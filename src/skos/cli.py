@@ -90,6 +90,95 @@ def render(
     typer.echo(renderer.render(d))
 
 
+# ---------------------------------------------------------------------------
+# Topology installer commands: init / plan / up
+# ---------------------------------------------------------------------------
+
+def _parse_install_profile(profile_str: str):
+    """Parse a profile string to InstallProfile, echoing an error on failure."""
+    from skos.install.profiles import InstallProfile
+    try:
+        return InstallProfile(profile_str.lower())
+    except ValueError:
+        valid = [p.value for p in InstallProfile]
+        typer.echo(f"error: unknown profile {profile_str!r}; choose from {valid}", err=True)
+        raise typer.Exit(2)
+
+
+@app.command(name="init")
+def init_cmd(
+    profile: str = typer.Option("local", "--profile", "-p",
+                                help="Topology profile: local | cluster | cloud"),
+):
+    """Set up the data-root tree and show the PERSONAL-FIRST recommended capability set."""
+    from skos.install.profiles import recommended
+    from skos.install.provisioner import apply as _apply
+    from skos.install.planner import plan as _plan
+
+    prof = _parse_install_profile(profile)
+    paths.ensure_tree()
+    caps = recommended(prof)
+    typer.echo(f"profile : {prof.value}")
+    typer.echo(f"data-root: {paths.data_root()}")
+    typer.echo(f"\nRecommended capabilities ({len(caps)}):")
+    for cap in caps:
+        typer.echo(f"  {cap}")
+    typer.echo("\nRun `skos plan` to see resolved adapters, `skos up` to apply.")
+
+
+@app.command(name="plan")
+def plan_cmd(
+    profile: str = typer.Option("local", "--profile", "-p",
+                                help="Topology profile: local | cluster | cloud"),
+    cap: list[str] = typer.Option([], "--cap", "-c",
+                                  help="Explicit capability name (repeatable); omit to use profile defaults"),
+):
+    """Show the resolved install plan (capability → adapter) without applying it."""
+    from skos.install.planner import plan as _plan, PlanError
+
+    prof = _parse_install_profile(profile)
+    caps = list(cap) if cap else None
+    try:
+        install_plan = _plan(prof, capabilities=caps)
+    except PlanError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"Install plan  profile={install_plan.profile}  steps={len(install_plan.steps)}")
+    typer.echo(f"{'capability':<14}  {'adapter'}")
+    typer.echo("-" * 36)
+    for step in install_plan.steps:
+        typer.echo(f"{step.capability:<14}  {step.adapter}")
+
+
+@app.command(name="up")
+def up_cmd(
+    profile: str = typer.Option("local", "--profile", "-p",
+                                help="Topology profile: local | cluster | cloud"),
+    cap: list[str] = typer.Option([], "--cap", "-c",
+                                  help="Explicit capability name (repeatable); omit to use profile defaults"),
+):
+    """Apply the install plan: ensure data-root tree + record capabilities in the registry."""
+    from skos.install.planner import plan as _plan, PlanError
+    from skos.install.provisioner import apply as _apply
+
+    prof = _parse_install_profile(profile)
+    caps = list(cap) if cap else None
+    try:
+        install_plan = _plan(prof, capabilities=caps)
+    except PlanError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
+
+    result = _apply(install_plan)
+    typer.echo(f"Applied plan  profile={install_plan.profile}  "
+               f"recorded={result.recorded_count}  planned={result.planned_count}")
+    for outcome in result.outcomes:
+        marker = "✓" if outcome.status == "recorded" else "~"
+        note = f"  [{outcome.note}]" if outcome.note else ""
+        typer.echo(f"  {marker} {outcome.capability:<14}  {outcome.adapter}  ({outcome.status}){note}")
+
+
 secret_app = typer.Typer(help="skvault — sovereign secret storage")
 app.add_typer(secret_app, name="secret")
 
