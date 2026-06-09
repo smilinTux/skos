@@ -71,6 +71,25 @@ def resolve(capability: str, profile: str = "", adapter: str = ""):
     typer.echo(f"{capability}\t{prof}\t{chosen}")
 
 
+@app.command()
+def render(
+    app_yaml: str,
+    platform: str = typer.Option(..., "--platform", help="Target platform: compose, swarm, kubernetes"),
+):
+    """Render an app.yaml descriptor to a platform deployment manifest."""
+    from skos.render import RENDERERS, get_renderer
+    supported = sorted(RENDERERS)
+    if platform not in RENDERERS:
+        typer.echo(
+            f"error: unknown platform {platform!r}. Supported: {', '.join(supported)}",
+            err=True,
+        )
+        raise typer.Exit(1)
+    d = load_descriptor(app_yaml)
+    renderer = get_renderer(platform)
+    typer.echo(renderer.render(d))
+
+
 secret_app = typer.Typer(help="skvault — sovereign secret storage")
 app.add_typer(secret_app, name="secret")
 
