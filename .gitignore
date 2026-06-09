@@ -1,0 +1,5 @@
+src/skos/__pycache__/
+.venv/
+*.egg-info/
+.pytest_cache/
+__pycache__/
