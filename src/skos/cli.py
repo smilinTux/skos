@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import typer
 
-from skos import paths, profile, registry
+from skos import paths, profile as _profile_module, registry
 from skos.capability import Catalog
 from skos.descriptor import load_descriptor
 from skos.packaging.oci import OciAdapter
@@ -21,7 +21,7 @@ def path(subdir: str):
 @app.command(name="profile")
 def show_profile():
     """Print the active topology profile and its data root."""
-    typer.echo(f"{profile.active().value}\t{paths.data_root()}")
+    typer.echo(f"{_profile_module.active().value}\t{paths.data_root()}")
 
 
 @app.command()
@@ -62,10 +62,47 @@ def capabilities():
 @app.command()
 def resolve(capability: str, profile: str = "", adapter: str = ""):
     """Resolve which adapter a capability uses for a profile (override with --adapter)."""
-    prof = profile or _profile.active().value
+    prof = profile or _profile_module.active().value
     try:
         chosen = _resolver.resolve(capability, profile=prof, override=adapter or None)
     except _resolver.ResolveError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1)
     typer.echo(f"{capability}\t{prof}\t{chosen}")
+
+
+secret_app = typer.Typer(help="skvault — sovereign secret storage")
+app.add_typer(secret_app, name="secret")
+
+
+def _split(ref: str):
+    scope, _, key = ref.partition("/")
+    if not key:
+        raise typer.BadParameter("use scope/key, e.g. cloud/cf_token")
+    return scope, key
+
+
+@secret_app.command("set")
+def secret_set(ref: str, value: str):
+    from skos import secrets
+    s, k = _split(ref); secrets.get_backend().set(s, k, value)
+    typer.echo(f"stored {ref}")
+
+
+@secret_app.command("get")
+def secret_get(ref: str):
+    from skos import secrets
+    s, k = _split(ref); typer.echo(secrets.get_backend().get(s, k))
+
+
+@secret_app.command("list")
+def secret_list(scope: str = ""):
+    from skos import secrets
+    for k in secrets.get_backend().list(scope or None):
+        typer.echo(k)
+
+
+@secret_app.command("rm")
+def secret_rm(ref: str):
+    from skos import secrets
+    s, k = _split(ref); secrets.get_backend().delete(s, k); typer.echo(f"deleted {ref}")
