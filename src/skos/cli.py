@@ -5,6 +5,7 @@ import typer
 
 from skos import paths, profile, registry
 from skos.descriptor import load_descriptor
+from skos.packaging.oci import OciAdapter
 
 app = typer.Typer(help="skos — filesystem & packaging foundation")
 
@@ -33,3 +34,13 @@ def list_apps():
     """List installed apps from the registry."""
     for name, meta in registry.list_installed().items():
         typer.echo(f"{name}\t{meta['adapter']}\t{meta['ref']}")
+
+
+@app.command()
+def install(app_yaml: str):
+    """Materialize an app via its packaging adapter and record it."""
+    d = load_descriptor(app_yaml)
+    adapter = OciAdapter()  # resolver picks adapter per profile in a later sub-project
+    res = adapter.materialize(d)
+    registry.record(d.name, adapter=res.adapter, ref=res.ref)
+    typer.echo(f"installed {d.name} via {res.adapter} ({res.ref}) running={res.running}")

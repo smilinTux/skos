@@ -1,0 +1,8 @@
+name: skmemory
+capability: memory
+description: "Three-tier memory: Postgres 17 + pgvector + pg_search(BM25) + AGE."
+packaging:
+  oci:
+    image: skmem-pg:pg17-bm25-age
+    ports: [5432]
+data: [pgdata]

@@ -1,0 +1,8 @@
+name: capauth
+capability: identity
+description: "Sovereign PGP challenge-response identity (skos identity subsystem)."
+packaging:
+  oci:
+    image: ghcr.io/smilintux/capauth:latest
+    ports: [8088]
+data: [keys]
