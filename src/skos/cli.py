@@ -4,8 +4,10 @@ from __future__ import annotations
 import typer
 
 from skos import paths, profile, registry
+from skos.capability import Catalog
 from skos.descriptor import load_descriptor
 from skos.packaging.oci import OciAdapter
+from skos import resolver as _resolver
 
 app = typer.Typer(help="skos — filesystem & packaging foundation")
 
@@ -44,3 +46,26 @@ def install(app_yaml: str):
     res = adapter.materialize(d)
     registry.record(d.name, adapter=res.adapter, ref=res.ref)
     typer.echo(f"installed {d.name} via {res.adapter} ({res.ref}) running={res.running}")
+
+
+@app.command()
+def capabilities():
+    """List the capability catalog grouped by the 4 C's."""
+    cat = Catalog.load()
+    for group in ("cloud", "comms", "compute", "core"):
+        typer.echo(f"\n[{group}]")
+        for c in cat.by_group(group):
+            alts = f"  (alt: {', '.join(c.alternates)})" if c.alternates else ""
+            typer.echo(f"  {c.name:9} {c.default:14} {c.description}{alts}")
+
+
+@app.command()
+def resolve(capability: str, profile: str = "", adapter: str = ""):
+    """Resolve which adapter a capability uses for a profile (override with --adapter)."""
+    prof = profile or _profile.active().value
+    try:
+        chosen = _resolver.resolve(capability, profile=prof, override=adapter or None)
+    except _resolver.ResolveError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"{capability}\t{prof}\t{chosen}")
