@@ -276,6 +276,109 @@ def brain_validate_cmd(
         typer.echo(f"    edges  : {len(node.edges)}")
 
 
+# ---------------------------------------------------------------------------
+# Surface sub-commands: list / ls / read / write  (runtime-adapter layer)
+# ---------------------------------------------------------------------------
+
+surface_app = typer.Typer(help="skos surface — runtime adapters over the brain")
+app.add_typer(surface_app, name="surface")
+
+
+def _make_surface(name: str, root: str):
+    """Resolve a Surface by name, mapping --root to the right ctor kwarg."""
+    from skos.interface import get_surface, SURFACES
+    from skos.adapter import AdapterError
+    from pathlib import Path
+
+    kwargs: dict = {}
+    if root:
+        rpath = Path(root).expanduser()
+        if name == "claude-code":
+            kwargs["wiki_root"] = rpath
+        else:
+            kwargs["vault_root"] = rpath
+    try:
+        return get_surface(name, **kwargs)
+    except AdapterError as exc:
+        avail = ", ".join(sorted(SURFACES))
+        typer.echo(f"error: {exc} (available: {avail})", err=True)
+        raise typer.Exit(2)
+
+
+@surface_app.command("list")
+def surface_list_cmd():
+    """List registered runtime-adapter surfaces and their status."""
+    from skos.interface import SURFACES
+    for name in sorted(SURFACES):
+        caps = SURFACES[name]().capabilities()
+        status = "planned" if caps.planned else "ready"
+        typer.echo(f"  {name:<12} {status}")
+
+
+@surface_app.command("ls")
+def surface_ls_cmd(
+    name: str = typer.Argument(..., help="Surface name: obsidian | claude-code | codex | n8n"),
+    root: str = typer.Option("", "--root", help="Vault/wiki root override"),
+):
+    """List the entity ids visible on a surface."""
+    from skos.interface.base import SurfaceError
+    surface = _make_surface(name, root)
+    try:
+        for node_id in surface.list():
+            typer.echo(node_id)
+    except SurfaceError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
+
+
+@surface_app.command("read")
+def surface_read_cmd(
+    name: str = typer.Argument(..., help="Surface name"),
+    node_id: str = typer.Argument(..., help="Entity node id to read"),
+    root: str = typer.Option("", "--root", help="Vault/wiki root override"),
+):
+    """Read an entity node from a surface and print its rendered markdown."""
+    from skos.brain.entity import render
+    from skos.interface.base import SurfaceError
+    surface = _make_surface(name, root)
+    try:
+        node = surface.read(node_id)
+    except SurfaceError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
+    typer.echo(render(node))
+
+
+@surface_app.command("write")
+def surface_write_cmd(
+    name: str = typer.Argument(..., help="Surface name"),
+    file: str = typer.Argument(..., help="Path to an entity node .md file to write"),
+    root: str = typer.Option("", "--root", help="Vault/wiki root override"),
+):
+    """Write an entity node (.md file) onto a surface."""
+    from pathlib import Path
+    from skos.brain.entity import parse, ParseError
+    from skos.interface.base import SurfaceError
+
+    p = Path(file).expanduser()
+    if not p.exists():
+        typer.echo(f"error: file not found: {p}", err=True)
+        raise typer.Exit(1)
+    try:
+        node = parse(p.read_text(encoding="utf-8"))
+    except ParseError as exc:
+        typer.echo(f"error: invalid entity node: {exc}", err=True)
+        raise typer.Exit(1)
+
+    surface = _make_surface(name, root)
+    try:
+        surface.write(node)
+    except SurfaceError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"wrote {node.id} via {name}")
+
+
 def _split(ref: str):
     scope, _, key = ref.partition("/")
     if not key:
