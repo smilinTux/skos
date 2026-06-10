@@ -183,6 +183,99 @@ secret_app = typer.Typer(help="skvault — sovereign secret storage")
 app.add_typer(secret_app, name="secret")
 
 
+# ---------------------------------------------------------------------------
+# Brain sub-commands: init / index / validate
+# ---------------------------------------------------------------------------
+
+brain_app = typer.Typer(help="skos brain — Infinite Brain entity-graph ontology")
+app.add_typer(brain_app, name="brain")
+
+
+@brain_app.command("init")
+def brain_init_cmd(
+    wiki: str = typer.Option("", "--wiki", help="Override wiki root path"),
+):
+    """Scaffold the entity-graph skeleton + self-build prompt under the wiki."""
+    from skos.brain.brain_init import scaffold, CORE_NAMESPACES
+    from pathlib import Path
+
+    wiki_root = Path(wiki).expanduser().resolve() if wiki else None
+    try:
+        result = scaffold(wiki_root=wiki_root)
+    except Exception as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"skos brain init — entity-graph skeleton scaffolded")
+    typer.echo(f"  wiki root  : {(wiki_root or Path('~/clawd/wiki').expanduser().resolve())}")
+    typer.echo(f"  namespaces : {len(result)}")
+    for ns, idx_path in result.items():
+        status = "created" if idx_path.exists() else "exists"
+        typer.echo(f"    {ns:<16} {idx_path}")
+    typer.echo("")
+    typer.echo("Next: run the self-build prompt to flesh out the entity graph.")
+    typer.echo("  Prompt: <wiki>/pages/entities/build_prompt.md")
+    typer.echo("  Open it in Claude Code and follow the instructions.")
+
+
+@brain_app.command("index")
+def brain_index_cmd(
+    namespace: str = typer.Argument(..., help="Namespace directory name or full path"),
+    wiki: str = typer.Option("", "--wiki", help="Override wiki root path"),
+):
+    """Build (or rebuild) _index.md for a namespace."""
+    from skos.brain.index import build_index
+    from pathlib import Path
+    import os
+
+    # Resolve: if namespace looks like a path, use it directly; else resolve under wiki
+    p = Path(namespace)
+    if not p.is_absolute():
+        wiki_root = (Path(wiki).expanduser().resolve() if wiki
+                     else Path(os.environ.get("SKOS_WIKI_ROOT", "~/clawd/wiki")).expanduser().resolve())
+        p = wiki_root / "pages" / "entities" / namespace
+
+    try:
+        index_path = build_index(p)
+    except FileNotFoundError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
+    except Exception as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
+
+    from skos.brain.index import read_index
+    entries = read_index(p)
+    typer.echo(f"Built index: {index_path}")
+    typer.echo(f"  {len(entries)} entities indexed")
+
+
+@brain_app.command("validate")
+def brain_validate_cmd(
+    file: str = typer.Argument(..., help="Path to an entity node .md file"),
+):
+    """Validate an entity node file against the EntityNode schema."""
+    from skos.brain.entity import parse, ParseError
+    from pathlib import Path
+
+    p = Path(file).expanduser().resolve()
+    if not p.exists():
+        typer.echo(f"error: file not found: {p}", err=True)
+        raise typer.Exit(1)
+
+    try:
+        node = parse(p.read_text(encoding="utf-8"))
+    except ParseError as exc:
+        typer.echo(f"INVALID  {p.name}", err=True)
+        typer.echo(f"  {exc}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"OK  {node.id}  [{node.type}]  {node.namespace}  ({node.lifecycle_state})")
+    typer.echo(f"    summary: {node.summary[:80]}")
+    if node.edges:
+        typer.echo(f"    edges  : {len(node.edges)}")
+
+
 def _split(ref: str):
     scope, _, key = ref.partition("/")
     if not key:
