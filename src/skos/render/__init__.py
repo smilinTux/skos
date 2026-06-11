@@ -12,18 +12,21 @@ Supported platform keys
 ``"swarm"``      — Docker Swarm stack (same schema as compose).
 ``"kubernetes"`` — Kubernetes Deployment + Service multi-doc YAML.
                    Compatible with rke2 and k3d — see KubernetesRenderer.
+``"nomad"``      — HashiCorp Nomad job spec (HCL, docker driver).
 """
 from __future__ import annotations
 
 from skos.render.base import Renderer, RenderError
 from skos.render.compose import ComposeRenderer, SwarmRenderer
 from skos.render.kubernetes import KubernetesRenderer
+from skos.render.nomad import NomadRenderer
 
 #: Registry mapping platform key -> Renderer instance.
 RENDERERS: dict[str, Renderer] = {
     "compose": ComposeRenderer(),
     "swarm": SwarmRenderer(),
     "kubernetes": KubernetesRenderer(),
+    "nomad": NomadRenderer(),
 }
 
 
@@ -48,6 +51,7 @@ __all__ = [
     "ComposeRenderer",
     "SwarmRenderer",
     "KubernetesRenderer",
+    "NomadRenderer",
     "RENDERERS",
     "get_renderer",
 ]
