@@ -35,7 +35,7 @@ back to canon.  skmem-pg is a *derived projection*, never a second source.
 ---
 id: <kebab-case-slug>            # e.g. agent-lumina, skill-wiki-ingest
 type: <entity_type>              # agent|skill|workflow|rule|tool|knowledge|project|output|memory|command|namespace
-namespace: <namespace>           # e.g. skos, skmemory, skcomm, meta-ads
+namespace: <namespace>           # e.g. skos, skmemory, skcomms, meta-ads
 lifecycle_state: draft           # draft → reviewed → canon
 summary: "One-line summary."     # scanned by agents in _index.md
 runtime_adapters: []             # optional: [claude-code, codex, paperclip]
