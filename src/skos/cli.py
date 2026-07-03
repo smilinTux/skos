@@ -39,6 +39,25 @@ def list_apps():
 
 
 @app.command()
+def status(
+    section: str = typer.Argument("all", help="email|cron|gtd|docs|corpus|calendar|all|report|corpus-check"),
+    json_out: bool = typer.Option(False, "--json", help="Machine-readable output"),
+):
+    """Realtime skos status across email, cron/scheduled work, docs, corpus, and GTD."""
+    from skos import status as _status
+    _status.run([section] + (["--json"] if json_out else []))
+
+
+@app.command()
+def ingest(
+    adapter: str = typer.Argument(..., help="gtd-ingest pull adapter to drain: calendar | telegram"),
+):
+    """Drain a gtd-ingest PULL adapter once (poll -> capture into the unified GTD)."""
+    from skos import adapters as _ad
+    typer.echo(f"{adapter}: captured {_ad.drain(adapter)} new GTD item(s)")
+
+
+@app.command()
 def install(app_yaml: str):
     """Materialize an app via its packaging adapter and record it."""
     d = load_descriptor(app_yaml)
