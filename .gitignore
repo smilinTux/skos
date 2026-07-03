@@ -3,3 +3,4 @@ src/skos/__pycache__/
 *.egg-info/
 .pytest_cache/
 __pycache__/
+*.bak-pre-*
