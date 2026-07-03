@@ -192,9 +192,16 @@ capture(GtdCapture(text="…", source="<src>", source_ref="<stable-key>",
 - **Self-report / claim evidence:** `skos status all` reports the live state of every
   surface (per-box email, cron ledger, GTD counts, corpus health) — every claim in
   this SOP is checkable there.
+- **Standards conformance:** this subsystem is the **reference implementation** of
+  [OBSERVABILITY_AND_SCHEDULING_STANDARD](https://github.com/smilinTux/sk-standards/blob/main/standards/OBSERVABILITY_AND_SCHEDULING_STANDARD.md)
+  (all jobs wrapped → ledger + failure→GTD + sk-alert; inputs via one `source_ref`-deduped
+  sink; daily ops report + on-demand status). Docs conform to
+  [SK_REPO_DOC_STANDARD](https://github.com/smilinTux/sk-standards/blob/main/standards/SK_REPO_DOC_STANDARD.md)
+  + [ARCHITECTURE_AND_DATAFLOW_STANDARD](https://github.com/smilinTux/sk-standards/blob/main/standards/ARCHITECTURE_AND_DATAFLOW_STANDARD.md);
+  tests per [TESTING_AND_CI_STANDARD](https://github.com/smilinTux/sk-standards/blob/main/standards/TESTING_AND_CI_STANDARD.md).
 
 ## Related docs / See also
 - 📐 **Spec:** [`gtd-ingest-architecture.md`](./gtd-ingest-architecture.md) — the design + phased roadmap.
 - ⬆️ **Depends on:** skcapstone `gtd_tools` (store + lifecycle verbs), `gog`, local LLM, Hermes.
 - ⬇️ **Used by:** ITIL (`skcapstone/itil.py`) as a push adapter; the daily digests + `skos status`.
-- 📐 **Standards:** [sk-standards](https://github.com/smilinTux/sk-standards) — doc/SOP, data-flow, version.
+- 📐 **Standards:** [sk-standards](https://github.com/smilinTux/sk-standards) — **observability & scheduling** (this is the reference impl), doc/SOP, architecture/dataflow, testing, version.
