@@ -297,8 +297,19 @@ report + capture machinery.
 |---|---|---|
 | **0** | Daily noise-sweep cron; `gtd-mail capture` (email→GTD, deduped); Email Brief 07:00; `sk-cron-run` wrapper + run-ledger; Ops Report 08:00; error-capture→GTD + sk-alert | **this session** |
 | **1** | Extract `gtd-ingest` port + `GtdSourceAdapter`/`GtdCapture`/`capture()` sink in skos; add `source_ref` to model; refactor ITIL→adapter; email adapter conforms | epic |
-| **2** | Scheduled agent triage of primary mail (local-LLM classifier + agent escalation); telegram + calendar adapters | epic |
-| **3** | Bidirectional email (reply drafts, mark-done→archive, show attachment); unified GTD surface in skos (Obsidian/Claude Code) | epic |
+| **2** | Local-LLM triage of primary mail (done); **calendar + telegram pull adapters** (done — `skos ingest <adapter>`); agent-escalation depth (open) | **done** |
+| **3** | **Bidirectional email** (done); **native `skos status`** (done); unified GTD surface in Obsidian/Claude Code (open) | **done** |
+
+**Pull adapters (`skos/adapters/`, drained by `skos ingest <name>`):**
+- **calendar** — timed commitments (meetings/classes/calls) in the next ~2 days →
+  GTD next-actions, deduped by event id, routine noise filtered (doses/focus-blocks/…).
+- **telegram** — convention capture: a DM prefixed `todo:`/`task:`/`gtd:`/`remind:`
+  → GTD inbox item, deduped by `chat:msg_id`. No trigger = ignored (zero noise).
+Both register on the `gtd-ingest` port; adding another pull source is one class.
+
+**Native CLI:** `skos status [email|cron|gtd|docs|corpus|all|report|corpus-check]`
+and `skos ingest <adapter>` (typer). `sk-status` is now a thin shim over the same
+`skos.status` module — one source of truth. (Fixed typer/click 8.1 compat en route.)
 
 Phase-0 scripts live in `~/clawd/scripts/` and are intentionally shaped like the
 future adapters (`gtd-mail.py` = email adapter poll+capture; `sk-cron-run` = cron
