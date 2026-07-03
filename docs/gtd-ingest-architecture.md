@@ -1,6 +1,7 @@
 # skos GTD-Ingest — Unified GTD as a Port, Every Source an Adapter
 
 **Status:** design (2026-07-03) · **Owner:** Lumina + Chef · **Epic:** (coord)
+**Operational SOP:** [`gtd-ingest-SOP.md`](./gtd-ingest-SOP.md) (build/test/deploy/config/API/troubleshoot).
 **Goal:** skos is Chef's ONE unified GTD for all work in this realm. Every input
 — ITIL incidents, email across N mailboxes, Telegram, voice, calendar, cron
 failures — is captured into a single GTD store through **one port with pluggable
