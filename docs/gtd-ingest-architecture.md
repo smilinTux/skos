@@ -230,6 +230,23 @@ sent (so "silence" is never ambiguous); sk-alert escalates if any failure. *(bui
 
 ---
 
+## 6b. Context sources (read-only) — "what have I been working on"
+
+Not every source *captures* GTD items — some provide **read-only context** that
+enriches the digests. First one: **recent docs** — the latest documents Chef
+worked on, newest-first, surfaced in the Ops Report and on demand via
+`sk-status docs`. Same adapter shape (a `poll()`-style provider), but its output
+is rendered, not written to the store.
+
+- **Google Drive** (all 5 accounts): `gog drive ls --all` → docs/sheets/slides/
+  pdf/office (media filtered out), sorted by `modifiedTime`, deduped by name.
+- **Nextcloud dkloud `p/` + `r/`** (projects/reference): filesystem mtime walk.
+  **Offline during the current outage; auto-included the moment `~/dkloud.douno.it`
+  reappears (~Aug 2026) — a path check, zero code change.** Extra roots via
+  `GTD_DOC_DIRS`.
+- Future context sources fit the same slot: calendar (today's events), git (repos
+  touched today), skmemory (recent memories).
+
 ## 7. Extensibility & scalability
 
 - **New source** → one adapter + one `capabilities.yaml` line (+ job yaml if pull).
