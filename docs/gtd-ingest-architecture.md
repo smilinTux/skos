@@ -247,6 +247,28 @@ is rendered, not written to the store.
 - Future context sources fit the same slot: calendar (today's events), git (repos
   touched today), skmemory (recent memories).
 
+## 6c. Monitored-pipeline sources (health + maintenance-ensure)
+
+Some sources aren't just captured/reported — they own a *pipeline* skos must keep
+healthy. First one: **corpus / realmwiki**. It (a) reports health, (b) flags
+triage, (c) ensures its maintenance jobs run — all through the same ledger +
+report + capture machinery.
+
+- **Health/triage** (`sk-status corpus`, Ops Report): realmwiki page count +
+  dangling-link / orphan / stub / **unverified** (Lumina's research queue) counts
+  via `wiki/tools/wiki_maintain.py scan`; uncommitted-pages + last-commit age;
+  the **YouTube/corpus ingest** last-run result (`ok/fail/skip`, hours-ago) parsed
+  from its log; **skmem-pg `docs`** corpus size. A `⚠️ triage` flag trips when the
+  research queue or dangling backlog crosses a threshold.
+- **Maintenance-ensure**: `wiki-maintain` cron runs `wiki_maintain.py fill`
+  (qwen drafts grounded stubs for the top dangling links) daily, and the
+  **youtube-ingest** job is now wrapped in `sk-cron-run` — both land in the
+  run-ledger, so a miss/failure becomes a GTD item + sk-alert automatically. That
+  is the "make sure the maintenance/corpus jobs actually run" guarantee.
+- The pattern generalizes: any pipeline (skmemory consolidation, backups, model
+  re-embeds) becomes a monitored source by (1) wrapping its job in `sk-cron-run`
+  and (2) adding a `*_status()` reader to the Ops Report.
+
 ## 7. Extensibility & scalability
 
 - **New source** → one adapter + one `capabilities.yaml` line (+ job yaml if pull).
