@@ -25,6 +25,7 @@ capabilities:
   # ── core ──
   - {name: capauth,  group: core,    description: "Sovereign PGP identity",               default: capauth,        alternates: []}
   - {name: skmemory, group: core,    description: "Sovereign agent memory (skmemory)",    default: skmemory,       alternates: []}
+  - {name: gtd-ingest, group: core,  description: "Unified GTD capture — sources as adapters", default: itil,       alternates: [email, cron, telegram, voice, calendar]}
   - {name: sksso,    group: core,    description: "Identity / SSO",                       default: authentik,      alternates: [zitadel]}
   - {name: sksec,    group: core,    description: "Threat defense",                       default: crowdsec,       alternates: [falco, wazuh, suricata]}
   - {name: skwaf,    group: core,    description: "Web app firewall",                     default: coraza,         alternates: [bunkerweb]}
