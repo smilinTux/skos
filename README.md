@@ -90,5 +90,17 @@ The descriptor never changes — only which adapter each capability resolves to.
 `skdata` port is a local Postgres on a laptop and a clustered one in production; you
 don't rewrite anything to grow.
 
+## Standards conformance
+
+- 📐 **Docs/SOP** — per [`SK_REPO_DOC_STANDARD`](https://github.com/smilinTux/sk-standards/blob/main/standards/SK_REPO_DOC_STANDARD.md): README-as-hub, 9-section SOPs, mermaid-first, cross-linked. The GTD subsystem ships an [architecture](docs/gtd-ingest-architecture.md) + [SOP](docs/gtd-ingest-SOP.md).
+- 🔭 **Observability & Scheduling** — the `gtd-ingest` subsystem is the **reference implementation** of [`OBSERVABILITY_AND_SCHEDULING_STANDARD`](https://github.com/smilinTux/sk-standards/blob/main/standards/OBSERVABILITY_AND_SCHEDULING_STANDARD.md): every scheduled job wrapped (run-ledger + failure→GTD + `sk-alert`), inputs captured through one `source_ref`-deduped sink, daily ops report + on-demand `skos status`.
+- 🧪 **Testing** — green-bar gate per [`TESTING_AND_CI_STANDARD`](https://github.com/smilinTux/sk-standards/blob/main/standards/TESTING_AND_CI_STANDARD.md).
+
+## Related projects / See also
+
+- ⬇️ **Used by:** [skcapstone](https://github.com/smilinTux/skcapstone) — its ITIL ops are a push adapter on skos `gtd-ingest`; consumes the data-root + resolver.
+- ↔️ **Siblings:** [skmemory](https://github.com/smilinTux/skmemory) (agent memory · a `skos` capability) · [skvault](https://github.com/smilinTux/skvault) (secrets plane · `skos.secrets`) · [SKStacks](https://github.com/smilinTux/SKStacks) (deploy fabric).
+- 📐 **Standards:** [sk-standards](https://github.com/smilinTux/sk-standards) — doc/SOP, architecture/dataflow, testing, **observability & scheduling**, version, backup.
+
 Part of the **[SKWorld](https://skworld.io)** sovereign ecosystem · site:
 **[skos.skworld.io](https://skos.skworld.io)** · `curl -fsSL https://skos.skworld.io/install.sh | sh` · 🐧 smilinTux
