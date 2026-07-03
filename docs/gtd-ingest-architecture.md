@@ -179,7 +179,7 @@ adapter and the proof the framework fits existing code.
 - **Capture:** `poll()` reads `label:"1 Action"` and `label:"2 Waiting"` threads and
   emits `GtdCapture(source="email", source_ref=<thread-id>, status=next|waiting)` →
   the unified GTD. Deduped by thread id. (Implemented Phase-0 in
-  `~/clawd/scripts/gtd-mail.py capture`.)
+  `skos/mail.py (`gtd-mail` console script) capture`.)
 - **Bidirectional (DONE 2026-07-03):** act on GTD email items via `gtd-mail`:
   - `reply <ref> --body …` — reply in-thread; default a reviewable Gmail **DRAFT**
     (outbound email is consequential — safe by default), `--send` to send.
@@ -312,7 +312,7 @@ Both register on the `gtd-ingest` port; adding another pull source is one class.
 and `skos ingest <adapter>` (typer). `sk-status` is now a thin shim over the same
 `skos.status` module — one source of truth. (Fixed typer/click 8.1 compat en route.)
 
-Phase-0 scripts live in `~/clawd/scripts/` and are intentionally shaped like the
+Phase-0 code lives in the skos package (`skos/mail.py`, `skos/status.py`, `skos/adapters/`, `skos/scripts/`) and are intentionally shaped like the
 future adapters (`gtd-mail.py` = email adapter poll+capture; `sk-cron-run` = cron
 adapter) so Phase-1 is a *lift into skos*, not a rewrite.
 

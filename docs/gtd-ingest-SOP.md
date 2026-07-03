@@ -17,9 +17,9 @@ single store through one sink, surfaced in daily reports + on-demand status, and
 acted on (reply / close / show attachment). Adding a source is one adapter class.
 
 **Owns:** the `gtd-ingest` port + `capture()` sink (`skos.gtd_ingest`), the pull
-adapters (`skos.adapters.*`), the realtime status + report engine (`skos.status`),
-and the operational scripts (`~/clawd/scripts/gtd-mail.py`, `sk-status.py`,
-`sk-cron-run.sh`) that back the crons.
+adapters (`skos.adapters.*` — email/calendar/telegram), the realtime status + report
+engine (`skos.status`), the email module (`skos.mail`), and the shell wrappers in
+`skos/scripts/`. CLIs: `skos`, `sk-status`, `gtd-mail` (packaged console scripts).
 
 **Does NOT own:** the GTD *item lifecycle verbs* (clarify/next/review) — those stay
 in skcapstone's `gtd_tools` MCP; this subsystem only *captures into* and *reports
@@ -54,10 +54,10 @@ flowchart LR
 
 **Start here (entry-point files):**
 - `skos/src/skos/gtd_ingest.py` — the port: `GtdCapture`, `capture()` sink, `GtdSourceAdapter`, `registry`.
-- `skos/src/skos/adapters/{calendar,telegram}.py` — pull adapters (`poll()`→captures).
+- `skos/src/skos/adapters/{email,calendar,telegram}.py` — pull adapters (`poll()`→captures).
 - `skos/src/skos/status.py` — status/report engine (email/cron/gtd/docs/corpus).
-- `~/clawd/scripts/gtd-mail.py` — email adapter (capture/triage/digest) + bidirectional (reply/done/attachments).
-- `~/clawd/scripts/sk-cron-run.sh` — the cron/observability wrapper (run-ledger + failure→GTD+alert).
+- `skos/src/skos/mail.py` (`gtd-mail`) — email capture/triage/digest + bidirectional (reply/done/attachments).
+- `skos/scripts/sk-cron-run.sh` — the cron/observability wrapper (run-ledger + failure→GTD+alert).
 - `skcapstone/src/skcapstone/itil.py::_gtd_emit` — ITIL push adapter (emits through the sink).
 
 **Store:** plain JSON under `$SK_DATA_ROOT/coordination/gtd/`
@@ -103,14 +103,16 @@ Telegram DM (Hermes bot). No public port.
 |---|---|---|
 | 04:45 | `wiki-maintain` | qwen drafts stubs for dangling wiki links |
 | 05:30 | `youtube-ingest` | corpus ingest (wrapped) |
-| 06:00 | `gtd-noise-sweep` | promotions/social/updates → `3 Read` + archive |
-| 06:10 | `email-triage` | LLM classifies primary mail → GTD labels + archive |
+| 06:00 | `gtd-noise-sweep` | `gtd-triage.sh` — promotions/social/updates → `3 Read` + archive |
+| 06:05 | `corpus-check` | `sk-status corpus-check` — wiki research-queue > threshold → GTD Action |
+| 06:10 | `email-triage` | `gtd-mail triage` — LLM classifies primary mail → GTD labels + archive |
 | 06:15 | `ingest-calendar` | `skos ingest calendar` → GTD |
 | 06:16 | `ingest-telegram` | `skos ingest telegram` → GTD |
-| 06:05 | `corpus-check` | wiki research-queue > threshold → GTD Action |
-| 06:35 | `email-capture` | `1 Action`/`2 Waiting` labels → GTD (skos sink) |
-| 06:45 | `email-brief` | 📬 Email Brief → Telegram DM |
-| 07:45 | `ops-report` | 📊 Ops Report (crons + email + docs + corpus + gtd) → DM |
+| 06:35 | `ingest-email` | `skos ingest email` — `1 Action`/`2 Waiting` labels → GTD (sink) |
+| 06:45 | `email-brief` | `gtd-mail digest` — 📬 Email Brief → Telegram DM |
+| 07:45 | `ops-report` | `sk-status report` — 📊 Ops Report → DM |
+
+Every command runs under `skos/scripts/sk-cron-run.sh <job> …`.
 
 Deploy/rollback = edit `crontab -e` (jobs are idempotent + deduped; safe to re-run).
 
@@ -141,8 +143,8 @@ Env vars (secrets sourced from existing stores — never inlined):
 **CLI (native):**
 ```
 skos status [email|cron|gtd|docs|corpus|all|report|corpus-check] [--json]
-skos ingest <calendar|telegram>
-sk-status …            # thin shim over skos.status
+skos ingest <email|calendar|telegram>
+sk-status …            # console entry = skos.status:run (same output as `skos status`)
 ```
 **Email adapter (`gtd-mail`):**
 ```

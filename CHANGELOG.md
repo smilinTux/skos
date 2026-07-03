@@ -24,6 +24,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 - **Monitored pipelines + context:** corpus/wiki health + maintenance-ensure +
   research-queue threshold-capture; recent-docs context source (Drive; Nextcloud-ready).
 
+- **Packaged the operational scripts into skos** (were untracked in `~/clawd/scripts`):
+  `skos.mail` (email capture/triage/digest + bidirectional) with an `EmailAdapter`
+  on the `gtd-ingest` port (`skos ingest email`); shell wrappers → `skos/scripts/`;
+  console scripts `sk-status`, `gtd-mail`. Crontab rewired to the packaged paths.
+
 ### Changed
 - **ITIL is now a push adapter** on the `gtd-ingest` port (skcapstone `itil.py::_gtd_emit`
   emits `GtdCapture(source=itil, source_ref=<id>)` through the sink; legacy fallback).
