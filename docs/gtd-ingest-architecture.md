@@ -179,8 +179,15 @@ adapter and the proof the framework fits existing code.
   emits `GtdCapture(source="email", source_ref=<thread-id>, status=next|waiting)` →
   the unified GTD. Deduped by thread id. (Implemented Phase-0 in
   `~/clawd/scripts/gtd-mail.py capture`.)
-- **Bidirectional (Phase-3):** GTD item `done` → archive/mark-read the thread;
-  "draft reply" tool; "show attachment" fetches via gog and returns the file.
+- **Bidirectional (DONE 2026-07-03):** act on GTD email items via `gtd-mail`:
+  - `reply <ref> --body …` — reply in-thread; default a reviewable Gmail **DRAFT**
+    (outbound email is consequential — safe by default), `--send` to send.
+  - `done <gtd_id>` — mark the GTD item done **and** archive+mark-read the email
+    thread (closes the loop both ways).
+  - `attachments <ref> --telegram` — list + download a thread's attachments and
+    deliver each to Chef's Telegram DM ("show attachment").
+  `<ref>` resolves a GTD item id → (account, thread, messages, attachments), so
+  Chef/agent can act by GTD id or raw thread id. Reversible: archive re-adds INBOX.
 
 ### 5c. `cron` (push) — the observability adapter
 `sk-cron-run <job> <cmd…>` wraps every scheduled job:
