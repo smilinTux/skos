@@ -33,13 +33,23 @@ from .adapter import Adapter, AdapterRegistry
 # Shared with the skcapstone GTD tools. Precedence:
 #   SK_GTD_DIR  >  <SKCAPSTONE_HOME>/coordination/gtd  >  ~/.skcapstone/coordination/gtd
 def gtd_dir() -> Path:
-    """Return (and create) the unified GTD store directory."""
+    """Return (and create) the unified GTD store directory.
+
+    Precedence: ``SK_GTD_DIR`` (explicit override) > skcapstone's own resolver
+    (so the store is byte-identical to what its GTD/ITIL tools read/write, and
+    honors ``SKCAPSTONE_SHARED_ROOT`` + tests) > ``<SKCAPSTONE_HOME>/coordination/gtd``.
+    This keeps skos standalone-capable while staying perfectly unified when it
+    runs alongside skcapstone."""
     env = os.environ.get("SK_GTD_DIR")
     if env:
         d = Path(env).expanduser()
     else:
-        home = Path(os.environ.get("SKCAPSTONE_HOME", str(Path.home() / ".skcapstone")))
-        d = home / "coordination" / "gtd"
+        try:  # optional, soft — align with skcapstone's exact store location
+            from skcapstone.mcp_tools.gtd_tools import _gtd_dir as _sk_gtd_dir
+            return _sk_gtd_dir()  # already mkdirs
+        except Exception:
+            home = Path(os.environ.get("SKCAPSTONE_HOME", str(Path.home() / ".skcapstone")))
+            d = home / "coordination" / "gtd"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
