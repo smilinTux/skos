@@ -66,7 +66,8 @@ def list_threads(account: str, query: str, maxn: int = 100) -> list[dict]:
         })
     return rows
 
-LLM_URL = os.environ.get("GTD_LLM_URL", "http://192.168.0.100:8082/v1/chat/completions")
+# 2026-07-03: rerouted off .100:8082 (Q3_K garble cliff) → chiap08 BeeLlama Q4_K_M (:11436). Override via GTD_LLM_URL.
+LLM_URL = os.environ.get("GTD_LLM_URL", "http://100.81.238.58:11436/v1/chat/completions")
 LLM_MODEL = os.environ.get("GTD_LLM_MODEL", "qwen3.6-27b-abliterated")
 BUCKET2LABEL = {
     "action": "1 Action", "waiting": "2 Waiting", "read": "3 Read", "someday": "4 Someday",
