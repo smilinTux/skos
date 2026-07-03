@@ -13,8 +13,9 @@ def _adapters() -> dict:
     # imported lazily so a missing optional dep doesn't break the whole package
     from .calendar import CalendarAdapter
     from .telegram import TelegramAdapter
+    from .email import EmailAdapter
     out = {}
-    for cls in (CalendarAdapter, TelegramAdapter):
+    for cls in (CalendarAdapter, TelegramAdapter, EmailAdapter):
         try:
             registry.register(cls)
         except Exception:
