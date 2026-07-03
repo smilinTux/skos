@@ -66,6 +66,7 @@ flowchart TD
 | **Profiles** | personal → team → enterprise; same model, different adapters |
 | **Brain** | self-building entity-graph knowledge ontology (`skos brain init`, EntityNode schema) |
 | **Surfaces** | runtime adapters (obsidian / claude-code / codex / n8n) that expose the brain (`skos surface …`) |
+| **Unified GTD (`gtd-ingest`)** | one GTD, every input an adapter — email/ITIL/cron/calendar/telegram → one `capture()` sink; daily digests + `skos status`/`skos ingest` |
 
 ## Documentation
 
@@ -73,6 +74,8 @@ flowchart TD
 |---|---|
 | **[Architecture](docs/ARCHITECTURE.md)** | ports/adapters model, the install flow, the brain, surfaces, where it lives (mermaids) |
 | **[Capabilities](docs/CAPABILITIES.md)** | the full 4-C catalog — every port, default adapter, and alternates |
+| **[Unified GTD — architecture](docs/gtd-ingest-architecture.md)** | the `gtd-ingest` spec: one port, pluggable sources, phased roadmap (mermaids) |
+| **[Unified GTD — SOP](docs/gtd-ingest-SOP.md)** | build/test/deploy/config/API/troubleshoot for the GTD subsystem (crons, CLI, adapters) |
 | **[Secret migration](docs/SECRET-MIGRATION.md)** | moving secrets into the skvault secret plane |
 
 ## Profiles (one model, every scale)
