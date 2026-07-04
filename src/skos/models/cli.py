@@ -25,6 +25,7 @@ from skos.models import (
     registry_path,
     resolve,
     set_context,
+    unset_context,
 )
 
 
@@ -111,6 +112,16 @@ def cmd_set(args) -> int:
     return 0
 
 
+def cmd_unset(args) -> int:
+    removed = unset_context(args.key)
+    if removed:
+        b = resolve(context=args.key)
+        _p(f"unset {args.key} (reverted to role/default -> {b.name} {b.model})")
+    else:
+        _p(f"{args.key}: no such context")
+    return 0
+
+
 def _probe(b: Backend, timeout: int = 6) -> tuple[bool, str]:
     """Return (up, detail). Chat -> GET {url}/models. Embed -> GET origin root."""
     if not b.url:
@@ -166,6 +177,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("key")
     s.add_argument("target")
     s.set_defaults(fn=cmd_set)
+
+    u = sub.add_parser("unset", help="remove a context toggle (revert to role/default)")
+    u.add_argument("key", help="context key, e.g. chat:12345")
+    u.set_defaults(fn=cmd_unset)
 
     t = sub.add_parser("test", help="curl the backend for a role/context")
     t.add_argument("name")
