@@ -57,13 +57,15 @@ backends:
 
   # Hosted Claude Opus via SKGateway (.41:18780). Gateway role-routing is not
   # yet wired here — keep commented until the route is verified, then point a
-  # role or context at `opus`.
-  # opus:
-  #   url: http://192.168.0.41:18780/v1
-  #   model: claude-opus-4-8
-  #   ctx: 200000
-  #   kind: chat
-  #   verified: false
+  # role or context at `opus`. NOTE: the gateway resolve() special-cases the
+  # backend name "opus" (and any anthropic-kind backend) to route through its
+  # OWN Anthropic backend (oauth + OpenAI->Messages translation) — it never
+  # dials the url below (which would loop back to :18780). Wired to sk-heavy.
+  opus:
+    url: http://192.168.0.41:18780/v1
+    model: claude-opus-4-8
+    ctx: 200000
+    kind: chat
 
 roles:
   sk-default: ornith   # generic text
@@ -71,6 +73,11 @@ roles:
   sk-code: ornith      # code generation
   sk-vision: qwen-vl   # image/OCR (MUST be a vision:true backend)
   sk-embed: mxbai      # embeddings
+  sk-heavy: opus       # strong model for HARD prompts (gateway -> Anthropic Opus)
+  sk-auto: auto        # MARKER: gateway picks the role per-request by difficulty
+                       # (image->sk-vision, hard->sk-heavy, else->sk-default).
+                       # "auto" is NOT a backend; the Python resolver treats it
+                       # as default, the gateway does the real classification.
 
 # The toggle switch. Uncomment / add entries, or use `skmodels set`.
 # Target may be a role (sk-*) or a concrete backend name.
@@ -83,3 +90,13 @@ contexts:
 
 defaults:
   role: sk-default
+
+# Optional tuning for sk-auto difficulty routing (all keys optional — the
+# gateway falls back to built-in defaults when this block is absent).
+# Classifier precedence:  image -> sk-vision  >  hard -> sk-heavy  >  sk-default
+# HARD when: user text > max_easy_chars, OR (code fence AND a hard verb),
+#            OR a reasoning cue, OR an agentic/multi-step shape.
+# auto:
+#   max_easy_chars: 2000
+#   hard_verbs: [refactor, debug, architect, design, optimi[sz]e, migrate, implement, prove, derive]
+#   reasoning_cues: ["step[ -]?by[ -]?step", reason through, trade-?off, "compare and", evaluate, analy[sz]e, "why does"]
