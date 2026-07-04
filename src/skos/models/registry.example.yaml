@@ -1,0 +1,85 @@
+# skmodels registry — TEMPLATE / committable reference.
+# ===========================================================================
+# This is the SINGLE SOURCE OF TRUTH for which model each part of the stack
+# uses. Copy to ~/.skcapstone/models/registry.yaml (the live, Syncthing-synced
+# path) and edit there. Override the live path with env SKMODELS_REGISTRY.
+#
+# Four sections + one rule:
+#
+#   backends  concrete servable endpoints. THIS is where you swap a model:
+#             change one backend's `model` (and `url`) line and every role /
+#             service / context that points at it follows.
+#
+#   roles     logical names the code asks for (never a raw url). Point a role
+#             at a backend to re-route everything using that role at once.
+#
+#   contexts  the TOGGLE. Override the role/backend for ONE named context —
+#             a group chat, a batch job, a service, an agent. Managed live
+#             with `skmodels set <key> <role|backend>`.
+#
+#   defaults  the fallback role used when no role/context/service is given.
+#
+#   PRECEDENCE:  context  >  service  >  role  >  default
+#     - context  = exact key match in `contexts` (e.g. "chat:dr-chiro-group")
+#     - service  = key "service:<name>" match in `contexts`
+#     - role     = the requested logical role (e.g. "sk-vision")
+#     - default  = defaults.role
+#   Unknown target -> falls back to defaults.role with a stderr warning; never
+#   crashes.
+# ===========================================================================
+
+backends:
+  # A chat/completions backend (OpenAI-compatible /v1). Swap the whole model
+  # for everything on this backend by editing `model` (and `url`).
+  ornith:
+    url: http://192.168.0.100:8082/v1   # base incl. /v1
+    model: ornith-1.0-9b                # <-- swap here
+    ctx: 65536                          # context window (tokens)
+    kind: chat                          # chat | embed
+    vision: false                       # true if the model accepts images
+
+  # A vision-capable chat backend (mmproj loaded). vision: true is what
+  # sk-vision resolves against — never point sk-vision at a text-only model.
+  qwen-vl:
+    url: http://100.81.238.58:11436/v1  # LAN alt: http://10.0.0.139:11436/v1
+    model: Qwen3.6-27b-abliterated-Q4_K_M
+    ctx: 32768
+    kind: chat
+    vision: true
+
+  # An embedding backend. kind: embed. `dim` documents the vector width so the
+  # pgvector column and the model stay in agreement.
+  mxbai:
+    url: http://192.168.0.100:11434/api/embed
+    model: mxbai-embed-large
+    dim: 1024
+    kind: embed
+
+  # Hosted Claude Opus via SKGateway (.41:18780). Gateway role-routing is not
+  # yet wired here — keep commented until the route is verified, then point a
+  # role or context at `opus`.
+  # opus:
+  #   url: http://192.168.0.41:18780/v1
+  #   model: claude-opus-4-8
+  #   ctx: 200000
+  #   kind: chat
+  #   verified: false
+
+roles:
+  sk-default: ornith   # generic text
+  sk-synth: ornith     # wiki/synthesis reasoning
+  sk-code: ornith      # code generation
+  sk-vision: qwen-vl   # image/OCR (MUST be a vision:true backend)
+  sk-embed: mxbai      # embeddings
+
+# The toggle switch. Uncomment / add entries, or use `skmodels set`.
+# Target may be a role (sk-*) or a concrete backend name.
+contexts:
+  # service:skingest.vision: sk-vision   # skingest OCR pins the VL model
+  # job:wiki-synth: sk-synth             # nightly wiki synthesis uses the synth role
+  # chat:dr-chiro-group: sk-vision       # this group chat needs image understanding
+  # agent:jarvis: sk-default             # per-agent override
+  # chat:12345: opus                     # a specific chat pinned to a concrete backend
+
+defaults:
+  role: sk-default

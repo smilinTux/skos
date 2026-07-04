@@ -9,6 +9,7 @@ dependencies = ["typer>=0.12", "pydantic>=2.7", "pyyaml>=6.0", "cryptography>=42
 skos = "skos.cli:app"
 sk-status = "skos.status:run"
 gtd-mail = "skos.mail:main"
+skmodels = "skos.models.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-mock>=3.14"]
