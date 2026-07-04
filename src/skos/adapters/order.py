@@ -17,6 +17,7 @@ never a guessed transition.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 
@@ -32,6 +33,48 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
     ("shipped", re.compile(r"has shipped|shipped:|on its way|out for shipment|now preparing", re.I)),
     ("ordered", re.compile(r"order (?:confirmed|placed)|thank you for your order|has been placed", re.I)),
 ]
+
+
+SKGATEWAY_URL = os.environ.get("SKGATEWAY_URL", "http://localhost:18780/v1")
+SKGATEWAY_MODEL = os.environ.get("SKGATEWAY_MODEL", "sk-default")  # auto-router → ornith
+
+
+def classify_llm(subjects: list[str], states: list[str]) -> str | None:
+    """Ambiguity fallback: ask skgateway (auto-router → ornith) to map the subject
+    lines to one of ``states``. Returns a valid state or None. Degrades to None on
+    any error/timeout/invalid answer — never guesses a transition."""
+    if not subjects:
+        return None
+    joined = "\n".join(f"- {s}" for s in subjects if s)
+    prompt = (
+        "You classify a package delivery's status from email subject lines.\n"
+        f"Allowed states (in order): {', '.join(states)}.\n"
+        "Reply with EXACTLY ONE of those state words, or 'none' if unclear. "
+        "No punctuation, no explanation.\n\n"
+        f"Subject lines:\n{joined}\n\nState:")
+    payload = json.dumps({
+        "model": SKGATEWAY_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 8, "temperature": 0,
+    })
+    try:
+        r = subprocess.run(
+            ["curl", "-sS", "--max-time", "45", f"{SKGATEWAY_URL}/chat/completions",
+             "-H", "Content-Type: application/json", "-d", payload],
+            capture_output=True, text=True, timeout=50)
+        ans = json.loads(r.stdout)["choices"][0]["message"]["content"].strip().lower()
+    except Exception:
+        return None
+    ans = re.sub(r"[^a-z_ ]", "", ans).replace(" ", "_")
+    return ans if ans in states else None
+
+
+def classify(subjects: list[str], states: list[str], *, use_llm: bool = True) -> str | None:
+    """Deterministic-first classification with an ornith fallback on ambiguity."""
+    state = classify_state(subjects, states)
+    if state is None and use_llm:
+        state = classify_llm(subjects, states)
+    return state
 
 
 def _tracked_orders() -> list[dict]:
@@ -114,7 +157,7 @@ class OrderAdapter(GtdSourceAdapter):
                 except Exception:
                     subjects = []
 
-            new_state = classify_state(subjects, states) or o.get("state")
+            new_state = classify(subjects, states) or o.get("state")
             if new_state == o.get("state"):
                 continue  # no change → build nothing (quiet by construction)
 
