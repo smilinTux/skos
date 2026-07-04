@@ -89,7 +89,7 @@ contexts:
   # chat:12345: opus                     # a specific chat pinned to a concrete backend
 
 defaults:
-  role: sk-default
+  role: sk-auto
 
 # Optional tuning for sk-auto difficulty routing (all keys optional — the
 # gateway falls back to built-in defaults when this block is absent).
