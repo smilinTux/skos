@@ -106,3 +106,37 @@ def test_seed_order_creates_then_idempotent():
     iid2, action2 = seed_order("113-XYZ", "you@gmail.com")
     assert action2 == "exists" and iid2 == iid
     assert len(_load("waiting-for.json")) == 1
+
+
+# ── ornith fallback wiring (LLM mocked) ───────────────────────────────────────
+def test_classify_prefers_deterministic(monkeypatch):
+    from skos.adapters import order as om
+    called = {"llm": False}
+    monkeypatch.setattr(om, "classify_llm", lambda s, st: called.__setitem__("llm", True) or "shipped")
+    # deterministic hit -> LLM must NOT be consulted
+    out = om.classify(["Your order has shipped!"], DEFAULT_STATES)
+    assert out == "shipped" and called["llm"] is False
+
+
+def test_classify_falls_back_to_llm_on_miss(monkeypatch):
+    from skos.adapters import order as om
+    monkeypatch.setattr(om, "classify_llm", lambda s, st: "out_for_delivery")
+    out = om.classify(["driver has your package, see it tonight"], DEFAULT_STATES)
+    assert out == "out_for_delivery"
+
+
+def test_classify_llm_degrades_to_none_on_gateway_error(monkeypatch):
+    from skos.adapters import order as om
+    # simulate the gateway being unreachable -> curl/json blows up -> None (no guess)
+    monkeypatch.setattr(om.subprocess, "run",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("no gateway")))
+    assert om.classify_llm(["anything ambiguous"], DEFAULT_STATES) is None
+
+
+def test_classify_llm_rejects_out_of_vocab(monkeypatch):
+    from skos.adapters import order as om
+    class _R:  # fake curl result whose model returns garbage
+        stdout = '{"choices":[{"message":{"content":"maybe delivered lol"}}]}'
+    monkeypatch.setattr(om.subprocess, "run", lambda *a, **k: _R())
+    # "maybe_delivered_lol" is not a valid state -> None
+    assert om.classify_llm(["x"], DEFAULT_STATES) is None
