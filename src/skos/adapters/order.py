@@ -60,6 +60,34 @@ def classify_state(subjects: list[str], states: list[str]) -> str | None:
     return best
 
 
+def seed_order(order_id: str, account: str, *, vendor: str = "amazon",
+               eta: str | None = None, text: str | None = None,
+               states: list[str] | None = None,
+               notify_tier: str = "normal") -> tuple[str | None, str]:
+    """Idempotently seed a tracked order as a waiting-for item with a ``meta.order``
+    block. Returns ``(item_id, action)`` with action in ``{created, exists}``. The
+    first/last of ``states`` become the initial state and ``complete_on``."""
+    from ..gtd_ingest import GtdCapture, capture, _find_item
+
+    ref = f"{vendor}:{order_id}"
+    _f, _i, existing, _items = _find_item("order", ref)
+    if existing:
+        return existing["id"], "exists"
+
+    states = states or DEFAULT_STATES
+    label = text or f"order {order_id}"
+    iid = capture(GtdCapture(
+        text=f"{label} — {states[0].replace('_', ' ')}",
+        source="order", source_ref=ref, status="waiting",
+        context="@errand", priority="low",
+        meta={"order": {
+            "vendor": vendor, "order_id": order_id, "account": account,
+            "states": states, "state": states[0], "eta": eta,
+            "complete_on": states[-1], "notify_tier": notify_tier,
+        }}))
+    return iid, "created"
+
+
 class OrderAdapter(GtdSourceAdapter):
     name = "order"
 

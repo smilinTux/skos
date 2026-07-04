@@ -88,3 +88,21 @@ def test_drain_completes_and_archives_on_delivered(monkeypatch):
     arch = _load("archive.json")
     assert any(i["source_ref"] == "amazon:113-5638977-2258657"
                and i["status"] == "done" and i.get("completed_at") for i in arch)
+
+
+# ── seed_order helper ─────────────────────────────────────────────────────────
+def test_seed_order_creates_then_idempotent():
+    from skos.adapters.order import seed_order
+    iid, action = seed_order("113-XYZ", "you@gmail.com", eta="2026-07-05",
+                             text="battery ×2")
+    assert action == "created" and iid
+    wf = _load("waiting-for.json")
+    assert len(wf) == 1
+    o = wf[0]["order"]
+    assert o["order_id"] == "113-XYZ" and o["state"] == "ordered"
+    assert o["complete_on"] == "delivered" and o["account"] == "you@gmail.com"
+    assert wf[0]["source_ref"] == "amazon:113-XYZ"
+    # second call is a no-op
+    iid2, action2 = seed_order("113-XYZ", "you@gmail.com")
+    assert action2 == "exists" and iid2 == iid
+    assert len(_load("waiting-for.json")) == 1

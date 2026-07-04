@@ -51,8 +51,30 @@ def status(
 @app.command()
 def ingest(
     adapter: str = typer.Argument(..., help="gtd-ingest pull adapter to drain: calendar | telegram | email | order"),
+    add: bool = typer.Option(False, "--add", help="seed a tracked order (adapter=order) instead of draining"),
+    order_id: str = typer.Option(None, "--order-id", help="vendor order id (dedup key)"),
+    account: str = typer.Option(None, "--account", help="gog mailbox that receives the vendor's status emails"),
+    vendor: str = typer.Option("amazon", "--vendor", help="vendor tag (amazon, ...)"),
+    eta: str = typer.Option(None, "--eta", help="expected delivery date, e.g. 2026-07-05"),
+    text: str = typer.Option(None, "--text", help="human label for the GTD item"),
 ):
-    """Drain a gtd-ingest PULL adapter once (poll -> capture into the unified GTD)."""
+    """Drain a gtd-ingest PULL adapter once (poll -> capture into the unified GTD).
+
+    With ``--add`` (adapter=order): seed a tracked order/delivery instead of
+    draining, e.g.::
+
+        skos ingest order --add --order-id 113-… --account you@gmail.com \\
+            --eta 2026-07-05 --text "iPhone 13 mini battery ×2"
+    """
+    if add:
+        if adapter != "order":
+            raise typer.BadParameter("--add is only supported for the 'order' adapter")
+        if not order_id or not account:
+            raise typer.BadParameter("--order-id and --account are required with --add")
+        from skos.adapters.order import seed_order
+        iid, action = seed_order(order_id, account, vendor=vendor, eta=eta, text=text)
+        typer.echo(f"order {order_id}: {action} ({iid})")
+        return
     from skos import adapters as _ad
     typer.echo(f"{adapter}: captured {_ad.drain(adapter)} new GTD item(s)")
 
