@@ -147,6 +147,14 @@ class Registry:
 
         backend_name = self._target_to_backend_name(candidate) if candidate else None
 
+        # sk-auto is a GATEWAY-only marker: SKGateway runs a difficulty classifier
+        # per request to pick the real role. Python callers can't classify, so they
+        # degrade to the concrete default role (sk-default -> ornith). This makes
+        # `defaults.role: sk-auto` safe for direct resolver users (skingest, cluster-ask).
+        if candidate == "sk-auto" or backend_name == "auto":
+            backend_name = self._target_to_backend_name("sk-default")
+            origin = f"{origin}->auto-degrade:sk-default"
+
         if backend_name is None:
             # Unknown role/context/backend — warn, fall back to default role.
             warnings.warn(
