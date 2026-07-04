@@ -133,6 +133,66 @@ def capture(c: GtdCapture) -> str | None:
     return item["id"]
 
 
+def _find_item(source: str, source_ref: str):
+    """Locate an item by (source, source_ref) anywhere in the store.
+    Returns (fname, index, item, items_list) or (None, None, None, None)."""
+    for fname in _ALL_FILES:
+        items = _load(fname)
+        for idx, it in enumerate(items):
+            if it.get("source") == source and it.get("source_ref") == source_ref:
+                return fname, idx, it, items
+    return None, None, None, None
+
+
+def upsert(c: GtdCapture) -> tuple[str, str]:
+    """Create-or-update sink for *stateful* sources (orders/deliveries, builds, …).
+
+    Unlike :func:`capture` (which skips a repeat ``source_ref``), ``upsert``
+    reconciles the incoming capture onto the existing item: it patches changed
+    fields, **moves** the item between list files when ``status`` changes, and
+    **archives** it when ``status == "done"``. Source-specific ``meta`` is merged
+    with overwrite (the adapter supplies the fresh state, e.g. the new order state).
+
+    Returns ``(item_id, action)`` with ``action`` in
+    ``{created, unchanged, updated, completed}``. On ``unchanged`` it performs **no
+    write** — the property that keeps polling idempotent and notifications quiet.
+    """
+    if not c.source_ref:
+        return (capture(c) or ""), "created"
+
+    fname, idx, existing, items = _find_item(c.source, c.source_ref)
+    if existing is None:
+        return capture(c), "created"
+
+    updated = dict(existing)
+    changed = False
+    for key, new_val in (("text", c.text), ("status", c.status),
+                         ("priority", c.priority), ("context", c.context)):
+        if new_val is not None and updated.get(key) != new_val:
+            updated[key] = new_val
+            changed = True
+    for k, v in (c.meta or {}).items():          # merge source-specific state (overwrite)
+        if updated.get(k) != v:
+            updated[k] = v
+            changed = True
+
+    if not changed:
+        return existing["id"], "unchanged"        # no write, no notify
+
+    updated["updated_at"] = datetime.now(timezone.utc).isoformat()
+    terminal = c.status == "done"
+    if terminal:
+        updated["completed_at"] = updated["updated_at"]
+    dest = "archive.json" if terminal else _LIST_FILE.get(updated.get("status", "inbox"), "inbox.json")
+
+    items.pop(idx)                                # remove from current file
+    _save(fname, items)
+    dest_items = items if dest == fname else _load(dest)
+    dest_items.append(updated)
+    _save(dest, dest_items)
+    return updated["id"], ("completed" if terminal else "updated")
+
+
 # ── the port: source adapters register here ──────────────────────────────────
 registry = AdapterRegistry()
 

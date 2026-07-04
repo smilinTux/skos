@@ -14,8 +14,9 @@ def _adapters() -> dict:
     from .calendar import CalendarAdapter
     from .telegram import TelegramAdapter
     from .email import EmailAdapter
+    from .order import OrderAdapter
     out = {}
-    for cls in (CalendarAdapter, TelegramAdapter, EmailAdapter):
+    for cls in (CalendarAdapter, TelegramAdapter, EmailAdapter, OrderAdapter):
         try:
             registry.register(cls)
         except Exception:

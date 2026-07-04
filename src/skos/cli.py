@@ -50,7 +50,7 @@ def status(
 
 @app.command()
 def ingest(
-    adapter: str = typer.Argument(..., help="gtd-ingest pull adapter to drain: calendar | telegram"),
+    adapter: str = typer.Argument(..., help="gtd-ingest pull adapter to drain: calendar | telegram | email | order"),
 ):
     """Drain a gtd-ingest PULL adapter once (poll -> capture into the unified GTD)."""
     from skos import adapters as _ad
