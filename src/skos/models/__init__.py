@@ -227,32 +227,66 @@ def list_contexts(path: str | os.PathLike | None = None) -> dict[str, str]:
     return dict(load_registry(path).contexts)
 
 
+def _rt_yaml():
+    """Round-trip YAML handler (ruamel) that PRESERVES comments; None if unavailable."""
+    try:
+        from ruamel.yaml import YAML
+        y = YAML()  # round-trip mode
+        y.preserve_quotes = True
+        y.indent(mapping=2, sequence=4, offset=2)
+        return y
+    except Exception:
+        return None
+
+
+def _write_contexts(mutate, *, path: str | os.PathLike | None) -> Path:
+    """Load the registry, apply mutate(contexts_dict), write it back preserving
+    comments (ruamel round-trip; plain-dump fallback only if ruamel is absent)."""
+    p = registry_path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    rt = _rt_yaml()
+    if rt is not None and p.exists():
+        with p.open("r", encoding="utf-8") as fh:
+            data = rt.load(fh) or {}
+        if data.get("contexts") is None:
+            data["contexts"] = {}
+        mutate(data["contexts"])
+        with p.open("w", encoding="utf-8") as fh:
+            rt.dump(data, fh)
+    else:  # no ruamel, or brand-new file → plain dump (comments would not exist yet)
+        data = yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}
+        data = data or {}
+        if data.get("contexts") is None:
+            data["contexts"] = {}
+        mutate(data["contexts"])
+        p.write_text(yaml.safe_dump(data, sort_keys=False, default_flow_style=False), encoding="utf-8")
+    _invalidate()
+    return p
+
+
 def set_context(
     key: str,
     target: str,
     *,
     path: str | os.PathLike | None = None,
 ) -> Path:
-    """Set contexts[key] = target and write the registry back. Returns the path.
+    """Set contexts[key] = target and write the registry back, PRESERVING comments
+    (round-trip via ruamel.yaml). This is what the Telegram/skchat `/model` toggle
+    calls, so it must NOT destroy the registry's self-documentation."""
+    return _write_contexts(lambda ctx: ctx.__setitem__(key, target), path=path)
 
-    NOTE: writing via yaml.safe_dump drops comments — this is expected for the
-    live (synced) registry; the committed template keeps the documented comments.
-    """
-    p = registry_path(path)
-    data: dict[str, Any] = {}
-    if p.exists():
-        data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    data.setdefault("contexts", {})
-    if data["contexts"] is None:
-        data["contexts"] = {}
-    data["contexts"][key] = target
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(
-        yaml.safe_dump(data, sort_keys=False, default_flow_style=False),
-        encoding="utf-8",
-    )
-    _invalidate()
-    return p
+
+def unset_context(
+    key: str,
+    *,
+    path: str | os.PathLike | None = None,
+) -> bool:
+    """Remove contexts[key] (revert a toggle back to the role/default). Returns
+    True if it existed. Preserves comments."""
+    existed = key in (list_contexts(path) or {})
+    if existed:
+        _write_contexts(lambda ctx: ctx.pop(key, None), path=path)
+    return existed
 
 
 __all__ = [
@@ -265,5 +299,6 @@ __all__ = [
     "list_backends",
     "list_contexts",
     "set_context",
+    "unset_context",
     "DEFAULT_REGISTRY",
 ]
