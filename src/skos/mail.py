@@ -10,7 +10,10 @@ Subcommands:
   digest    Compose the daily brief (Action + Waiting + new primary mail, across
             all boxes, sorted by what Chef cares about) and send it to Hermes DM.
 
-  -- bidirectional (act on GTD items; <ref> = GTD item id OR gmail thread id) --
+  -- bidirectional (act on items; <ref> = brief E-number · GTD item id · thread id) --
+  The daily digest numbers every item E1..EN and writes digest-index.json, so
+  from Telegram (or any channel) Chef can just say "reply E3 …", "file E3",
+  "show E3" and it resolves to the right account+thread.
   reply <ref> --body "..." [--send] [--to addr] [-a acct]
             Reply within the thread. Default = a reviewable Gmail DRAFT (safe);
             --send actually sends. Recipient defaults to the thread's sender.
@@ -39,6 +42,7 @@ ACCOUNTS = [
     "jaimeanddavid2014@gmail.com",
     "dounoit@gmail.com",
 ]
+SHORT2ACCT = {a.split("@")[0]: a for a in ACCOUNTS}
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -68,7 +72,7 @@ def list_threads(account: str, query: str, maxn: int = 100) -> list[dict]:
 
 # 2026-07-03: rerouted off .100:8082 (Q3_K garble cliff) → chiap08 BeeLlama Q4_K_M (:11436). Override via GTD_LLM_URL.
 LLM_URL = os.environ.get("GTD_LLM_URL", "http://100.81.238.58:11436/v1/chat/completions")
-LLM_MODEL = os.environ.get("GTD_LLM_MODEL", "qwen3.6-27b-abliterated")
+LLM_MODEL = os.environ.get("GTD_LLM_MODEL", "ornith-1.0-9b")
 BUCKET2LABEL = {
     "action": "1 Action", "waiting": "2 Waiting", "read": "3 Read", "someday": "4 Someday",
     "legal": "Areas/Legal-Trust", "people": "Areas/People", "finance": "Areas/Finance",
@@ -239,30 +243,59 @@ def cmd_digest(send: bool = True) -> str:
             new_primary.append((short, r))
 
     d = datetime.date.today().isoformat()
-    L = [f"📬 GTD Email Brief — {d}", ""]
+
+    # Stable per-brief reference numbers (E1..EN) so Chef can act on any item
+    # from Telegram (or any channel) by number — "reply E3", "file E3",
+    # "show E3". The number→thread map is persisted to digest-index.json and
+    # resolved by _resolve()/cmd_done(), so it wires reply/done/attachments.
+    tid2gtd = {it.get("email_thread_id"): it.get("id")
+               for _, it in _all_items() if it.get("email_thread_id")}
+    index: dict[str, dict] = {}
+    seq = 0
+    def _ref(short: str, r: dict, bucket: str) -> str:
+        nonlocal seq
+        seq += 1
+        key = f"E{seq}"
+        index[key] = {
+            "account": SHORT2ACCT.get(short, short),
+            "thread_id": r["id"],
+            "subject": r["subject"][:120],
+            "from": r["from"][:60],
+            "bucket": bucket,
+            "gtd_id": tid2gtd.get(r["id"]),
+        }
+        return key
+
+    # Title is carried by the Hermes --subject header on send; keep it in the
+    # body only when returning the brief for standalone (non-send) use so we
+    # don't print "📬 GTD Email Brief" twice in the delivered message.
+    L = [] if send else [f"📬 GTD Email Brief — {d}", ""]
     L.append(f"🔴 ACTION ({len(action)}) — needs you:")
     for short, r in action[:20]:
-        L.append(f"  • [{short}] {r['subject'][:64]} — {r['from'][:28]}")
+        L.append(f"  {_ref(short, r, 'action')} [{short}] {r['subject'][:60]} — {r['from'][:26]}")
     if not action:
         L.append("  (clear)")
     L.append("")
     L.append(f"🟡 WAITING ({len(waiting)}) — on others:")
     for short, r in waiting[:15]:
-        L.append(f"  • [{short}] {r['subject'][:64]} — {r['from'][:28]}")
+        L.append(f"  {_ref(short, r, 'waiting')} [{short}] {r['subject'][:60]} — {r['from'][:26]}")
     if not waiting:
         L.append("  (clear)")
     L.append("")
     if new_primary:
         L.append(f"🆕 NEW today ({len(new_primary)} shown) — un-triaged real mail:")
         for short, r in new_primary[:15]:
-            L.append(f"  • [{short}] {r['subject'][:60]} — {r['from'][:26]}")
+            L.append(f"  {_ref(short, r, 'new')} [{short}] {r['subject'][:58]} — {r['from'][:24]}")
         L.append("")
     L.append("📊 Inbox health:")
-    for short, n, newn in health:
-        L.append(f"  {short:22s} inbox={n:<4d} new_today={newn}")
+    for short, inbox_n, newn in health:
+        L.append(f"  {short:22s} inbox={inbox_n:<4d} new_today={newn}")
     L.append("")
-    L.append("↩︎ Ask me to address any item (reply, draft, file, show attachment).")
+    L.append("↩︎ Reference any item by number — “reply E3 …”, “file E3”, “show E3”.")
     body = "\n".join(L)
+    # Persist the reference index so a later "act on E3" resolves to the right
+    # account+thread. Written on both paths so a --no-send preview is usable too.
+    _save("digest-index", {"generated": _now(), "date": d, "items": index})
     if send:
         subprocess.run(["hermes", "send", "--to", HERMES_DM, "--subject",
                         f"📬 GTD Email Brief — {d}", body],
@@ -277,8 +310,29 @@ def _all_items() -> list[tuple[str, dict]]:
             out.append((name, it))
     return out
 
+def _digest_index() -> dict:
+    """Return the last brief's {E-number: {account, thread_id, ...}} map."""
+    data = _load("digest-index")
+    return data.get("items", {}) if isinstance(data, dict) else {}
+
+def _brief_key(ref: str) -> str | None:
+    """Normalize a user ref to a brief key: 'E3', 'e3', or bare '3' -> 'E3'."""
+    r = ref.strip().upper()
+    if r.startswith("E") and r[1:].isdigit():
+        return r
+    if r.isdigit():
+        return f"E{r}"
+    return None
+
 def _resolve(ref: str, account: str | None = None) -> dict:
-    """Resolve a ref (GTD item id OR gmail thread id) -> {account, thread_id, item}."""
+    """Resolve a ref (brief E-number · GTD item id · gmail thread id) -> {account, thread_id, item}."""
+    # brief reference number from the daily email digest (E3 / e3 / bare 3)
+    key = _brief_key(ref)
+    if key:
+        e = _digest_index().get(key)
+        if e:
+            return {"account": e["account"], "thread_id": e["thread_id"],
+                    "item": None, "gtd_id": e.get("gtd_id")}
     for _, it in _all_items():
         if it.get("id") == ref or it.get("source_ref") == ref or it.get("email_thread_id") == ref:
             if it.get("email_thread_id"):
@@ -343,7 +397,24 @@ def cmd_reply(ref: str, body: str, send: bool = False, account: str | None = Non
         print(f"reply DRAFTED to {recipient} (review+send in Gmail): rc={r2.returncode}\n{(r2.stdout or r2.stderr)[:200]}")
 
 def cmd_done(gtd_id: str) -> None:
-    """Mark the GTD item done AND archive+read its email thread (bidirectional close)."""
+    """Mark the GTD item done AND archive+read its email thread (bidirectional close).
+
+    Accepts a brief E-number (E3) as well as a raw GTD item id. If the E-item
+    was captured into the GTD store, it closes that; otherwise (un-triaged
+    "NEW" mail) it just archives+marks-read the email thread directly.
+    """
+    key = _brief_key(gtd_id)
+    if key:
+        e = _digest_index().get(key)
+        if e and e.get("gtd_id"):
+            gtd_id = e["gtd_id"]  # fall through to normal GTD close
+        elif e:
+            acct, tid = e["account"], e["thread_id"]
+            mids = [m["id"] for m in _thread(acct, tid)["messages"]] or [tid]
+            subprocess.run([GOG, "gmail", "archive", "-a", acct, *mids], capture_output=True)
+            subprocess.run([GOG, "gmail", "mark-read", "-a", acct, *mids], capture_output=True)
+            print(f"done: {key} archived+read email thread {tid} ({len(mids)} msgs) — no GTD item to close")
+            return
     hit = None
     for name in ("inbox", "next-actions", "waiting-for", "someday-maybe", "projects"):
         items = _load(name)
