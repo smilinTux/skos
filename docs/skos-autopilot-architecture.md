@@ -474,3 +474,20 @@ Add to `~/.skcapstone/config/jobs.yaml`:
 4. Daily run time (draft 06:30 noroc2027) and whether the digest rides the 7:15 brief or sends its own DM.
 
 (Former Open Decision 5, harness egress enforcement, is resolved in section 12: egress is a pinned, fail-closed control. The only residual is per-node capability, if a node cannot enforce the namespace, engineering execution is disabled there rather than downgraded.)
+
+---
+
+## 21. Adopted patterns from the Archon evaluation
+
+A deep-dive eval of Archon (`coleam00/archon`, 2026-07-12) found it is a mature MIT-licensed workflow engine that is a direct analog of this executor. It confirmed our two differentiators (a first-class grade-to-5/5 primitive and a real external-CI gate, both of which Archon lacks) and surfaced patterns worth adopting. The ones that belong in v1/v1.5 are folded in here; the out-of-scope ecosystem features are filed under coord epic `49a74ed2` (tag `archon-leverage`).
+
+**Adopt into v1/v1.5 (integrate when writing the implementation plan):**
+- **Fresh-context grade rounds (the "Ralph" pattern).** Each round of the grade-to-5/5 loop (section 5.3) runs as a fresh harness session that re-reads truth from disk (the worktree, the task record, the prior grader feedback written to a sidecar), rather than threading a growing context. Long runs never bloat, and any round is restartable. The prior round's actionable feedback is the only curated carry-forward.
+- **Deterministic twin gate + robust completion signal.** The loop never exits on the grader's self-reported "5/5" alone; the LLM verdict is ANDed with a deterministic check (the external-CI green + diff-coverage of section 5.5). Completion signals use the `<promise>SIGNAL</promise>` tag convention (backreference-matched, stripped before display) so phrases like "not done yet" cannot trip a false positive.
+- **Pause-as-state, resume-as-redispatch.** A human decision (numbered digest item, section 9) never parks a headless session. The orchestrator writes the decision-requested event, checkpoints the run to a resumable state, and the harness process exits and releases the worktree. The operator's answer writes a decision-received event and re-dispatches, hydrating from the already-finalized items in the run journal (section 3). This replaces any notion of holding a live session open across a human gate.
+- **Typed output sidecars.** Plan, implement, and grade stages hand off via typed sidecar artifacts (`nodes/<id>.md` + `<id>.meta.json`, located by semantic type, not filename) in the run's artifact dir, so cross-stage context transfer needs no shared mutable index.
+- **Provider capability matrix on the harness seam.** `HarnessAdapter` (section 11) advertises capabilities (`structured_output` tier, `session_resume`, `sandbox`, `tool_restrictions`, ...); the orchestrator warns at load time when a run needs a capability the selected harness lacks, rather than failing mid-run.
+- **Diverse-lens grader panel (v1.5 upgrade).** The single grader (section 5.3) generalizes to N parallel specialist reviewers joined on a "one_success"-style rule, the same topology this very spec was hardened with. Kept out of v1 to hold scope; the seam is the grader interface.
+- **Governance principle.** Adopt Archon's "no autonomous lifecycle mutation across process boundaries": autopilot never force-terminates non-terminal work it did not start. This reinforces the stale-claim lease (section 5.1), which releases only its own claims past the lease age.
+
+**Deferred to the ecosystem (coord `49a74ed2`, out of Autopilot scope):** the declarative YAML workflow DSL as a general SKOS process-as-code layer (a possible future generalization of this executor), worktree isolation as a standalone skos primitive, the multi-surface run-event bridge fabric, skgateway structured-output tiering, the V1 RAG strategies for skmem-pg, MCP tool-surface consolidation, the Mission Control dashboard, and categorical-only telemetry.
