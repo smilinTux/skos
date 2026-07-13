@@ -1,0 +1,33 @@
+from skos.autopilot.adapters.pi import PiAdapter
+from skos.autopilot.sandbox import Sandbox
+
+
+def _a(**kw):
+    return PiAdapter(Sandbox(), **kw)
+
+
+def test_argv_and_image():
+    a = _a()
+    assert a._argv("P") == ["pi", "-p", "P", "--mode", "json"]
+    assert a._image() == "sandbox-pi:1"
+    assert a.name == "pi"
+
+
+def test_local_model_routes_to_skgateway_with_no_external_cred():
+    a = _a(model="sk-default", base_url="http://localhost:18780/v1")
+    env = a._auth_env()
+    assert env["OPENAI_BASE_URL"] == "http://localhost:18780/v1"
+    assert env["PI_MODEL"] == "sk-default"
+    assert a._auth_mounts() == []                 # local: no external cred to mount
+
+
+def test_parse_extracts_model_reply_dict():
+    a = _a()
+    # already-parsed object
+    assert a._parse({"verdict": "valid", "reason": "ok"}) == {"verdict": "valid", "reason": "ok"}
+    # nested under result
+    assert a._parse({"result": {"score": 5}}) == {"score": 5}
+    # result carries a JSON string (model reply as text)
+    assert a._parse({"result": "{\"verdict\": \"stale\"}"}) == {"verdict": "stale"}
+    # unparseable -> empty dict, never crash
+    assert a._parse({"result": "not json"}) == {}
