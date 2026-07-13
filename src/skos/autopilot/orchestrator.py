@@ -297,3 +297,19 @@ def run_once(*, board, harness, config, tasks_dir=None, run_id=None, dry_run=Non
     return {"run_id": run_id, "dry_run": dry,
             "selected": [it.ref for it, _ in selected],
             "decisions": len(decisions), "report": report}
+
+
+def run_cli(*, dry_run: bool = True, canary: bool = False, task=None,
+           harness: str = "stub") -> dict:
+    """CLI bridge for `skos autopilot run`. v1 posture C: only dry-run executes,
+    against a StubHarness; canary and live are reported disabled until v1.5."""
+    if canary or not dry_run:
+        return {"disabled": "posture C: live/canary harness execution is disabled "
+                            "in v1 (enable after the v1.5 sovereign sandbox)"}
+    from .config import Config
+    from .harness import StubHarness
+    config = Config.load()
+    from skcapstone.coordination import Board
+    from skcapstone.mcp_tools._helpers import _shared_root
+    board = Board(_shared_root())
+    return run_once(board=board, harness=StubHarness(), config=config, dry_run=True)

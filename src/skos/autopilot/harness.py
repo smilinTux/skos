@@ -32,6 +32,26 @@ class HarnessAdapter(Protocol):
     def grade(self, brief: GradeBrief) -> GateResult: ...
 
 
+class StubHarness:
+    """Deterministic no-spawn harness for v1 (posture C). Never launches a model.
+    assess returns valid so dry-run previews show the candidate pool; run_task and
+    grade are never reached in dry-run (Phase 2 is skipped) and hard-raise if called."""
+    name = "stub"
+
+    def capabilities(self) -> ProviderCapabilities:
+        return {"session_resume": False, "structured_output": "none",
+                "sandbox": False, "tool_restrictions": False}
+
+    def assess(self, brief: AssessBrief) -> Verdict:
+        return Verdict(verdict="valid", reason="stub")
+
+    def run_task(self, brief: TaskBrief) -> HarnessResult:
+        raise RuntimeError("StubHarness cannot execute; live harness is disabled in v1 (posture C)")
+
+    def grade(self, brief: GradeBrief) -> GateResult:
+        raise RuntimeError("StubHarness cannot grade; live harness is disabled in v1 (posture C)")
+
+
 def _absent(value) -> bool:
     """A capability is absent when false-y or the sentinel string 'none'."""
     return value in (False, None, "", "none")

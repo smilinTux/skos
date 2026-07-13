@@ -427,6 +427,81 @@ def _split(ref: str):
     return scope, key
 
 
+autopilot_app = typer.Typer(help="skos autopilot - autonomous assess/triage/swarm/grade/report")
+app.add_typer(autopilot_app, name="autopilot")
+
+
+@autopilot_app.command("run")
+def autopilot_run(
+    once: bool = typer.Option(True, "--once/--no-once"),
+    dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run",
+                                 help="Read-only: no coord/GTD writes, no merges, no DM"),
+    canary: bool = typer.Option(False, "--canary"),
+    task: str = typer.Option(None, "--task"),
+    harness: str = typer.Option("stub", "--harness"),
+):
+    """Execute one autopilot pass (v1: dry-run only, posture C)."""
+    from skos.autopilot import orchestrator
+    out = orchestrator.run_cli(dry_run=dry_run, canary=canary, task=task, harness=harness)
+    typer.echo(out.get("disabled") or f"run {out.get('run_id', '?')} dry_run={dry_run}")
+
+
+@autopilot_app.command("answer")
+def autopilot_answer(n: int = typer.Argument(...), response: str = typer.Argument(None)):
+    """Resolve numbered decision N."""
+    from skos.autopilot import resolver
+    try:
+        out = resolver.answer(n, response)
+    except resolver.UnknownDecision as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"answered {out['n']} ({out['qid']}): {out.get('answer')}")
+
+
+@autopilot_app.command("list")
+def autopilot_list(decisions: bool = typer.Option(False, "--decisions"),
+                   runs: bool = typer.Option(False, "--runs"),
+                   claims: bool = typer.Option(False, "--claims")):
+    """List the decision queue, recent runs, or current claims."""
+    from skos.autopilot import journal
+    what = "decisions" if decisions else "runs" if runs else "claims" if claims else "decisions"
+    for line in journal.render_list(what):
+        typer.echo(line)
+
+
+@autopilot_app.command("status")
+def autopilot_status():
+    """Render the latest run from the journal."""
+    from skos.autopilot import journal
+    typer.echo(journal.render_status())
+
+
+@autopilot_app.command("show")
+def autopilot_show(run_id: str = typer.Argument(...)):
+    """Dump one run's per-item trajectory."""
+    from skos.autopilot import journal
+    typer.echo(journal.render_run(run_id))
+
+
+@autopilot_app.command("revert")
+def autopilot_revert(task_id: str = typer.Argument(...)):
+    """Revert the recorded merge commit and reopen the coord task."""
+    from skos.autopilot import engineering
+    out = engineering.revert(task_id)
+    typer.echo(f"reverted {task_id}: {out}")
+
+
+@autopilot_app.command("send")
+def autopilot_send(preview: bool = typer.Option(False, "--preview")):
+    """Rebuild and send (or preview) the current numbered digest DM."""
+    from skos.autopilot import config as _cfg, digest
+    if preview:
+        typer.echo(digest.build_digest_text(digest.rebuild_manifest()))
+        return
+    out = digest.send_digest(_cfg.Config.load(), dry_run=False)
+    typer.echo(f"digest sent={out.get('sent')} items={out.get('items')}")
+
+
 @secret_app.command("set")
 def secret_set(ref: str, value: str):
     from skos import secrets
