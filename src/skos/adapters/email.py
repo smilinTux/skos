@@ -1,4 +1,4 @@
-"""Email → GTD pull adapter — Gmail `1 Action`/`2 Waiting` labels → unified GTD.
+"""Email → GTD pull adapter: Gmail `1 Action`/`2 Waiting` labels → unified GTD.
 
 The heavy lifting (multi-box capture, LLM triage, digest, bidirectional reply/
 done/attachments) lives in `skos.mail`; this adapter exposes the *capture* half on

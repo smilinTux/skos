@@ -1,4 +1,4 @@
-# gtd-ingest — Standard Operating Procedures
+# gtd-ingest: Standard Operating Procedures
 
 The skos **unified-GTD subsystem**: one GTD store, one `capture()` sink, pluggable
 source adapters (email · ITIL · cron · calendar · telegram), read-only context
@@ -6,7 +6,7 @@ sources (recent docs), monitored pipelines (corpus/wiki), bidirectional email, a
 two daily digests. This SOP is the operational source of truth; the design/spec is
 [`gtd-ingest-architecture.md`](./gtd-ingest-architecture.md).
 
-Maturity: **T2 (working, in daily production on `noroc2027`)** · Phase 0–3 delivered.
+Maturity: **T2 (working, in daily production on `noroc2027`)** · Phase 0-3 delivered.
 
 ---
 
@@ -17,11 +17,11 @@ single store through one sink, surfaced in daily reports + on-demand status, and
 acted on (reply / close / show attachment). Adding a source is one adapter class.
 
 **Owns:** the `gtd-ingest` port + `capture()` sink (`skos.gtd_ingest`), the pull
-adapters (`skos.adapters.*` — email/calendar/telegram), the realtime status + report
+adapters (`skos.adapters.*`: email/calendar/telegram), the realtime status + report
 engine (`skos.status`), the email module (`skos.mail`), and the shell wrappers in
 `skos/scripts/`. CLIs: `skos`, `sk-status`, `gtd-mail` (packaged console scripts).
 
-**Does NOT own:** the GTD *item lifecycle verbs* (clarify/next/review) — those stay
+**Does NOT own:** the GTD *item lifecycle verbs* (clarify/next/review). Those stay
 in skcapstone's `gtd_tools` MCP; this subsystem only *captures into* and *reports
 on* the shared store. It also does not send email without an explicit `--send`
 (default is a reviewable draft).
@@ -53,12 +53,12 @@ flowchart LR
 ```
 
 **Start here (entry-point files):**
-- `skos/src/skos/gtd_ingest.py` — the port: `GtdCapture`, `capture()` sink, `GtdSourceAdapter`, `registry`.
-- `skos/src/skos/adapters/{email,calendar,telegram}.py` — pull adapters (`poll()`→captures).
-- `skos/src/skos/status.py` — status/report engine (email/cron/gtd/docs/corpus).
-- `skos/src/skos/mail.py` (`gtd-mail`) — email capture/triage/digest + bidirectional (reply/done/attachments).
-- `skos/scripts/sk-cron-run.sh` — the cron/observability wrapper (run-ledger + failure→GTD+alert).
-- `skcapstone/src/skcapstone/itil.py::_gtd_emit` — ITIL push adapter (emits through the sink).
+- `skos/src/skos/gtd_ingest.py`, the port: `GtdCapture`, `capture()` sink, `GtdSourceAdapter`, `registry`.
+- `skos/src/skos/adapters/{email,calendar,telegram}.py`: pull adapters (`poll()`→captures).
+- `skos/src/skos/status.py`: status/report engine (email/cron/gtd/docs/corpus).
+- `skos/src/skos/mail.py` (`gtd-mail`): email capture/triage/digest + bidirectional (reply/done/attachments).
+- `skos/scripts/sk-cron-run.sh`: the cron/observability wrapper (run-ledger + failure→GTD+alert).
+- `skcapstone/src/skcapstone/itil.py::_gtd_emit`: ITIL push adapter (emits through the sink).
 
 **Store:** plain JSON under `$SK_DATA_ROOT/coordination/gtd/`
 (`inbox/next-actions/projects/waiting-for/someday-maybe/archive.json`), Syncthing-synced.
@@ -69,14 +69,14 @@ byte-identical to what the GTD/ITIL tools read (`SK_GTD_DIR` overrides).
 
 ## 3. Build
 
-No build artifact — Python, editable-installed into `~/.skenv`:
+No build artifact. Python, editable-installed into `~/.skenv`:
 ```bash
 cd ~/clawd/skos && pip install -e .        # provides `skos`, importable `skos.*`
 ```
 Runtime deps used by adapters (already present): `gog` (Gmail/Calendar/Drive),
 `skcapstone telegram` (Telethon), the local LLM at `.100:8082` (triage) / mxbai
 (embeds), `hermes` + Telegram bot token (`~/.hermes/.env`) for delivery.
-**Pin:** `typer==0.12.5` (click 8.1 compat — newer typer breaks the whole CLI).
+**Pin:** `typer==0.12.5` (click 8.1 compat, newer typer breaks the whole CLI).
 
 ---
 
@@ -93,7 +93,7 @@ calendar noise-filter, ITIL→sink routing + unified-store alignment.
 
 ## 5. Release / Deploy
 
-**Front-end / Exposure: N/A — no network listener.** Runs as local cron jobs on
+**Front-end / Exposure: N/A, no network listener.** Runs as local cron jobs on
 `noroc2027` (.158); the only outbound is Gmail (gog), the local LLM, and the
 Telegram DM (Hermes bot). No public port.
 
@@ -103,14 +103,14 @@ Telegram DM (Hermes bot). No public port.
 |---|---|---|
 | 04:45 | `wiki-maintain` | qwen drafts stubs for dangling wiki links |
 | 05:30 | `youtube-ingest` | corpus ingest (wrapped) |
-| 06:00 | `gtd-noise-sweep` | `gtd-triage.sh` — promotions/social/updates → `3 Read` + archive |
-| 06:05 | `corpus-check` | `sk-status corpus-check` — wiki research-queue > threshold → GTD Action |
-| 06:10 | `email-triage` | `gtd-mail triage` — LLM classifies primary mail → GTD labels + archive |
+| 06:00 | `gtd-noise-sweep` | `gtd-triage.sh`: promotions/social/updates → `3 Read` + archive |
+| 06:05 | `corpus-check` | `sk-status corpus-check`: wiki research-queue > threshold → GTD Action |
+| 06:10 | `email-triage` | `gtd-mail triage`: LLM classifies primary mail → GTD labels + archive |
 | 06:15 | `ingest-calendar` | `skos ingest calendar` → GTD |
 | 06:16 | `ingest-telegram` | `skos ingest telegram` → GTD |
-| 06:35 | `ingest-email` | `skos ingest email` — `1 Action`/`2 Waiting` labels → GTD (sink) |
-| 06:45 | `email-brief` | `gtd-mail digest` — 📬 Email Brief → Telegram DM |
-| 07:45 | `ops-report` | `sk-status report` — 📊 Ops Report → DM |
+| 06:35 | `ingest-email` | `skos ingest email`: `1 Action`/`2 Waiting` labels → GTD (sink) |
+| 06:45 | `email-brief` | `gtd-mail digest`: 📬 Email Brief → Telegram DM |
+| 07:45 | `ops-report` | `sk-status report`: 📊 Ops Report → DM |
 
 Every command runs under `skos/scripts/sk-cron-run.sh <job> …`.
 
@@ -120,7 +120,7 @@ Deploy/rollback = edit `crontab -e` (jobs are idempotent + deduped; safe to re-r
 
 ## 6. Configuration / Usage
 
-Env vars (secrets sourced from existing stores — never inlined):
+Env vars (secrets sourced from existing stores, never inlined):
 
 | Var | Default | Used by |
 |---|---|---|
@@ -131,10 +131,10 @@ Env vars (secrets sourced from existing stores — never inlined):
 | `WIKI_RESEARCH_THRESHOLD` / `WIKI_DANGLING_THRESHOLD` | 650 / 5000 | corpus-check |
 | `GTD_CAL_ACCOUNTS` / `GTD_CAL_DAYS` | primary / 2 | calendar adapter |
 | `GTD_TG_CHAT` / `GTD_TG_LIMIT` | Chef's DM / 25 | telegram adapter |
-| `GTD_DOC_ACCOUNTS` / `GTD_DOC_DIRS` | all 5 / — | recent-docs (Nextcloud roots) |
+| `GTD_DOC_ACCOUNTS` / `GTD_DOC_DIRS` | all 5 / - | recent-docs (Nextcloud roots) |
 
 **Telegram capture convention:** DM a message prefixed `todo:` / `task:` / `gtd:` /
-`remind:` — the rest becomes a GTD item. No prefix = ignored (zero noise).
+`remind:`. The rest becomes a GTD item. No prefix = ignored (zero noise).
 
 ---
 
@@ -153,7 +153,7 @@ gtd-mail reply <ref> --body "…" [--send] [--to addr] [-a acct]   # default: sa
 gtd-mail done <gtd_id>                                            # mark done + archive+read thread
 gtd-mail attachments <ref> [--save] [--telegram] [-a acct]       # list/download/deliver
 ```
-**Observability:** `sk-cron-run <job> <cmd…>` — wrap any scheduled job.
+**Observability:** `sk-cron-run <job> <cmd…>`: wrap any scheduled job.
 
 **Python API (the port):**
 ```python
@@ -188,11 +188,11 @@ capture(GtdCapture(text="…", source="<src>", source_ref="<stable-key>",
 ## 9. Maturity-tier + Version reference
 
 - **Tier:** T2 (working; daily production; test-gated). Not a crypto component
-  (`CRYPTOGRAPHY_STANDARD` compliance: **N/A — no key material**; secrets are read
+  (`CRYPTOGRAPHY_STANDARD` compliance: **N/A, no key material**; secrets are read
   from existing stores, never generated/stored here).
 - **Version lifecycle:** Incubating (v3) subsystem of skos; SemVer tracks the skos package.
 - **Self-report / claim evidence:** `skos status all` reports the live state of every
-  surface (per-box email, cron ledger, GTD counts, corpus health) — every claim in
+  surface (per-box email, cron ledger, GTD counts, corpus health). Every claim in
   this SOP is checkable there.
 - **Standards conformance:** this subsystem is the **reference implementation** of
   [OBSERVABILITY_AND_SCHEDULING_STANDARD](https://github.com/smilinTux/sk-standards/blob/main/standards/OBSERVABILITY_AND_SCHEDULING_STANDARD.md)
@@ -203,7 +203,7 @@ capture(GtdCapture(text="…", source="<src>", source_ref="<stable-key>",
   tests per [TESTING_AND_CI_STANDARD](https://github.com/smilinTux/sk-standards/blob/main/standards/TESTING_AND_CI_STANDARD.md).
 
 ## Related docs / See also
-- 📐 **Spec:** [`gtd-ingest-architecture.md`](./gtd-ingest-architecture.md) — the design + phased roadmap.
+- 📐 **Spec:** [`gtd-ingest-architecture.md`](./gtd-ingest-architecture.md): the design + phased roadmap.
 - ⬆️ **Depends on:** skcapstone `gtd_tools` (store + lifecycle verbs), `gog`, local LLM, Hermes.
 - ⬇️ **Used by:** ITIL (`skcapstone/itil.py`) as a push adapter; the daily digests + `skos status`.
-- 📐 **Standards:** [sk-standards](https://github.com/smilinTux/sk-standards) — **observability & scheduling** (this is the reference impl), doc/SOP, architecture/dataflow, testing, version.
+- 📐 **Standards:** [sk-standards](https://github.com/smilinTux/sk-standards): **observability & scheduling** (this is the reference impl), doc/SOP, architecture/dataflow, testing, version.

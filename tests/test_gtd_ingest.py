@@ -84,23 +84,23 @@ def _order_cap(state, text, status="waiting"):
 
 
 def test_upsert_creates_when_new():
-    iid, action = upsert(_order_cap("ordered", "battery — ordered"))
+    iid, action = upsert(_order_cap("ordered", "battery - ordered"))
     assert action == "created" and iid
     wf = _load_list("waiting-for.json")
     assert len(wf) == 1 and wf[0]["order"]["state"] == "ordered"
 
 
 def test_upsert_unchanged_does_not_write():
-    upsert(_order_cap("ordered", "battery — ordered"))
+    upsert(_order_cap("ordered", "battery - ordered"))
     before = (gtd_dir() / "waiting-for.json").read_text()
-    iid, action = upsert(_order_cap("ordered", "battery — ordered"))  # identical
+    iid, action = upsert(_order_cap("ordered", "battery - ordered"))  # identical
     assert action == "unchanged"
     assert (gtd_dir() / "waiting-for.json").read_text() == before  # byte-identical: no write
 
 
 def test_upsert_updates_state_in_place():
-    first, _ = upsert(_order_cap("ordered", "battery — ordered"))
-    second, action = upsert(_order_cap("out_for_delivery", "battery — out for delivery"))
+    first, _ = upsert(_order_cap("ordered", "battery - ordered"))
+    second, action = upsert(_order_cap("out_for_delivery", "battery - out for delivery"))
     assert action == "updated" and second == first  # same item, not a new one
     wf = _load_list("waiting-for.json")
     assert len(wf) == 1
@@ -110,8 +110,8 @@ def test_upsert_updates_state_in_place():
 
 
 def test_upsert_completes_and_archives_on_done():
-    first, _ = upsert(_order_cap("ordered", "battery — ordered"))
-    done_id, action = upsert(_order_cap("delivered", "battery — delivered", status="done"))
+    first, _ = upsert(_order_cap("ordered", "battery - ordered"))
+    done_id, action = upsert(_order_cap("delivered", "battery - delivered", status="done"))
     assert action == "completed" and done_id == first
     assert _load_list("waiting-for.json") == []          # gone from waiting
     arch = _load_list("archive.json")

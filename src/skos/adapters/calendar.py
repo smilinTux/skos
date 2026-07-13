@@ -47,7 +47,7 @@ class CalendarAdapter(GtdSourceAdapter):
                 if any(k in low for k in _NOISE):
                     continue
                 start = ev.get("start") or {}
-                # only timed commitments — skip all-day (start has 'date' not 'dateTime')
+                # only timed commitments: skip all-day (start has 'date' not 'dateTime')
                 when = start.get("dateTime") if isinstance(start, dict) else start
                 if not when or "T" not in str(when):
                     continue

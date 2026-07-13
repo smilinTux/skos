@@ -1,14 +1,14 @@
-# skos GTD-Ingest — Unified GTD as a Port, Every Source an Adapter
+# skos GTD-Ingest: Unified GTD as a Port, Every Source an Adapter
 
 **Status:** design (2026-07-03) · **Owner:** Lumina + Chef · **Epic:** (coord)
 **Operational SOP:** [`gtd-ingest-SOP.md`](./gtd-ingest-SOP.md) (build/test/deploy/config/API/troubleshoot).
-**Goal:** skos is Chef's ONE unified GTD for all work in this realm. Every input
-— ITIL incidents, email across N mailboxes, Telegram, voice, calendar, cron
-failures — is captured into a single GTD store through **one port with pluggable
+**Goal:** skos is Chef's ONE unified GTD for all work in this realm. Every input,
+from ITIL incidents, email across N mailboxes, Telegram, voice, calendar, and cron
+failures, is captured into a single GTD store through **one port with pluggable
 adapters**. Notifications (daily email brief, daily ops report) and bidirectional
 actions (reply, file, show attachment, mark done→archive) sit on top.
 
-The north star: *adding a new source is writing one adapter — no core changes.*
+The north star: *adding a new source is writing one adapter: no core changes.*
 
 ---
 
@@ -16,7 +16,7 @@ The north star: *adding a new source is writing one adapter — no core changes.
 
 1. **One inbox, many sources.** All captures land in the same store
    (`$SK_DATA_ROOT/coordination/gtd/*.json`) with a `source` tag. Clarify once,
-   organize everywhere. (This is already the GTD data model — see §3.)
+   organize everywhere. (This is already the GTD data model, see §3.)
 2. **Ports & adapters (skos idiom).** A single capability **`gtd-ingest`** is the
    port. `itil`, `email`, `telegram`, `voice`, `calendar`, `cron` are adapters.
    Resolver picks which are active per profile (personal/team/enterprise).
@@ -79,7 +79,7 @@ flowchart LR
 
 ---
 
-## 3. The store & data model (already exists — reuse, don't reinvent)
+## 3. The store & data model (already exists: reuse, don't reinvent)
 
 Unified store: `$SK_DATA_ROOT/coordination/gtd/` → `inbox.json`,
 `next-actions.json`, `projects.json`, `waiting-for.json`, `someday-maybe.json`,
@@ -162,13 +162,13 @@ add a line to `capabilities.yaml`, and (for pull) drop a job yaml. Nothing else.
 
 ## 5. First three adapters
 
-### 5a. `itil` (push) — refactor of what already exists
+### 5a. `itil` (push): refactor of what already exists
 `itil_tools.itil_incident_create()` today hardcodes a GTD write. Refactor to build
 a `GtdCapture(source="itil", source_ref=inc_id, context="@ops", priority=<sev-map>)`
 and call `capture()`. Same behavior, now behind the port. This is the reference
 adapter and the proof the framework fits existing code.
 
-### 5b. `email` (pull) — the multi-box mail adapter
+### 5b. `email` (pull): the multi-box mail adapter
 - Backed by `gog` (5 Gmail accounts today; the adapter interface is mailbox-agnostic
   so IMAP/Outlook are future adapters or backends).
 - **Noise sweep** (promotions/social/updates/forums → `3 Read` + archive) stays a
@@ -181,20 +181,20 @@ adapter and the proof the framework fits existing code.
   the unified GTD. Deduped by thread id. (Implemented Phase-0 in
   `skos/mail.py (`gtd-mail` console script) capture`.)
 - **Bidirectional (DONE 2026-07-03):** act on GTD email items via `gtd-mail`:
-  - `reply <ref> --body …` — reply in-thread; default a reviewable Gmail **DRAFT**
-    (outbound email is consequential — safe by default), `--send` to send.
-  - `done <gtd_id>` — mark the GTD item done **and** archive+mark-read the email
+  - `reply <ref> --body …`: reply in-thread; default a reviewable Gmail **DRAFT**
+    (outbound email is consequential, safe by default), `--send` to send.
+  - `done <gtd_id>`: mark the GTD item done **and** archive+mark-read the email
     thread (closes the loop both ways).
-  - `attachments <ref> --telegram` — list + download a thread's attachments and
+  - `attachments <ref> --telegram`: list + download a thread's attachments and
     deliver each to Chef's Telegram DM ("show attachment").
   `<ref>` resolves a GTD item id → (account, thread, messages, attachments), so
   Chef/agent can act by GTD id or raw thread id. Reversible: archive re-adds INBOX.
 
-### 5c. `cron` (push) — the observability adapter
+### 5c. `cron` (push): the observability adapter
 `sk-cron-run <job> <cmd…>` wraps every scheduled job:
 1. append a **run-ledger** record (JSONL): `{job, host, start, end, dur_s, exit, ok, tail}`.
 2. on failure → `capture(GtdCapture(source="cron", source_ref="<job>@<date>",
-   context="@ops", priority="high", text="cron FAILED: <job> — <err>"))` **and** sk-alert.
+   context="@ops", priority="high", text="cron FAILED: <job> - <err>"))` **and** sk-alert.
 This makes cron/scheduled-work health a first-class GTD + alert citizen and feeds
 the daily ops report.
 
@@ -228,20 +228,20 @@ sequenceDiagram
   OPS->>HERMES: 📊 Ops Report (✅/❌ every job)
 ```
 
-**Email Brief (07:00 EST)** — `gtd-mail.py digest`: Action → Waiting → new-today →
+**Email Brief (07:00 EST):** `gtd-mail.py digest`: Action → Waiting → new-today →
 inbox health, across all boxes, sorted by what Chef acts on. *(built)*
 
-**Ops / Work Report (08:00 EST)** — `sk-daily-report.py`: for the last 24h, every
+**Ops / Work Report (08:00 EST):** `sk-daily-report.py`: for the last 24h, every
 scheduled job's success/failure/duration from the run-ledger + skscheduler status +
 any GTD `source=cron` failures. ✅ green summary or ❌ with the error tail. Always
 sent (so "silence" is never ambiguous); sk-alert escalates if any failure. *(build)*
 
 ---
 
-## 6b. Context sources (read-only) — "what have I been working on"
+## 6b. Context sources (read-only): "what have I been working on"
 
-Not every source *captures* GTD items — some provide **read-only context** that
-enriches the digests. First one: **recent docs** — the latest documents Chef
+Not every source *captures* GTD items. Some provide **read-only context** that
+enriches the digests. First one: **recent docs**, the latest documents Chef
 worked on, newest-first, surfaced in the Ops Report and on demand via
 `sk-status docs`. Same adapter shape (a `poll()`-style provider), but its output
 is rendered, not written to the store.
@@ -250,16 +250,16 @@ is rendered, not written to the store.
   pdf/office (media filtered out), sorted by `modifiedTime`, deduped by name.
 - **Nextcloud dkloud `p/` + `r/`** (projects/reference): filesystem mtime walk.
   **Offline during the current outage; auto-included the moment `~/dkloud.douno.it`
-  reappears (~Aug 2026) — a path check, zero code change.** Extra roots via
+  reappears (~Aug 2026), a path check, zero code change.** Extra roots via
   `GTD_DOC_DIRS`.
 - Future context sources fit the same slot: calendar (today's events), git (repos
   touched today), skmemory (recent memories).
 
 ## 6c. Monitored-pipeline sources (health + maintenance-ensure)
 
-Some sources aren't just captured/reported — they own a *pipeline* skos must keep
+Some sources aren't just captured/reported: they own a *pipeline* skos must keep
 healthy. First one: **corpus / realmwiki**. It (a) reports health, (b) flags
-triage, (c) ensures its maintenance jobs run — all through the same ledger +
+triage, (c) ensures its maintenance jobs run, all through the same ledger +
 report + capture machinery.
 
 - **Health/triage** (`sk-status corpus`, Ops Report): realmwiki page count +
@@ -270,7 +270,7 @@ report + capture machinery.
   research queue or dangling backlog crosses a threshold.
 - **Maintenance-ensure**: `wiki-maintain` cron runs `wiki_maintain.py fill`
   (qwen drafts grounded stubs for the top dangling links) daily, and the
-  **youtube-ingest** job is now wrapped in `sk-cron-run` — both land in the
+  **youtube-ingest** job is now wrapped in `sk-cron-run`, both land in the
   run-ledger, so a miss/failure becomes a GTD item + sk-alert automatically. That
   is the "make sure the maintenance/corpus jobs actually run" guarantee.
 - The pattern generalizes: any pipeline (skmemory consolidation, backups, model
@@ -298,19 +298,19 @@ report + capture machinery.
 |---|---|---|
 | **0** | Daily noise-sweep cron; `gtd-mail capture` (email→GTD, deduped); Email Brief 07:00; `sk-cron-run` wrapper + run-ledger; Ops Report 08:00; error-capture→GTD + sk-alert | **this session** |
 | **1** | Extract `gtd-ingest` port + `GtdSourceAdapter`/`GtdCapture`/`capture()` sink in skos; add `source_ref` to model; refactor ITIL→adapter; email adapter conforms | epic |
-| **2** | Local-LLM triage of primary mail (done); **calendar + telegram pull adapters** (done — `skos ingest <adapter>`); agent-escalation depth (open) | **done** |
+| **2** | Local-LLM triage of primary mail (done); **calendar + telegram pull adapters** (done, via `skos ingest <adapter>`); agent-escalation depth (open) | **done** |
 | **3** | **Bidirectional email** (done); **native `skos status`** (done); unified GTD surface in Obsidian/Claude Code (open) | **done** |
 
 **Pull adapters (`skos/adapters/`, drained by `skos ingest <name>`):**
-- **calendar** — timed commitments (meetings/classes/calls) in the next ~2 days →
+- **calendar**: timed commitments (meetings/classes/calls) in the next ~2 days →
   GTD next-actions, deduped by event id, routine noise filtered (doses/focus-blocks/…).
-- **telegram** — convention capture: a DM prefixed `todo:`/`task:`/`gtd:`/`remind:`
+- **telegram**: convention capture: a DM prefixed `todo:`/`task:`/`gtd:`/`remind:`
   → GTD inbox item, deduped by `chat:msg_id`. No trigger = ignored (zero noise).
 Both register on the `gtd-ingest` port; adding another pull source is one class.
 
 **Native CLI:** `skos status [email|cron|gtd|docs|corpus|all|report|corpus-check]`
 and `skos ingest <adapter>` (typer). `sk-status` is now a thin shim over the same
-`skos.status` module — one source of truth. (Fixed typer/click 8.1 compat en route.)
+`skos.status` module. One source of truth. (Fixed typer/click 8.1 compat en route.)
 
 Phase-0 code lives in the skos package (`skos/mail.py`, `skos/status.py`, `skos/adapters/`, `skos/scripts/`) and are intentionally shaped like the
 future adapters (`gtd-mail.py` = email adapter poll+capture; `sk-cron-run` = cron
@@ -319,7 +319,7 @@ adapter) so Phase-1 is a *lift into skos*, not a rewrite.
 ---
 
 ## 9. Non-goals / guardrails
-- Never delete/trash mail — label + archive only (reversible, searchable).
+- Never delete/trash mail: label + archive only (reversible, searchable).
 - Noise-sweep excludes starred/important.
 - Digests are idempotent reads; only `capture()` and label ops mutate state.
 - Secrets (gog keyring, Hermes creds) stay in existing stores; adapters read, never embed.

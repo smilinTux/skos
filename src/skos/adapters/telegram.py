@@ -1,7 +1,7 @@
 """Telegram → GTD pull adapter (skcapstone-telegram-backed).
 
 Convention-based capture (no noise): Chef marks a DM message with a trigger
-prefix — ``todo:`` / ``task:`` / ``gtd:`` / ``capture:`` / ``remind:`` — and this
+prefix (``todo:`` / ``task:`` / ``gtd:`` / ``capture:`` / ``remind:``) and this
 adapter files the rest as a GTD next-action. Deduped by ``chat:msg_id``, so
 re-polling never duplicates. Polls the last N messages of the capture chat
 (default: Chef's DM) since ``--since`` / GTD_TG_SINCE.

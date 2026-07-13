@@ -35,7 +35,7 @@ try: items=json.load(open(path)) if os.path.exists(path) else []
 except Exception: items=[]
 if not any(i.get("source_ref")==ref for i in items):
     items.append({"id":uuid.uuid4().hex[:12],
-        "text":f"cron FAILED: {job} (exit {rc}) — {tail[:160]}",
+        "text":f"cron FAILED: {job} (exit {rc}) - {tail[:160]}",
         "source":"cron","source_ref":ref,"privacy":"private","context":"@ops",
         "priority":"high","energy":None,"status":"inbox",
         "created_at":datetime.datetime.now(datetime.timezone.utc).isoformat()})

@@ -1,4 +1,4 @@
-# skmodels registry — TEMPLATE / committable reference.
+# skmodels registry: TEMPLATE / committable reference.
 # ===========================================================================
 # This is the SINGLE SOURCE OF TRUTH for which model each part of the stack
 # uses. Copy to ~/.skcapstone/models/registry.yaml (the live, Syncthing-synced
@@ -13,7 +13,7 @@
 #   roles     logical names the code asks for (never a raw url). Point a role
 #             at a backend to re-route everything using that role at once.
 #
-#   contexts  the TOGGLE. Override the role/backend for ONE named context —
+#   contexts  the TOGGLE. Override the role/backend for ONE named context,
 #             a group chat, a batch job, a service, an agent. Managed live
 #             with `skmodels set <key> <role|backend>`.
 #
@@ -39,7 +39,7 @@ backends:
     vision: false                       # true if the model accepts images
 
   # A vision-capable chat backend (mmproj loaded). vision: true is what
-  # sk-vision resolves against — never point sk-vision at a text-only model.
+  # sk-vision resolves against. Never point sk-vision at a text-only model.
   qwen-vl:
     url: http://100.81.238.58:11436/v1  # LAN alt: http://10.0.0.139:11436/v1
     model: Qwen3.6-27b-abliterated-Q4_K_M
@@ -56,10 +56,10 @@ backends:
     kind: embed
 
   # Hosted Claude Opus via SKGateway (.41:18780). Gateway role-routing is not
-  # yet wired here — keep commented until the route is verified, then point a
+  # yet wired here. Keep commented until the route is verified, then point a
   # role or context at `opus`. NOTE: the gateway resolve() special-cases the
   # backend name "opus" (and any anthropic-kind backend) to route through its
-  # OWN Anthropic backend (oauth + OpenAI->Messages translation) — it never
+  # OWN Anthropic backend (oauth + OpenAI->Messages translation). It never
   # dials the url below (which would loop back to :18780). Wired to sk-heavy.
   opus:
     url: http://192.168.0.41:18780/v1
@@ -91,7 +91,7 @@ contexts:
 defaults:
   role: sk-auto
 
-# Optional tuning for sk-auto difficulty routing (all keys optional — the
+# Optional tuning for sk-auto difficulty routing (all keys optional, the
 # gateway falls back to built-in defaults when this block is absent).
 # Classifier precedence:  image -> sk-vision  >  hard -> sk-heavy  >  sk-default
 # HARD when: user text > max_easy_chars, OR (code fence AND a hard verb),

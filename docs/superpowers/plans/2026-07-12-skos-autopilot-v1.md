@@ -45,7 +45,7 @@ class Board:
 ```
 `meta.autopilot` shape: `{phase, pr|artifact, merge:{sha,pr,branch,ts}, harness, scores:[{round,score,notes,ts,harness}], edits:[{field,old,new,ts,run_id}]}`.
 
-**skos `autopilot/types.py` (Phase B)** — exactly as spec section 10: `WorkItem, RepoSpec, AssessBrief, TaskBrief, GradeBrief, GateResult, Verdict, HarnessResult, DecisionItem`. RepoSpec fields: `name, path, base_branch, integration_branch, test_cmd, ci, coverage_cmd=None, ci_poll_timeout=1200, automerge=False, auto_revert=False, min_diff_coverage=0.8`.
+**skos `autopilot/types.py` (Phase B)**: exactly as spec section 10: `WorkItem, RepoSpec, AssessBrief, TaskBrief, GradeBrief, GateResult, Verdict, HarnessResult, DecisionItem`. RepoSpec fields: `name, path, base_branch, integration_branch, test_cmd, ci, coverage_cmd=None, ci_poll_timeout=1200, automerge=False, auto_revert=False, min_diff_coverage=0.8`.
 
 **skos `autopilot/harness.py` (Phase C):**
 ```python
@@ -80,10 +80,10 @@ EXECUTORS: dict[str, Executor]           # registry keyed by kind
 - `mcp_tools/coord_tools.py` (modify): `coord_score` tool + handler.
 
 **skos** (`~/clawd/skos/src/skos/autopilot/`, new package):
-- `types.py` — all dataclasses (Phase B). `config.py` — `autopilot.yaml` + `repo_map` loading (Phase B). `journal.py` — run journal read/write (Phase B).
-- `harness.py` — `HarnessAdapter` protocol + capability matrix (Phase C). `claude_code.py` — ClaudeCodeAdapter: argv build, sandbox (confined Bash + pinned egress), injection framing (Phase C).
-- `executor.py` — `Executor` protocol + registry (Phase D). `orchestrator.py` — phases 0-3, dry-run (Phase D). `digest.py` — numbered digest build + send (Phase D/F). `resolver.py` — `answer()` (Phase F). `stubs.py` — non-engineering executors (Phase G).
-- `engineering.py` — engineering executor: repo resolution, claim+lease, worktree, grade-to-5/5, external-CI gate, finalize, revert (Phase E). `ci.py` — external CI verdict + diff-coverage (Phase E). `runbook_index.py` — deferred to v1.5 (ops), not in this plan.
+- `types.py`: all dataclasses (Phase B). `config.py`: `autopilot.yaml` + `repo_map` loading (Phase B). `journal.py`: run journal read/write (Phase B).
+- `harness.py`: `HarnessAdapter` protocol + capability matrix (Phase C). `claude_code.py`: ClaudeCodeAdapter: argv build, sandbox (confined Bash + pinned egress), injection framing (Phase C).
+- `executor.py`: `Executor` protocol + registry (Phase D). `orchestrator.py`: phases 0-3, dry-run (Phase D). `digest.py`: numbered digest build + send (Phase D/F). `resolver.py`: `answer()` (Phase F). `stubs.py`: non-engineering executors (Phase G).
+- `engineering.py`: engineering executor: repo resolution, claim+lease, worktree, grade-to-5/5, external-CI gate, finalize, revert (Phase E). `ci.py`: external CI verdict + diff-coverage (Phase E). `runbook_index.py`: deferred to v1.5 (ops), not in this plan.
 - `cli.py` (modify existing skos `cli.py`): `skos autopilot {run, answer, list, status, show, revert, send}` (Phase F).
 - `capabilities.yaml` (modify): `autopilot` line (Phase G).
 

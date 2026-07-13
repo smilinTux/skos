@@ -1,4 +1,4 @@
-"""gtd-ingest PULL adapters — poll an external source, emit GtdCapture, drain into
+"""gtd-ingest PULL adapters: poll an external source, emit GtdCapture, drain into
 the unified GTD via the capture() sink. Registered on the `gtd-ingest` port.
 
     skos ingest calendar     # drain the calendar adapter once

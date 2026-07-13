@@ -1,4 +1,4 @@
-"""skos operator CLI. Mirrors `opensrc path` ergonomics — `skos path <subdir>` prints abs path."""
+"""skos operator CLI. Mirrors `opensrc path` ergonomics: `skos path <subdir>` prints abs path."""
 from __future__ import annotations
 
 import typer
@@ -9,7 +9,7 @@ from skos.descriptor import load_descriptor
 from skos.packaging.oci import OciAdapter
 from skos import resolver as _resolver
 
-app = typer.Typer(help="skos — filesystem & packaging foundation")
+app = typer.Typer(help="skos: filesystem & packaging foundation")
 
 
 @app.command()
@@ -220,7 +220,7 @@ def up_cmd(
         typer.echo(f"  {marker} {outcome.capability:<14}  {outcome.adapter}  ({outcome.status}){note}")
 
 
-secret_app = typer.Typer(help="skvault — sovereign secret storage")
+secret_app = typer.Typer(help="skvault: sovereign secret storage")
 app.add_typer(secret_app, name="secret")
 
 
@@ -228,7 +228,7 @@ app.add_typer(secret_app, name="secret")
 # Brain sub-commands: init / index / validate
 # ---------------------------------------------------------------------------
 
-brain_app = typer.Typer(help="skos brain — Infinite Brain entity-graph ontology")
+brain_app = typer.Typer(help="skos brain: Infinite Brain entity-graph ontology")
 app.add_typer(brain_app, name="brain")
 
 
@@ -247,7 +247,7 @@ def brain_init_cmd(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"skos brain init — entity-graph skeleton scaffolded")
+    typer.echo(f"skos brain init: entity-graph skeleton scaffolded")
     typer.echo(f"  wiki root  : {(wiki_root or Path('~/clawd/wiki').expanduser().resolve())}")
     typer.echo(f"  namespaces : {len(result)}")
     for ns, idx_path in result.items():
@@ -321,7 +321,7 @@ def brain_validate_cmd(
 # Surface sub-commands: list / ls / read / write  (runtime-adapter layer)
 # ---------------------------------------------------------------------------
 
-surface_app = typer.Typer(help="skos surface — runtime adapters over the brain")
+surface_app = typer.Typer(help="skos surface: runtime adapters over the brain")
 app.add_typer(surface_app, name="surface")
 
 
