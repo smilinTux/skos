@@ -74,3 +74,32 @@ class Config:
             digest_chat=raw.get("digest_chat"),
             epic_id=raw.get("epic_id"),
         )
+
+
+_AUTOPILOT_JOB_YAML = """\
+autopilot-daily:
+  schedule: "30 6 * * *"
+  type: shell
+  nodes: [noroc2027]
+  command: >
+    /usr/bin/flock -n /home/cbrd21/.skcapstone/scheduler/autopilot-daily.lock
+    /home/cbrd21/clawd/skos/scripts/sk-cron-run.sh autopilot-daily
+    /home/cbrd21/.skenv/bin/skos autopilot run --once
+  timeout: 3600
+  retries: 0
+  jitter: 30
+  notify: on_failure
+  notify_level: warn
+  catchup: false
+  enabled: true
+"""
+
+
+def render_autopilot_job_yaml() -> str:
+    """Return the literal `autopilot-daily` scheduler block (spec section 13).
+
+    Ready to paste under the top-level `jobs:` map in
+    ~/.skcapstone/config/jobs.yaml. Kept as source-of-truth here so the block
+    is testable even though the live synced config is edited by hand.
+    """
+    return _AUTOPILOT_JOB_YAML
