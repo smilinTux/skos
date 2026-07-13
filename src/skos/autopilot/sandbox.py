@@ -41,10 +41,15 @@ class Sandbox:
         wt = os.path.realpath(spec.worktree)
         argv = [
             self.docker, "run", "--rm", "--network", network,
-            "--user", "sbx", "--workdir", "/work",
-            "--read-only", "--tmpfs", "/tmp", "--tmpfs", "/home/sbx",
+            # run as the host uid:gid so the bind-mounted worktree is writable;
+            # still non-root-privileged (caps dropped, no-new-privileges, read-only
+            # rootfs, no docker socket), so confinement holds.
+            "--user", f"{os.getuid()}:{os.getgid()}", "--workdir", "/work",
+            "--read-only", "--tmpfs", "/tmp:mode=1777",
+            "--tmpfs", "/home/sbx:mode=1777",       # writable HOME for an arbitrary uid
             "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
             "--pids-limit", "512",
+            "--env", "HOME=/home/sbx",
             "--mount", f"type=bind,src={wt},dst=/work",
             "--env", f"HTTPS_PROXY=http://{proxy_alias}:{PROXY_PORT}",
             "--env", f"HTTP_PROXY=http://{proxy_alias}:{PROXY_PORT}",
