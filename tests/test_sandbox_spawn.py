@@ -31,7 +31,10 @@ def test_spawn_runs_container_and_tears_down(monkeypatch):
     assert out == {"result": {"ok": True}}
     kinds = [c[1] for c in calls if c and c[0] == "docker"]
     assert "network" in kinds and "run" in kinds          # created a network and ran
-    assert any(c[0] == "docker" and "network" in c and "rm" in c for c in calls)  # teardown
+    assert any(c[0] == "docker" and "network" in c and "rm" in c for c in calls)  # net teardown
+    # the harness container is torn down by name (rm -f), not just the network/proxy
+    assert any(c[0] == "docker" and c[1] == "rm" and "-f" in c and
+              any(str(a).startswith("sbxrun-") for a in c) for c in calls)
     # the proxy was started with the assembled allowlist (repo + ci + egress hosts)
     proxy_start = next(c for c in calls if c[0] == "docker" and "run" in c and "-d" in c)
     for host in ("github.com", "ci.local", "gw.local"):

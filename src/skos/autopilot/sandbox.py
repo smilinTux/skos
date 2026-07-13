@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -33,14 +34,20 @@ class LaunchSpec:
 
 
 class Sandbox:
-    def __init__(self, live_execution: bool = False, docker: str = "docker") -> None:
+    def __init__(self, live_execution: bool = False, docker: str = "docker",
+                 run_timeout: int = 1800) -> None:
         self.live_execution = live_execution
         self.docker = docker
+        self.run_timeout = run_timeout
 
-    def _docker_run_argv(self, spec: LaunchSpec, network: str, proxy_alias: str) -> list[str]:
+    def _docker_run_argv(self, spec: LaunchSpec, network: str, proxy_alias: str,
+                         container_name: str | None = None) -> list[str]:
         wt = os.path.realpath(spec.worktree)
-        argv = [
-            self.docker, "run", "--rm", "--network", network,
+        argv = [self.docker, "run"]
+        if container_name:
+            argv += ["--name", container_name]
+        argv += [
+            "--rm", "--network", network,
             # run as the host uid:gid so the bind-mounted worktree is writable;
             # still non-root-privileged (caps dropped, no-new-privileges, read-only
             # rootfs, no docker socket), so confinement holds.
@@ -79,9 +86,11 @@ class Sandbox:
                 "harness.live_execution=true only after the confinement proof passes.")
         self._ensure_capable(spec)
         allow = [h for h in ([repo_remote_host, ci_host] + list(spec.egress_hosts)) if h]
-        net = f"sbxnet-{os.getpid()}-{len(allow)}"
+        token = secrets.token_hex(4)
+        net = f"sbxnet-{token}"
         proxy_alias = "sbxproxy"
-        proxy_name = f"{proxy_alias}-{os.getpid()}"
+        proxy_name = f"sbxproxy-{token}"
+        harness_name = f"sbxrun-{token}"
         try:
             subprocess.run([self.docker, "network", "create", "--internal", net],
                            capture_output=True, text=True, check=True)
@@ -94,12 +103,18 @@ class Sandbox:
                 capture_output=True, text=True, check=True)
             subprocess.run([self.docker, "network", "connect", "bridge", proxy_name],
                            capture_output=True, text=True)          # give proxy outward egress
-            proc = subprocess.run(self._docker_run_argv(spec, net, proxy_alias),
-                                  capture_output=True, text=True, cwd=spec.worktree)
+            try:
+                proc = subprocess.run(
+                    self._docker_run_argv(spec, net, proxy_alias, container_name=harness_name),
+                    capture_output=True, text=True, cwd=spec.worktree, timeout=self.run_timeout)
+            except subprocess.TimeoutExpired:
+                return {"result": "", "is_error": True, "exit_code": 124, "timeout": True}
             try:
                 return json.loads(proc.stdout or "{}")
             except json.JSONDecodeError:
-                return {"result": proc.stdout, "stderr": proc.stderr, "exit_code": proc.returncode}
+                return {"result": proc.stdout, "stderr": proc.stderr,
+                        "exit_code": proc.returncode, "is_error": proc.returncode != 0}
         finally:
+            subprocess.run([self.docker, "rm", "-f", harness_name], capture_output=True, text=True)
             subprocess.run([self.docker, "rm", "-f", proxy_name], capture_output=True, text=True)
             subprocess.run([self.docker, "network", "rm", net], capture_output=True, text=True)
