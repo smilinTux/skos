@@ -276,7 +276,8 @@ def run_once(*, board, harness, config, tasks_dir=None, run_id=None, dry_run=Non
 
     report = phase3_report(decisions, dry_run=dry)
     journal.write_run(run_id, {"run_id": run_id, "phase": "report", "items": state,
-                               "decisions": len(decisions), "dry_run": dry})
+                               "decisions": len(decisions), "dry_run": dry,
+                               "preview": report.get("digest_preview") if dry else None})
     return {"run_id": run_id, "dry_run": dry,
             "selected": [it.ref for it, _ in selected],
             "decisions": len(decisions), "report": report}
