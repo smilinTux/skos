@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""skos.status — realtime skos status (backs `skos status` and the sk-status shim) across email, cron/scheduled work, and GTD.
+"""skos.status: realtime skos status (backs `skos status` and the sk-status shim) across email, cron/scheduled work, and GTD.
 
   sk-status              # everything, human-readable
   sk-status email        # per-box inbox / action / waiting counts (live gog)
@@ -46,7 +46,7 @@ def email_status() -> dict:
 
 # all accounts are scanned for recent docs; most-recent-across-all is what surfaces
 DOC_ACCOUNTS = os.environ.get("GTD_DOC_ACCOUNTS", ",".join(ACCOUNTS)).split(",")
-# Nextcloud GTD roots — offline during the outage (~restored 2026-08); when the
+# Nextcloud GTD roots, offline during the outage (~restored 2026-08); when the
 # folder reappears its p/ (projects) and r/ (reference) files are picked up
 # automatically, no code change. Extra roots via GTD_DOC_DIRS (colon-separated).
 NEXTCLOUD_ROOTS = [Path.home() / "dkloud.douno.it"] + \
@@ -65,7 +65,7 @@ def recent_docs(n: int = 10, days: int = 21) -> list[dict]:
                                  capture_output=True, text=True, timeout=90).stdout
             for f in json.loads(out).get("files", []):
                 mime = f.get("mimeType", "")
-                # docs only — skip folders, audio/video/image/archives
+                # docs only: skip folders, audio/video/image/archives
                 if "folder" in mime or mime.split("/", 1)[0] in ("audio", "video", "image"):
                     continue
                 mt = f.get("modifiedTime", "")
@@ -187,11 +187,11 @@ def corpus_check() -> None:
     dang = w.get("dangling", 0) or 0
     if dang > WIKI_DANGLING_THRESHOLD:
         if sink(GtdCapture(
-            text=f"wiki dangling-link backlog spiking: {dang} holes — wiki_maintain fill falling behind",
+            text=f"wiki dangling-link backlog spiking: {dang} holes. wiki_maintain fill is falling behind",
             source="wiki", source_ref=f"wiki:dangling@{bucket}", context="@wiki",
             priority="medium", status="next", meta={"wiki_dangling": dang})):
             fired.append(f"dangling={dang}>{WIKI_DANGLING_THRESHOLD}")
-    print(f"corpus-check: {('captured ' + ', '.join(fired)) if fired else 'below thresholds — no capture'}")
+    print(f"corpus-check: {('captured ' + ', '.join(fired)) if fired else 'below thresholds: no capture'}")
 
 def gtd_status() -> dict:
     out = {}
@@ -249,7 +249,7 @@ def render(sections: set[str]) -> str:
     if "cron" in sections:
         cs = cron_status(); L.append("⏱  CRON / SCHEDULED (last 24h)")
         if not cs:
-            L.append("  (no runs recorded — wrap jobs with sk-cron-run)")
+            L.append("  (no runs recorded: wrap jobs with sk-cron-run)")
         for job, v in sorted(cs.items()):
             mark = "✅" if v["last_ok"] else "❌"
             L.append(f"  {mark} {job:24s} runs={v['runs']} ok={v['ok']} fail={v['fail']} "
@@ -260,7 +260,7 @@ def render(sections: set[str]) -> str:
     if "docs" in sections:
         rd = recent_docs(); L.append("📄 RECENT DOCS (worked on)")
         if not rd:
-            L.append("  (none in window — Drive scanned; Nextcloud offline until ~Aug)")
+            L.append("  (none in window: Drive scanned; Nextcloud offline until ~Aug)")
         for d in rd:
             L.append(f"  {d['when']}  {d['name'][:52]:52s}  {d['where']}")
         L.append("")
@@ -305,11 +305,13 @@ def run(argv=None):
                   else "✅ all scheduled work green")
         # Telegram: the tables are fixed-width, so wrap them in a monospace code
         # fence to preserve column alignment; bold title lives outside the block.
-        tg_body = f"📊 *skos Ops Report — {d}*\n\n```\n{report}\n\n{footer}\n```"
+        tg_body = f"📊 *skos Ops Report: {d}*\n\n```\n{report}\n\n{footer}\n```"
+        # single bold title lives inside tg_body (outside the fence); no --subject
+        # header, or Hermes prepends a second identical title (double-title bug).
         subprocess.run(["hermes", "send", "--to", HERMES_DM,
-                        "--subject", f"📊 skos Ops Report — {d}", tg_body], capture_output=True, text=True)
+                        tg_body], capture_output=True, text=True)
         # console/log copy stays plain-text (no fences)
-        print(f"📊 skos Ops Report — {d}\n\n{report}\n\n{footer}")
+        print(f"📊 skos Ops Report: {d}\n\n{report}\n\n{footer}")
         return
     sections = {"email", "cron", "docs", "corpus", "gtd"} if cmd in ("all", "") else {cmd}
     if as_json:

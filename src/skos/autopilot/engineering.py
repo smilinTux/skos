@@ -3,13 +3,14 @@ isolated worktree, grade to 5/5 behind the external-CI twin gate, finalize.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .ci import external_ci_verdict, diff_coverage
-from .types import GateResult, GradeBrief, RepoSpec, TaskBrief, WorkItem
+from .types import DecisionItem, GateResult, GradeBrief, RepoSpec, TaskBrief, WorkItem
 
 
 def _now_iso() -> str:
@@ -109,10 +110,20 @@ class EngineeringExecutor:
                               capture_output=True, text=True)
         return proc.stdout.strip()
 
+    def escalate(self, item: WorkItem, reason: str) -> DecisionItem:
+        """Queue a decision for a non-converging item (mirrors the stub shape)."""
+        qid = hashlib.sha1(f"engineering:{item.ref}:{reason}".encode()).hexdigest()[:12]
+        return DecisionItem(qid=qid,
+                            prompt=f"Engineering task {item.ref} did not converge: {reason}",
+                            options={"take": "take", "defer": "defer"},
+                            action_ref=item.ref, priority="high")
+
     def run(self, item: WorkItem, harness) -> GateResult:
+        self.claim(item)                    # claim before any work: no double-execution
         repo = self.resolve_repo(item)
         p = item.payload
         wt = self.make_worktree(item, repo)
+        self.journal.set_worktree(item.ref, wt)   # so finalize() can find this worktree
         pr_branch = f"autopilot/{item.ref}"
         feedback: str | None = None
         last: GateResult | None = None
@@ -188,7 +199,7 @@ class EngineeringExecutor:
             # leave the task claimed (not completed) until the operator approves
 
 
-def _revert_impl(board, config, task_id: str, agent: str = "autopilot") -> None:
+def _revert_impl(board, config, task_id: str, agent: str = "autopilot") -> dict:
     """Revert the recorded merge commit and reopen the coord task.
 
     Governance: autopilot reverts only a merge it recorded (meta.autopilot.merge).
@@ -213,6 +224,7 @@ def _revert_impl(board, config, task_id: str, agent: str = "autopilot") -> None:
         task_id,
         lambda d: d.setdefault("meta", {}).setdefault("autopilot", {})
                   .__setitem__("reverted", {"sha": merge["sha"], "ts": _now_iso()}))
+    return {"task_id": task_id, "reverted_sha": merge["sha"], "reopened": True}
 
 
 def _load_board():
