@@ -183,3 +183,47 @@ def test_phase1_no_executor_queues_decision(clean_execs):
     item = WorkItem(kind="research", ref="t-4", source="email", repo=None, payload={"id": "t-4", "tags": []})
     selected = orch.phase1_triage([item], MagicMock(), repo_map={}, decisions=decisions)
     assert selected == [] and len(decisions) == 1
+
+
+@pytest.fixture(autouse=True)
+def fake_journal(monkeypatch):
+    writes = []
+    ns = SimpleNamespace(read_run=lambda rid: {}, write_run=lambda rid, d: writes.append((rid, d)))
+    monkeypatch.setattr(orch, "journal", ns)
+    return writes
+
+
+class _RunExec:
+    kind = "engineering"
+    def __init__(self, result):
+        self._result = result
+        self.run = MagicMock(return_value=result)
+        self.finalize = MagicMock()
+        self.escalate = MagicMock(return_value=DecisionItem(qid="e", prompt="stuck",
+                                  options={}, action_ref="t", priority="high"))
+    def selectable(self, item): return True
+
+
+def test_phase2_finalizes_and_scores_on_pass():
+    ex = _RunExec(GateResult(score=5, passed=True, notes="ok", artifact="pr#1"))
+    board = MagicMock(); harness = SimpleNamespace(name="claude-code")
+    decisions = []
+    state = orch.phase2_swarm([(_wi("t-1"), ex)], harness=harness, board=board,
+                              caps=Caps(), ledger=CapLedger(Caps()), decisions=decisions,
+                              run_id="r1")
+    ex.run.assert_called_once()
+    ex.finalize.assert_called_once()
+    board.score_task.assert_called_once()
+    assert board.score_task.call_args.kwargs["score"] == 5
+    assert state["t-1"]["state"] == "finalized" and decisions == []
+
+
+def test_phase2_escalates_on_non_convergence():
+    ex = _RunExec(GateResult(score=4, passed=False, notes="thin tests", artifact=None))
+    board = MagicMock(); decisions = []
+    state = orch.phase2_swarm([(_wi("t-2"), ex)], harness=SimpleNamespace(name="h"),
+                              board=board, caps=Caps(), ledger=CapLedger(Caps()),
+                              decisions=decisions, run_id="r1")
+    ex.finalize.assert_not_called()
+    ex.escalate.assert_called_once()
+    assert state["t-2"]["state"] == "escalated" and len(decisions) == 1

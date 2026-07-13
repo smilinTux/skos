@@ -167,3 +167,34 @@ def phase1_triage(candidates, harness, *, repo_map, decisions) -> list[tuple[Wor
                 options={"take": "take", "defer": "defer"},
                 action_ref=item.ref, priority="medium"))
     return selected
+
+
+def phase2_swarm(selected, *, harness, board, caps: Caps, ledger: CapLedger,
+                 decisions, run_id: str, state=None, enabled: bool = True) -> dict:
+    """Run each routed item's produce-then-grade loop, write each round's score to
+    the coord record, finalize cleared items and escalate non-converging ones. The
+    token/dollar ceiling is checked between items (spec section 14). v1 is sequential
+    (concurrency 1, always <= caps.max_concurrent)."""
+    state = dict(state or {})
+    for item, ex in selected:                       # concurrency cap: caps.max_concurrent
+        if kill_switch_active(enabled):
+            break
+        if ledger.exceeded():
+            decisions.append(DecisionItem(qid=stable_qid("budget-hit", run_id),
+                prompt="Autopilot hit its run token/dollar ceiling; stopped early.",
+                options={"ok": "acknowledge"}, action_ref=run_id, priority="high"))
+            break
+        result = ex.run(item, harness)
+        rnd = int((state.get(item.ref, {}).get("round", 0) or 0)) + 1
+        board.score_task(item.ref, round=rnd, score=result.score or 0,
+                         notes=result.notes, harness=getattr(harness, "name", ""),
+                         phase="grade")
+        ledger.add(getattr(result, "tokens", 0), getattr(result, "cost_usd", 0.0))
+        if result.passed:
+            ex.finalize(item, result)
+            state[item.ref] = {"state": "finalized", "round": rnd, "score": result.score}
+        else:
+            decisions.append(ex.escalate(item, result.notes))
+            state[item.ref] = {"state": "escalated", "round": rnd, "score": result.score}
+        journal.write_run(run_id, {"run_id": run_id, "phase": "swarm", "items": state})
+    return state
