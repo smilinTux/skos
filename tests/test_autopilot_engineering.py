@@ -210,3 +210,48 @@ def test_twin_gate_blocks_when_coverage_under_min(mocker, cfg):
     ex, harness, item = _run_ex(mocker, cfg, grades, ci_status="green", cov=0.5)
     res = ex.run(item, harness)
     assert res.passed is False
+
+
+def _final_ex(mocker, cfg, repo_name, ci_status="green"):
+    ex = EngineeringExecutor(cfg, board=mocker.Mock(), journal=mocker.Mock(),
+                             digest=mocker.Mock())
+    ex.journal.worktree_for.return_value = "/wt/t1"
+    mocker.patch.object(ex, "_head_sha", return_value="sha1")
+    mocker.patch.object(ex, "prune_worktree")
+    mocker.patch.object(ex, "_merge", return_value="mergesha")
+    mocker.patch.object(ex, "_open_pr", return_value="https://gh/pr/1")
+    mocker.patch("skos.autopilot.engineering.external_ci_verdict", return_value=ci_status)
+    item = WorkItem(kind="engineering", ref="t1", source="coord", repo=None,
+                    payload={"tags": [f"repo:{repo_name}"], "title": "t"})
+    return ex, item
+
+
+def test_finalize_automerges_when_whitelisted_and_green(mocker):
+    spec = _spec("skrender"); spec.automerge = True; spec.ci = "github"
+    cfg = _t.SimpleNamespace(repo_map={"skrender": spec}, automerge_repos=["skrender"])
+    ex, item = _final_ex(mocker, cfg, "skrender", ci_status="green")
+    ex.finalize(item, GateResult(score=5, passed=True, notes="", artifact="pr"))
+    ex._merge.assert_called_once()
+    ex.board.complete_task.assert_called_once_with("autopilot", "t1")
+    ex.board._write_task_raw.assert_called_once()   # records meta.autopilot.merge
+    ex.digest.queue_decision.assert_not_called()
+
+
+def test_finalize_pr_only_when_not_whitelisted(mocker):
+    spec = _spec("skrender"); spec.automerge = True; spec.ci = "github"
+    cfg = _t.SimpleNamespace(repo_map={"skrender": spec}, automerge_repos=[])  # not whitelisted
+    ex, item = _final_ex(mocker, cfg, "skrender", ci_status="green")
+    ex.finalize(item, GateResult(score=5, passed=True, notes="", artifact="pr"))
+    ex._merge.assert_not_called()
+    ex.board.complete_task.assert_not_called()      # left claimed
+    ex._open_pr.assert_called_once()
+    ex.digest.queue_decision.assert_called_once()
+
+
+def test_finalize_pr_only_when_ci_red(mocker):
+    spec = _spec("skrender"); spec.automerge = True; spec.ci = "github"
+    cfg = _t.SimpleNamespace(repo_map={"skrender": spec}, automerge_repos=["skrender"])
+    ex, item = _final_ex(mocker, cfg, "skrender", ci_status="red")
+    ex.finalize(item, GateResult(score=5, passed=True, notes="", artifact="pr"))
+    ex._merge.assert_not_called()
+    ex._open_pr.assert_called_once()

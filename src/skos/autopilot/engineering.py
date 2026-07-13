@@ -144,3 +144,45 @@ class EngineeringExecutor:
                           notes=f"did not converge in {self._MAX_ROUNDS} rounds: "
                                 f"{strip_promise(last.notes) if last else ''}",
                           artifact=(last.artifact if last else None))
+
+    def _merge(self, repo: RepoSpec, pr_branch: str) -> str:
+        subprocess.run(["git", "-C", repo.path, "checkout", repo.integration_branch],
+                       check=True, capture_output=True, text=True)
+        subprocess.run(["git", "-C", repo.path, "merge", "--no-ff", pr_branch],
+                       check=True, capture_output=True, text=True)
+        proc = subprocess.run(["git", "-C", repo.path, "rev-parse", "HEAD"],
+                              capture_output=True, text=True)
+        return proc.stdout.strip()
+
+    def _open_pr(self, repo: RepoSpec, pr_branch: str, item: WorkItem) -> str:
+        proc = subprocess.run(
+            ["gh", "pr", "create", "--head", pr_branch, "--base", repo.integration_branch,
+             "--title", f"autopilot: {item.payload.get('title', item.ref)}",
+             "--body", f"Autopilot task {item.ref}"],
+            cwd=repo.path, capture_output=True, text=True)
+        return proc.stdout.strip()
+
+    def finalize(self, item: WorkItem, result: GateResult) -> None:
+        repo = self.resolve_repo(item)
+        wt = self.journal.worktree_for(item.ref)
+        pr_branch = f"autopilot/{item.ref}"
+        ci_status = external_ci_verdict(repo, pr_branch, self._head_sha(wt))
+        automerge = (repo.name in self.config.automerge_repos
+                     and repo.ci != "none" and ci_status == "green"
+                     and result.passed and repo.automerge)
+        if automerge:
+            sha = self._merge(repo, pr_branch)
+            merge = {"sha": sha, "pr": None, "branch": pr_branch, "ts": _now_iso()}
+            self.board._write_task_raw(
+                item.ref,
+                lambda d: d.setdefault("meta", {}).setdefault("autopilot", {})
+                          .__setitem__("merge", merge))
+            self.board.complete_task("autopilot", item.ref)
+            self.prune_worktree(repo, wt)
+        else:
+            pr_url = self._open_pr(repo, pr_branch, item)
+            self.digest.queue_decision(
+                prompt=f"Merge PR {pr_url} for task {item.ref}?",
+                options={"yes": "merge", "no": "close", "defer": "later"},
+                action_ref=f"merge:{item.ref}", priority="high")
+            # leave the task claimed (not completed) until the operator approves
