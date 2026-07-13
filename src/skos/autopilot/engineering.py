@@ -45,3 +45,9 @@ class EngineeringExecutor:
         if not (p.get("acceptance") or p.get("deliverable")):
             return False
         return True
+
+    def claim(self, item: WorkItem) -> None:
+        """Claim the coord task before any work (a second runtime cannot double-
+        execute), then record the lease start so a crash is reclaimable."""
+        self.board.claim_task("autopilot", item.ref)
+        self.journal.record_claim(item.ref, claimed_at=_now_iso())
