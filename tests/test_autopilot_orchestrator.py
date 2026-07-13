@@ -312,3 +312,28 @@ def test_dry_run_is_read_only(tmp_path, monkeypatch, clean_execs, fake_journal):
     assert out["dry_run"] is True
     assert out["report"]["dry_run"] is True and "digest_preview" in out["report"]
     assert any(rid == "rdry" for rid, _ in fake_journal)  # journal entry written
+
+
+def test_kill_switch_stops_before_swarm(tmp_path, monkeypatch, clean_execs, fake_journal):
+    monkeypatch.setenv("SKOS_AUTOPILOT_OFF", "1")
+    _write_task(tmp_path, "t-1", tags=["repo:skos"], acceptance_criteria=["x"])
+    ex = _RunExec(GateResult(5, True, "ok", "pr")); EXECUTORS["engineering"] = ex
+    board = _board(["t-1"])
+    harness = SimpleNamespace(name="h", assess=lambda b: Verdict(verdict="valid", reason=""))
+    out = orch.run_once(board=board, harness=harness, config=_config(),
+                        tasks_dir=tmp_path, run_id="rk")
+    ex.run.assert_not_called()                       # never entered Phase 2
+    assert out["stopped"] == "kill_switch"
+
+
+def test_caps_stop_and_escalate_between_items(clean_execs, fake_journal):
+    ex = _RunExec(GateResult(5, True, "ok", "pr")); EXECUTORS["engineering"] = ex
+    board = MagicMock()
+    ledger = CapLedger(Caps(max_tokens_per_run=100)); ledger.tokens = 200  # already over
+    decisions = []
+    state = orch.phase2_swarm([(_wi("t-1"), ex), (_wi("t-2"), ex)],
+                              harness=SimpleNamespace(name="h"), board=board,
+                              caps=Caps(), ledger=ledger, decisions=decisions, run_id="rc")
+    ex.run.assert_not_called()                       # stopped before any run
+    assert state == {}
+    assert len(decisions) == 1 and "budget" in decisions[0].prompt.lower()
