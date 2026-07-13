@@ -74,9 +74,14 @@ def classify_kind(task: dict) -> str:
                                                             "engineering")
 
 
-def _to_workitem(task: dict) -> WorkItem:
+def _to_workitem(task: dict, *, unblocked: bool = True, verdict: str = "valid") -> WorkItem:
+    """Build a WorkItem, enriching the payload with the phase-0 facts the executor's
+    selectable/run contract reads (unblocked, verdict) and mapping coord's
+    acceptance_criteria onto the `acceptance` key the executor expects."""
+    payload = {**task, "unblocked": unblocked, "verdict": verdict,
+               "acceptance": task.get("acceptance_criteria") or task.get("acceptance") or []}
     return WorkItem(kind=classify_kind(task), ref=task["id"],
-                    source=task.get("source", "coord"), repo=repo_tag(task), payload=task)
+                    source=task.get("source", "coord"), repo=repo_tag(task), payload=payload)
 
 
 def deepdive_spawn(board, proposals, *, caps: Caps, run_id: str,
@@ -115,12 +120,12 @@ def phase0_assess(*, board, harness, tasks_dir, caps: Caps, run_id: str,
                             codebase_context=codebase_context)
         v = harness.assess(brief)
         if v.verdict == "valid":
-            candidates.append(_to_workitem(t))
+            candidates.append(_to_workitem(t, verdict="valid"))
         elif v.verdict == "stale":
             if not dry_run:
                 board.update_task(tid, description=v.updated_description,
                                   acceptance_criteria=v.updated_acceptance, run_id=run_id)
-            candidates.append(_to_workitem(t))
+            candidates.append(_to_workitem(t, verdict="stale"))
         elif v.verdict == "obsolete":
             if not dry_run:
                 board.close_task_obsolete(tid, v.reason, run_id=run_id)
