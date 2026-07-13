@@ -186,9 +186,6 @@ def phase2_swarm(selected, *, harness, board, caps: Caps, ledger: CapLedger,
             break
         result = ex.run(item, harness)
         rnd = int((state.get(item.ref, {}).get("round", 0) or 0)) + 1
-        board.score_task(item.ref, round=rnd, score=result.score or 0,
-                         notes=result.notes, harness=getattr(harness, "name", ""),
-                         phase="grade")
         ledger.add(getattr(result, "tokens", 0), getattr(result, "cost_usd", 0.0))
         if result.passed:
             ex.finalize(item, result)
