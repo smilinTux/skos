@@ -17,12 +17,15 @@ _RED_CONCLUSIONS = {"failure", "cancelled", "timed_out",
                     "action_required", "startup_failure"}
 
 
-def external_ci_verdict(repo: RepoSpec, pr_branch: str, head_sha: str) -> str:
+def external_ci_verdict(repo: RepoSpec, pr_branch: str, head_sha: str,
+                        worktree: str | None = None) -> str:
     """Return green|red|pending|none for the repo's external CI over head_sha.
 
     github-actions: poll `gh run list` up to ci_poll_timeout, map the run whose
     headSha matches. success -> green; a failing/unknown conclusion -> red; a
     poll timeout -> red. NEVER green on an unknown conclusion or a timeout.
+    local:<cmd> runs in the worktree (where the harness's edits live) so it gates
+    the current work, not the base checkout.
     """
     if repo.ci == "none":
         return "none"
@@ -42,7 +45,7 @@ def external_ci_verdict(repo: RepoSpec, pr_branch: str, head_sha: str) -> str:
             time.sleep(_POLL_INTERVAL)
     if repo.ci.startswith("local:"):
         cmd = repo.ci[len("local:"):]
-        proc = subprocess.run(cmd, shell=True, cwd=repo.path,
+        proc = subprocess.run(cmd, shell=True, cwd=(worktree or repo.path),
                               capture_output=True, text=True)
         return "green" if proc.returncode == 0 else "red"
     return "red"

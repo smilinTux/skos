@@ -135,7 +135,7 @@ class EngineeringExecutor:
                            prior_feedback=feedback, round=rnd)
             harness.run_task(tb)
             diff = self._diff(repo, wt)
-            ci_status = external_ci_verdict(repo, pr_branch, self._head_sha(wt))
+            ci_status = external_ci_verdict(repo, pr_branch, self._head_sha(wt), worktree=wt)
             cov = diff_coverage(repo, wt, diff)
             gb = GradeBrief(task_id=item.ref, repo=repo, worktree=wt, diff=diff,
                             acceptance=p.get("acceptance", []),
@@ -165,6 +165,23 @@ class EngineeringExecutor:
                               capture_output=True, text=True)
         return proc.stdout.strip()
 
+    def _commit_and_push(self, repo: RepoSpec, wt: str, pr_branch: str, item: WorkItem) -> None:
+        """Commit the harness's worktree edits onto pr_branch and push. The harness
+        edits the worktree but does not commit, so a PR/merge would otherwise have
+        no commits. Push is best-effort (a repo with no origin stays local)."""
+        subprocess.run(["git", "-C", wt, "add", "-A"], check=True, capture_output=True, text=True)
+        # never commit autopilot's own CI/coverage byproducts (generated during the
+        # twin-gate loop, not the harness's work)
+        subprocess.run(["git", "-C", wt, "reset", "-q", "--",
+                        "coverage.xml", ".coverage", ".pytest_cache",
+                        ":(glob)**/__pycache__/**", ":(glob)**/*.pyc"],
+                       capture_output=True, text=True)
+        title = item.payload.get("title", item.ref)
+        subprocess.run(["git", "-C", wt, "commit", "-m", f"autopilot: {title}"],
+                       capture_output=True, text=True)          # no-op commit tolerated
+        subprocess.run(["git", "-C", wt, "push", "-u", "origin", pr_branch],
+                       capture_output=True, text=True)          # best-effort (needs origin)
+
     def _open_pr(self, repo: RepoSpec, pr_branch: str, item: WorkItem) -> str:
         proc = subprocess.run(
             ["gh", "pr", "create", "--head", pr_branch, "--base", repo.integration_branch,
@@ -177,7 +194,8 @@ class EngineeringExecutor:
         repo = self.resolve_repo(item)
         wt = self.journal.worktree_for(item.ref)
         pr_branch = f"autopilot/{item.ref}"
-        ci_status = external_ci_verdict(repo, pr_branch, self._head_sha(wt))
+        self._commit_and_push(repo, wt, pr_branch, item)   # harness edits are uncommitted
+        ci_status = external_ci_verdict(repo, pr_branch, self._head_sha(wt), worktree=wt)
         automerge = (repo.name in self.config.automerge_repos
                      and repo.ci != "none" and ci_status == "green"
                      and result.passed and repo.automerge)

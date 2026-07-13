@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from ..claude_code import ForbiddenToolError, is_forbidden
 from ..sandbox import AuthMount, Sandbox
-from .base import BaseCliAdapter
+from .base import BaseCliAdapter, extract_json
 
 
 class ClaudeCodeAdapter(BaseCliAdapter):
@@ -44,5 +44,13 @@ class ClaudeCodeAdapter(BaseCliAdapter):
         return {}
 
     def _parse(self, raw: dict) -> dict:
+        # claude-code --output-format json wraps the model reply as a STRING in
+        # `result`; the assess/grade answer is JSON inside that string.
         inner = raw.get("result")
-        return inner if isinstance(inner, dict) else raw
+        if isinstance(inner, dict):
+            return inner
+        if isinstance(inner, str):
+            obj = extract_json(inner)
+            if obj is not None:
+                return obj
+        return raw if isinstance(raw, dict) else {}
