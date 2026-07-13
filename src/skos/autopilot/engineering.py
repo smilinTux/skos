@@ -3,6 +3,7 @@ isolated worktree, grade to 5/5 behind the external-CI twin gate, finalize.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,25 @@ from .types import GateResult, GradeBrief, RepoSpec, TaskBrief, WorkItem
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+_PROMISE = re.compile(r"<promise>\s*([A-Z_]+)\s*</promise>")
+
+
+def parse_promise(text: str | None) -> str | None:
+    """Return the SIGNAL inside a <promise>SIGNAL</promise> tag, else None."""
+    m = _PROMISE.search(text or "")
+    return m.group(1) if m else None
+
+
+def strip_promise(text: str | None) -> str:
+    """Remove any promise tag(s) and trim, for display / feedback carry-forward."""
+    return _PROMISE.sub("", text or "").strip()
+
+
+def is_complete(text: str | None, signal: str = "COMPLETE") -> bool:
+    """True only for a real promise tag carrying exactly `signal`."""
+    return parse_promise(text) == signal
 
 
 class EngineeringExecutor:
