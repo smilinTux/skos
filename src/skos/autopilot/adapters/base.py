@@ -13,6 +13,39 @@ from ..types import (AssessBrief, GateResult, GradeBrief, HarnessResult,
                      TaskBrief, Verdict)
 
 
+def parse_event_stream(body: str) -> dict:
+    """Extract the model's final JSON reply from a newline-delimited JSON event
+    stream (opencode `--format json`, pi `--mode json`). The reply is the last
+    `text` event's `part.text` (or a top-level `text`), json-decoded. Returns {}
+    when no decodable reply is present. Grounded in a captured opencode sample:
+    events like {"type":"text","part":{"type":"text","text":"{...json...}"}}.
+    """
+    text = None
+    for line in (body or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(ev, dict):
+            continue
+        part = ev.get("part")
+        if isinstance(part, dict) and part.get("type") == "text" and part.get("text"):
+            text = part["text"]
+        elif ev.get("type") == "text" and isinstance(ev.get("text"), str):
+            text = ev["text"]
+    if text:
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict):
+                return obj
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {}
+
+
 class BaseCliAdapter:
     name = "base"
 

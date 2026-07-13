@@ -14,9 +14,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates python3 python3-pip python3-venv curl \
     && rm -rf /var/lib/apt/lists/*
 
-# pinned harness CLI (CONFIRM against pi.dev):
-RUN npm install -g @pi-dev/cli || npm install -g pi || \
-    echo "WARNING: pi install command unconfirmed; see pi.dev and fix this line"
+# pinned harness CLI (confirmed from pi.dev: npm package @earendil-works/pi-coding-agent)
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
 RUN pip3 install --no-cache-dir --break-system-packages pytest coverage \
     || pip3 install --no-cache-dir pytest coverage
