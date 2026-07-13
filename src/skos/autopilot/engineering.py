@@ -186,3 +186,30 @@ class EngineeringExecutor:
                 options={"yes": "merge", "no": "close", "defer": "later"},
                 action_ref=f"merge:{item.ref}", priority="high")
             # leave the task claimed (not completed) until the operator approves
+
+
+def revert(board, config, task_id: str, agent: str = "autopilot") -> None:
+    """Revert the recorded merge commit and reopen the coord task.
+
+    Governance: autopilot reverts only a merge it recorded (meta.autopilot.merge).
+    """
+    task = next((t for t in board.load_tasks() if t.id == task_id), None)
+    if task is None:
+        raise ValueError(f"unknown task {task_id}")
+    merge = (task.meta or {}).get("autopilot", {}).get("merge")
+    if not merge or not merge.get("sha"):
+        raise ValueError(f"no recorded merge for {task_id}")
+    name = next((t.split(":", 1)[1] for t in task.tags if t.startswith("repo:")), None)
+    repo = config.repo_map[name]
+    subprocess.run(["git", "-C", repo.path, "checkout", repo.integration_branch],
+                   check=True, capture_output=True, text=True)
+    subprocess.run(["git", "-C", repo.path, "revert", "--no-edit", merge["sha"]],
+                   check=True, capture_output=True, text=True)
+    af = board.load_agent(agent)
+    if af is not None and task_id in af.completed_tasks:
+        af.completed_tasks.remove(task_id)     # reopen: undo the completion
+        board.save_agent(af)
+    board._write_task_raw(
+        task_id,
+        lambda d: d.setdefault("meta", {}).setdefault("autopilot", {})
+                  .__setitem__("reverted", {"sha": merge["sha"], "ts": _now_iso()}))
