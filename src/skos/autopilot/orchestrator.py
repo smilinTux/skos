@@ -198,3 +198,44 @@ def phase2_swarm(selected, *, harness, board, caps: Caps, ledger: CapLedger,
             state[item.ref] = {"state": "escalated", "round": rnd, "score": result.score}
         journal.write_run(run_id, {"run_id": run_id, "phase": "swarm", "items": state})
     return state
+
+
+def write_decision(d: DecisionItem) -> str | None:
+    """Write one decision to GTD via the gtd_ingest port with source='autopilot'.
+    capture() returns None on a duplicate (source, source_ref); fall back to
+    upsert() so the resolver's source_ref always resolves (spec section 9.1)."""
+    from skos import gtd_ingest
+    c = gtd_ingest.GtdCapture(
+        text=d.prompt, source="autopilot", source_ref=f"autopilot:{d.qid}",
+        status="waiting", context="@decide", priority=d.priority or "high",
+        meta={"decision": {"qid": d.qid, "prompt": d.prompt, "options": d.options,
+                           "answered": False, "answer": None, "action_ref": d.action_ref}})
+    gid = gtd_ingest.capture(c)
+    if gid is None:
+        gid, _action = gtd_ingest.upsert(c)
+    return gid
+
+
+def _decision_preview(d: DecisionItem) -> dict:
+    return {"id": None, "source": "autopilot", "source_ref": f"autopilot:{d.qid}",
+            "priority": d.priority, "created_at": "",
+            "decision": {"qid": d.qid, "prompt": d.prompt, "options": d.options,
+                         "answered": False}}
+
+
+def phase3_report(decisions, *, dry_run: bool = False, digest_date: str | None = None) -> dict:
+    """Build the numbered digest and (unless dry-run) write each decision to GTD and
+    persist the manifest. sk-alert SEND is Phase F; this only builds."""
+    from . import digest as digest_mod
+    digest_date = digest_date or datetime.now(timezone.utc).date().isoformat()
+    if dry_run:
+        preview = digest_mod.build_manifest([_decision_preview(d) for d in decisions],
+                                            digest_date=digest_date)
+        return {"dry_run": True, "digest_preview": digest_mod.build_digest_text(preview),
+                "decisions": len(decisions)}
+    for d in decisions:
+        write_decision(d)
+    manifest = digest_mod.build_manifest(digest_date=digest_date)
+    digest_mod.write_manifest(manifest)
+    return {"dry_run": False, "manifest": manifest,
+            "digest_text": digest_mod.build_digest_text(manifest)}
