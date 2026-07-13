@@ -268,3 +268,23 @@ def test_phase3_writes_and_builds_manifest(monkeypatch, tmp_path):
     from skos.gtd_ingest import gtd_dir
     assert (gtd_dir() / "autopilot-digest.json").exists()
     assert out["manifest"]["items"][0]["qid"] == "q4"
+
+
+def _config(**kw):
+    base = dict(enabled=True, dry_run=False, caps=Caps(), repo_map={"skos": object()})
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_run_once_full_pipeline(tmp_path, clean_execs):
+    _write_task(tmp_path, "t-1", tags=["repo:skos"], acceptance_criteria=["works"])
+    ex = _RunExec(GateResult(5, True, "ok", "pr#1")); EXECUTORS["engineering"] = ex
+    board = _board(["t-1"])
+    harness = SimpleNamespace(name="claude-code",
+                              assess=lambda brief: Verdict(verdict="valid", reason=""))
+    out = orch.run_once(board=board, harness=harness, config=_config(),
+                        tasks_dir=tmp_path, run_id="r1")
+    ex.run.assert_called_once()
+    ex.finalize.assert_called_once()
+    assert out["selected"] == ["t-1"] and out["run_id"] == "r1"
+    assert out["report"]["dry_run"] is False
