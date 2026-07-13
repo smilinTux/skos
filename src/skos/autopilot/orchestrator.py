@@ -13,7 +13,8 @@ from pathlib import Path
 
 from .types import WorkItem, AssessBrief, Verdict, GateResult, DecisionItem
 from .executor import EXECUTORS
-from .config import Caps
+from .config import Caps, Config
+from .harness import build_harness
 from . import journal
 
 
@@ -261,7 +262,7 @@ def build_executors(config, board, run_id: str) -> dict:
 
 def run_once(*, board, harness, config, tasks_dir=None, run_id=None, dry_run=None,
              ledger: CapLedger | None = None, deepdive_proposals=None,
-             executors=None) -> dict:
+             executors=None, task: str | None = None) -> dict:
     """Execute one daily cycle: assess -> triage -> swarm -> report. Journals
     per-item state so a re-run resumes (see the resume task). Guardrails (kill
     switch, caps, dry-run) are layered in the following tasks."""
@@ -294,6 +295,8 @@ def run_once(*, board, harness, config, tasks_dir=None, run_id=None, dry_run=Non
     selected = phase1_triage(candidates, harness, repo_map=config.repo_map,
                              decisions=decisions, executors=executors)
     selected = [(it, ex) for it, ex in selected if it.ref not in done]  # resume: skip settled
+    if task is not None:
+        selected = [(it, ex) for it, ex in selected if it.ref == task]
 
     if not dry:
         if kill_switch_active(config.enabled):
@@ -313,15 +316,23 @@ def run_once(*, board, harness, config, tasks_dir=None, run_id=None, dry_run=Non
 
 def run_cli(*, dry_run: bool = True, canary: bool = False, task=None,
            harness: str = "stub") -> dict:
-    """CLI bridge for `skos autopilot run`. v1 posture C: only dry-run executes,
-    against a StubHarness; canary and live are reported disabled until v1.5."""
-    if canary or not dry_run:
-        return {"disabled": "posture C: live/canary harness execution is disabled "
-                            "in v1 (enable after the v1.5 sovereign sandbox)"}
-    from .config import Config
-    from .harness import StubHarness
+    """CLI bridge for `skos autopilot run`. Dry-run (default) runs against the
+    StubHarness. Canary/live build the real sandboxed harness, but only when
+    harness.live_execution is enabled in config (else a clear disabled message);
+    a canary targets one task."""
     config = Config.load()
     from skcapstone.coordination import Board
     from skcapstone.mcp_tools._helpers import _shared_root
     board = Board(_shared_root())
-    return run_once(board=board, harness=StubHarness(), config=config, dry_run=True)
+    if dry_run and not canary:
+        from .harness import StubHarness
+        return run_once(board=board, harness=StubHarness(), config=config, dry_run=True)
+    if not getattr(config, "live_execution", False):
+        return {"disabled": "live/canary requires harness.live_execution=true in "
+                            "autopilot.yaml; enable only after the v1.5 confinement "
+                            "proof passes."}
+    if canary and not task:
+        return {"error": "a canary requires --task <id> (it targets one task)."}
+    name = None if harness in ("stub", "", None) else harness
+    h = build_harness(config, name)
+    return run_once(board=board, harness=h, config=config, dry_run=False, task=task)
