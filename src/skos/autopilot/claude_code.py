@@ -49,10 +49,13 @@ def _bare(tool: str) -> str:
 
 def is_forbidden(tool: str) -> bool:
     t = _norm(tool)
-    # whole-server MCP grant "mcp__server" (exactly one "__", no tool segment)
-    # would allow every tool on that server -> never allowed.
-    if t.startswith("mcp__") and t.count("__") == 1:
-        return True
+    # whole-server MCP grant "mcp__server" (no tool segment), or a malformed /
+    # empty segment such as "mcp__server__" -> would allow every tool on that
+    # server, or dodge the bare-name match entirely. Never allowed.
+    if t.startswith("mcp__"):
+        segs = t.split("__")[1:]          # server[, tool]; e.g. ["github"] or ["github",""]
+        if len(segs) < 2 or any(s == "" for s in segs):
+            return True                   # whole-server grant or malformed/empty segment
     bare = _bare(t)
     if t in _FORBIDDEN_EXACT or bare in _FORBIDDEN_EXACT:
         return True

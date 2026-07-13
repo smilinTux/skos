@@ -173,6 +173,31 @@ def _run_ex(mocker, cfg, grades, ci_status="green", cov=0.95):
     return ex, harness, item
 
 
+def test_run_claims_before_work(mocker, cfg):
+    grades = [GateResult(score=5, passed=True,
+                         notes="ready <promise>COMPLETE</promise>", artifact="pr")]
+    ex, harness, item = _run_ex(mocker, cfg, grades)
+    ex.run(item, harness)
+    ex.board.claim_task.assert_called_once_with("autopilot", "t1")
+
+
+def test_run_persists_worktree_for_finalize(mocker, cfg):
+    grades = [GateResult(score=5, passed=True,
+                         notes="ready <promise>COMPLETE</promise>", artifact="pr")]
+    ex, harness, item = _run_ex(mocker, cfg, grades)
+    ex.run(item, harness)
+    ex.journal.set_worktree.assert_called_once_with("t1", "/wt/t1")
+
+
+def test_escalate_returns_decision_item_for_the_task(cfg):
+    ex = EngineeringExecutor(cfg, board=object(), journal=object())
+    item = WorkItem(kind="engineering", ref="t1", source="coord", repo=None,
+                    payload={"tags": ["repo:skrender"]})
+    d = ex.escalate(item, "did not converge in 4 rounds")
+    assert d.action_ref == "t1"
+    assert d.prompt and "t1" in d.prompt
+
+
 def test_run_stops_at_five_with_green_gate(mocker, cfg):
     grades = [GateResult(score=3, passed=False, notes="thin tests", artifact=None),
               GateResult(score=5, passed=True,
@@ -271,13 +296,15 @@ def test_revert_reverts_sha_and_reopens(mocker):
     board.load_agent.return_value = agent
     run = mocker.patch("skos.autopilot.engineering.subprocess.run",
                        return_value=mocker.Mock(returncode=0, stdout="", stderr=""))
-    _revert_impl(board, cfg, "t1")
+    out = _revert_impl(board, cfg, "t1")
     argvs = [c.args[0] for c in run.call_args_list]
     assert ["git", "-C", "/repos/skrender", "revert", "--no-edit", "mergesha"] in argvs
     # reopened: dropped from the agent's completed_tasks and saved
     assert "t1" not in agent.completed_tasks and "t9" in agent.completed_tasks
     board.save_agent.assert_called_once_with(agent)
     board._write_task_raw.assert_called_once()   # records meta.autopilot.reverted
+    # Minor1: _revert_impl returns a result dict, not None
+    assert out == {"task_id": "t1", "reverted_sha": "mergesha", "reopened": True}
 
 
 def test_revert_raises_without_recorded_merge(mocker):

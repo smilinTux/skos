@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gtd-mail — bridge Gmail (5 accounts) into the unified skos/skcapstone GTD,
+"""gtd-mail: bridge Gmail (5 accounts) into the unified skos/skcapstone GTD,
 and send a daily digest to Chef's Hermes DM.
 
 Subcommands:
@@ -81,12 +81,12 @@ BUCKET2LABEL = {
 _TRIAGE_SYS = (
     "You triage Chef's (David's) email into a GTD system. For each email (sender + subject) "
     "assign EXACTLY ONE bucket:\n"
-    "- action: needs Chef to personally do/reply/decide — a real ask from a person, a bill to pay, "
+    "- action: needs Chef to personally do/reply/decide, a real ask from a person, a bill to pay, "
     "a document to submit, a task. Only if still relevant.\n"
     "- waiting: Chef is waiting on someone else's reply/delivery/support ticket.\n"
-    "- read: FYI only — newsletters, marketing, receipts, order/shipping notices, verification/login "
+    "- read: FYI only, newsletters, marketing, receipts, order/shipping notices, verification/login "
     "codes, social, GitHub/service notifications, calendar reminders. NO action needed.\n"
-    "- someday: reference or maybe-later — courses, ideas, pitches.\n"
+    "- someday: reference or maybe-later, courses, ideas, pitches.\n"
     "- legal: trust/UCC/court/attorney/sovereignty/notary/tax legal documents.\n"
     "- people: family, kids, school (Norwalk/PowerSchool), personal relationships.\n"
     "- finance: bank statements, bills, investment/brokerage accounts.\n"
@@ -130,7 +130,7 @@ def _labels_modify(account: str, thread_ids: list[str], label: str) -> None:
 
 def cmd_triage(cap_per_account: int = 200) -> None:
     """Intelligently file each account's inbox (post noise-sweep) into GTD labels
-    using the local LLM, then archive — so reports reflect a processed mailbox."""
+    using the local LLM, then archive, so reports reflect a processed mailbox."""
     grand = {}
     for acct in ACCOUNTS:
         filed = 0
@@ -179,7 +179,7 @@ def _make_email_item(account: str, row: dict, status: str, priority: str) -> dic
     subj = row["subject"][:120] or "(no subject)"
     return {
         "id": uuid.uuid4().hex[:12],
-        "text": f"[email:{account.split('@')[0]}] {subj} — {sender}",
+        "text": f"[email:{account.split('@')[0]}] {subj} - {sender}",
         "source": "email",
         "privacy": "private",
         "context": "@email",
@@ -207,7 +207,7 @@ def email_captures() -> list:
                 subj = row["subject"][:120] or "(no subject)"
                 sender = row["from"][:60]
                 caps.append(GtdCapture(
-                    text=f"[email:{acct.split('@')[0]}] {subj} — {sender}",
+                    text=f"[email:{acct.split('@')[0]}] {subj} - {sender}",
                     source="email", source_ref=row["id"], context="@email",
                     priority=prio, status=status,
                     meta={"email_account": acct, "email_from": sender,
@@ -245,7 +245,7 @@ def cmd_digest(send: bool = True) -> str:
     d = datetime.date.today().isoformat()
 
     # Stable per-brief reference numbers (E1..EN) so Chef can act on any item
-    # from Telegram (or any channel) by number — "reply E3", "file E3",
+    # from Telegram (or any channel) by number: "reply E3", "file E3",
     # "show E3". The number→thread map is persisted to digest-index.json and
     # resolved by _resolve()/cmd_done(), so it wires reply/done/attachments.
     tid2gtd = {it.get("email_thread_id"): it.get("id")
@@ -269,36 +269,36 @@ def cmd_digest(send: bool = True) -> str:
     # Title is carried by the Hermes --subject header on send; keep it in the
     # body only when returning the brief for standalone (non-send) use so we
     # don't print "📬 GTD Email Brief" twice in the delivered message.
-    L = [] if send else [f"📬 GTD Email Brief — {d}", ""]
-    L.append(f"🔴 ACTION ({len(action)}) — needs you:")
+    L = [] if send else [f"📬 GTD Email Brief: {d}", ""]
+    L.append(f"🔴 ACTION ({len(action)}) needs you:")
     for short, r in action[:20]:
-        L.append(f"  {_ref(short, r, 'action')} [{short}] {r['subject'][:60]} — {r['from'][:26]}")
+        L.append(f"  {_ref(short, r, 'action')} [{short}] {r['subject'][:60]} - {r['from'][:26]}")
     if not action:
         L.append("  (clear)")
     L.append("")
-    L.append(f"🟡 WAITING ({len(waiting)}) — on others:")
+    L.append(f"🟡 WAITING ({len(waiting)}) on others:")
     for short, r in waiting[:15]:
-        L.append(f"  {_ref(short, r, 'waiting')} [{short}] {r['subject'][:60]} — {r['from'][:26]}")
+        L.append(f"  {_ref(short, r, 'waiting')} [{short}] {r['subject'][:60]} - {r['from'][:26]}")
     if not waiting:
         L.append("  (clear)")
     L.append("")
     if new_primary:
-        L.append(f"🆕 NEW today ({len(new_primary)} shown) — un-triaged real mail:")
+        L.append(f"🆕 NEW today ({len(new_primary)} shown), un-triaged real mail:")
         for short, r in new_primary[:15]:
-            L.append(f"  {_ref(short, r, 'new')} [{short}] {r['subject'][:58]} — {r['from'][:24]}")
+            L.append(f"  {_ref(short, r, 'new')} [{short}] {r['subject'][:58]} - {r['from'][:24]}")
         L.append("")
     L.append("📊 Inbox health:")
     for short, inbox_n, newn in health:
         L.append(f"  {short:22s} inbox={inbox_n:<4d} new_today={newn}")
     L.append("")
-    L.append("↩︎ Reference any item by number — “reply E3 …”, “file E3”, “show E3”.")
+    L.append("↩︎ Reference any item by number: “reply E3 …”, “file E3”, “show E3”.")
     body = "\n".join(L)
     # Persist the reference index so a later "act on E3" resolves to the right
     # account+thread. Written on both paths so a --no-send preview is usable too.
     _save("digest-index", {"generated": _now(), "date": d, "items": index})
     if send:
         subprocess.run(["hermes", "send", "--to", HERMES_DM, "--subject",
-                        f"📬 GTD Email Brief — {d}", body],
+                        f"📬 GTD Email Brief: {d}", body],
                        capture_output=True, text=True)
     return body
 
@@ -413,7 +413,7 @@ def cmd_done(gtd_id: str) -> None:
             mids = [m["id"] for m in _thread(acct, tid)["messages"]] or [tid]
             subprocess.run([GOG, "gmail", "archive", "-a", acct, *mids], capture_output=True)
             subprocess.run([GOG, "gmail", "mark-read", "-a", acct, *mids], capture_output=True)
-            print(f"done: {key} archived+read email thread {tid} ({len(mids)} msgs) — no GTD item to close")
+            print(f"done: {key} archived+read email thread {tid} ({len(mids)} msgs), no GTD item to close")
             return
     hit = None
     for name in ("inbox", "next-actions", "waiting-for", "someday-maybe", "projects"):

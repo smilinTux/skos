@@ -59,6 +59,8 @@ def test_e2e_dry_run_selects_and_writes_nothing(tmp_path, monkeypatch, board):
     board.close_task_obsolete.assert_not_called()
     board.complete_task.assert_not_called()
     board.create_task.assert_not_called()
+    board.release_stale_claims.assert_not_called()  # dry-run must not reclaim (B1)
+    board.claim_task.assert_not_called()             # run() never reached in dry-run
     cap.assert_not_called()
     up.assert_not_called()
     send.assert_not_called()

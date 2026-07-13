@@ -105,7 +105,8 @@ def phase0_assess(*, board, harness, tasks_dir, caps: Caps, run_id: str,
     """Reclaim stale claims, compute unblocked, assess each candidate, apply the
     verdict (stale rewrite / obsolete close / needs_decision queue), spawn capped
     deep-dive tasks. Returns (candidates, decisions)."""
-    board.release_stale_claims("autopilot", 3600)
+    if not dry_run:
+        board.release_stale_claims("autopilot", 3600)
     by_id = {t.get("id"): t for t in load_raw_tasks(tasks_dir)}
     candidates: list[WorkItem] = []
     decisions: list[DecisionItem] = []

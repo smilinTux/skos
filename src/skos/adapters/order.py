@@ -6,12 +6,12 @@ stateful: one waiting-for item per order, driven through
 :func:`skos.gtd_ingest.upsert` sink, auto-completed on delivery, with **one
 Telegram ping per real state change** (nothing on a no-change poll).
 
-Tracked orders carry no separate registry — an order is any waiting-for item with
+Tracked orders carry no separate registry: an order is any waiting-for item with
 a ``meta.order`` block (``order_id``, ``account``, ``state``, ``complete_on``).
 
 Inference: state extraction is deterministic over the vendor's own subject
 phrasing; genuine ambiguity is the only thing that would fall back to skgateway
-(:18780, auto-router → ornith) — and unknown always degrades to *no change*,
+(:18780, auto-router → ornith), and unknown always degrades to *no change*,
 never a guessed transition.
 """
 from __future__ import annotations
@@ -42,7 +42,7 @@ SKGATEWAY_MODEL = os.environ.get("SKGATEWAY_MODEL", "sk-default")  # auto-router
 def classify_llm(subjects: list[str], states: list[str]) -> str | None:
     """Ambiguity fallback: ask skgateway (auto-router → ornith) to map the subject
     lines to one of ``states``. Returns a valid state or None. Degrades to None on
-    any error/timeout/invalid answer — never guesses a transition."""
+    any error/timeout/invalid answer, never guesses a transition."""
     if not subjects:
         return None
     joined = "\n".join(f"- {s}" for s in subjects if s)
@@ -120,7 +120,7 @@ def seed_order(order_id: str, account: str, *, vendor: str = "amazon",
     states = states or DEFAULT_STATES
     label = text or f"order {order_id}"
     iid = capture(GtdCapture(
-        text=f"{label} — {states[0].replace('_', ' ')}",
+        text=f"{label} - {states[0].replace('_', ' ')}",
         source="order", source_ref=ref, status="waiting",
         context="@errand", priority="low",
         meta={"order": {
@@ -135,7 +135,7 @@ class OrderAdapter(GtdSourceAdapter):
     name = "order"
 
     # NB: poll() returns (item, capture, new_state, terminal) tuples for the
-    # stateful drain() below — richer than the base list[GtdCapture] because the
+    # stateful drain() below, richer than the base list[GtdCapture] because the
     # notify decision needs the transition, not just the written id.
     def poll(self):  # type: ignore[override]
         from .. import mail
@@ -162,9 +162,9 @@ class OrderAdapter(GtdSourceAdapter):
                 continue  # no change → build nothing (quiet by construction)
 
             terminal = new_state == o.get("complete_on", "delivered")
-            label = (it.get("text") or f"order {oid}").split(" — ")[0]
+            label = (it.get("text") or f"order {oid}").split(" - ")[0]
             cap = GtdCapture(
-                text=f"{label} — {new_state.replace('_', ' ')}",
+                text=f"{label} - {new_state.replace('_', ' ')}",
                 source="order",
                 source_ref=it["source_ref"],
                 status="done" if terminal else "waiting",
@@ -185,11 +185,11 @@ class OrderAdapter(GtdSourceAdapter):
         return written
 
     def _notify(self, cap: GtdCapture, new_state: str, action: str) -> None:
-        label = cap.text.split(" — ")[0]
+        label = cap.text.split(" - ")[0]
         if action == "completed":
             msg = f"✅ Delivered: {label}. Marked done + archived."
         else:
-            msg = f"\U0001f4e6 {label} — {new_state.replace('_', ' ')}."
+            msg = f"\U0001f4e6 {label} - {new_state.replace('_', ' ')}."
         _tg_text(msg)
 
 

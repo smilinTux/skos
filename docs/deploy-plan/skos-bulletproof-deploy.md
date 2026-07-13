@@ -37,7 +37,7 @@ Concretely, skos is bulletproof when all of the following hold:
 2. **Reproducible from scratch.** `git clone` plus one documented bootstrap command on a cold machine yields a working `skos` CLI (correct pins, all deps declared), the full cron/timer schedule installed from in-repo artifacts, and the SOP verified against that path. No step depends on hand-edited state on .158.
 3. **CI-gated.** CI runs on every push and PR (all branches), the blocking lint select passes, all 312+ tests pass, and main is protected so red cannot merge. Green bar means something.
 4. **Durable data.** GTD store writes are atomic (tmp+fsync+rename) and locked across all writers; a corrupt or interrupted write can never empty a list. Point-in-time backups (skbackup materialized, restic or equivalent) cover the GTD store, cron ledger, and model registry, independent of Syncthing replication.
-5. **No single point of failure.** A dead-man's switch external to .158 alerts when the pipeline stops reporting. Scheduler artifacts are deployable to a standby host (.41) with a written failover runbook. Losing .158 loses at most one backup interval of data and zero code (everything pushed).
+5. **No single point of failure.** A dead-man's switch external to .158 alerts when the pipeline stops reporting. The scheduler artifacts (cron/timer units) are deployable to a standby host (.41) with a written failover runbook; this standby/failover applies to the skos scheduler only. It does NOT extend to the memory layer: skmem-pg is per-node writable and rebuildable from source (Syncthing-synced flat plus git wiki), never run primary/replica or streaming-replicated. Losing .158 loses at most one backup interval of data and zero code (everything pushed).
 6. **Observable and self-recovering.** Every scheduled job continues to write the run ledger and alert on failure; additionally the ledger rotates, chatty jobs cannot blow shell limits, and a missing scheduled run (not just a failing one) raises an alert.
 7. **Documented for a cold start.** The SOP's deploy section describes installing the committed schedule artifacts, not `crontab -e`; the README's install instructions actually work.
 
@@ -95,7 +95,7 @@ Nothing else matters while a live credential sits in a public repo and productio
 ### Phase 5: HA and observability hardening
 
 - **5a. Dead-man's switch external to .158**: pipeline heartbeats to a second box (or external monitor) that alerts when heartbeats stop. Depends on 4b (needs the schedule as code to hook into).
-- **5b. Standby deployment on .41**: install the committed scheduler artifacts disabled on .41 plus a written failover runbook. Depends on 4b.
+- **5b. Standby scheduler deployment on .41**: install the committed scheduler artifacts disabled on .41 plus a written failover runbook. Scope: the skos scheduler only, not skmem-pg (skmem-pg is per-node writable and rebuildable, not a replicated standby). Depends on 4b.
 - **5c. Observability holes**: ledger rotation, stream job output to a temp file instead of a shell variable, alert-on-missing-run detection. Depends on 4b (touches the same wrapper).
 - **5d. [P] Model registry tests and schema validation** for skos.models precedence and sk-auto semantics. Independent.
 
@@ -123,7 +123,7 @@ Mirrors the tasks returned to the coordinator. Order within priority is the reco
 | skos: add gitleaks secret scanning to CI | medium | rotation, PII removal, CI green tasks |
 | skos: ship a real install.sh and align README and SOP with the tested cold-start path | medium | dependency pins task, scheduler-as-code task |
 | skos: external dead-man's switch for the .158 pipeline | medium | scheduler-as-code task |
-| skos: standby scheduler deployment on .41 with failover runbook | medium | scheduler-as-code task |
+| skos: standby scheduler deployment on .41 with failover runbook (scheduler only; not skmem-pg replication) | medium | scheduler-as-code task |
 | skos: harden sk-cron-run.sh observability (rotation, output streaming, missing-run alerts) | medium | scheduler-as-code task |
 | skos: test coverage and schema validation for the model registry | medium | none |
 | skos: CI workflow quality pass (caching, action bumps, concurrency, coverage) | low | CI green task |
