@@ -108,3 +108,24 @@ def send_digest(config, *, dry_run: bool = False) -> dict:
 
     _send_alert(build_digest_text(manifest), config.digest_chat)
     return {"sent": True, "mode": "live", "items": n_items}
+
+
+def queue_decision(prompt: str, options: dict, action_ref: str | None,
+                   priority: str = "high", qid: str | None = None) -> str | None:
+    """Write one decision to GTD via the gtd_ingest port (source='autopilot').
+    capture() returns None on a duplicate (source, source_ref); fall back to
+    upsert() so the resolver's source_ref always resolves (spec section 9.1).
+    The single decision-write path, called by both the orchestrator and the
+    engineering executor's finalize."""
+    import hashlib
+    from skos import gtd_ingest
+    qid = qid or hashlib.sha256(f"{action_ref}|{prompt}".encode()).hexdigest()[:12]
+    c = gtd_ingest.GtdCapture(
+        text=prompt, source="autopilot", source_ref=f"autopilot:{qid}",
+        status="waiting", context="@decide", priority=priority or "high",
+        meta={"decision": {"qid": qid, "prompt": prompt, "options": options,
+                           "answered": False, "answer": None, "action_ref": action_ref}})
+    gid = gtd_ingest.capture(c)
+    if gid is None:
+        gid, _ = gtd_ingest.upsert(c)
+    return gid
