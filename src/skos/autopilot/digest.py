@@ -8,6 +8,7 @@ the GTD store, ordered by priority then created_at, and pinned in
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 PRIORITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -67,3 +68,43 @@ def write_manifest(manifest: dict) -> Path:
     p.write_text(json.dumps(manifest, indent=2, ensure_ascii=False, default=str),
                  encoding="utf-8")
     return p
+
+
+def rebuild_manifest() -> dict:
+    """Rebuild today's manifest over unanswered autopilot items and persist it."""
+    from datetime import datetime, timezone
+    m = build_manifest(digest_date=datetime.now(timezone.utc).date().isoformat())
+    write_manifest(m)
+    return m
+
+
+def _send_alert(text: str, chat: str) -> None:
+    """Deliver a Telegram DM through the sovereign alert primitive.
+
+    Shells the installed `sk-alert` shim (chat override via -c), which loads the
+    bot token from Hermes .env and posts to the Bot API. Kept as a subprocess so
+    the alert path stays the one audited primitive the fleet already uses.
+    """
+    subprocess.run(["sk-alert", "-c", str(chat), text], check=True)
+
+
+def send_digest(config, *, dry_run: bool = False) -> dict:
+    """Build the numbered digest and DM it (spec section 9.2 / Phase 3 Report).
+
+    In dry-run the DM is suppressed entirely (spec section 14, genuinely
+    read-only) except for one opt-in one-line summary when
+    ``config.dry_run_summary`` is set.
+    """
+    manifest = rebuild_manifest()
+    n_items = len(manifest.get("items", []))
+
+    if dry_run:
+        if not getattr(config, "dry_run_summary", False):
+            return {"sent": False, "reason": "dry-run", "items": n_items}
+        summary = (f"Autopilot dry-run: {n_items} decision(s) would be queued "
+                   f"(preview only, nothing written).")
+        _send_alert(summary, config.digest_chat)
+        return {"sent": True, "mode": "dry-run-summary", "items": n_items}
+
+    _send_alert(build_digest_text(manifest), config.digest_chat)
+    return {"sent": True, "mode": "live", "items": n_items}
