@@ -242,6 +242,7 @@ def _final_ex(mocker, cfg, repo_name, ci_status="green"):
                              digest=mocker.Mock())
     ex.journal.worktree_for.return_value = "/wt/t1"
     mocker.patch.object(ex, "_head_sha", return_value="sha1")
+    mocker.patch.object(ex, "_commit_and_push")     # git commit+push of harness edits
     mocker.patch.object(ex, "prune_worktree")
     mocker.patch.object(ex, "_merge", return_value="mergesha")
     mocker.patch.object(ex, "_open_pr", return_value="https://gh/pr/1")
@@ -269,6 +270,7 @@ def test_finalize_pr_only_when_not_whitelisted(mocker):
     ex.finalize(item, GateResult(score=5, passed=True, notes="", artifact="pr"))
     ex._merge.assert_not_called()
     ex.board.complete_task.assert_not_called()      # left claimed
+    ex._commit_and_push.assert_called_once()        # harness edits committed + pushed
     ex._open_pr.assert_called_once()
     ex.digest.queue_decision.assert_called_once()
 

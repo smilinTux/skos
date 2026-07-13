@@ -13,6 +13,45 @@ from ..types import (AssessBrief, GateResult, GradeBrief, HarnessResult,
                      TaskBrief, Verdict)
 
 
+def extract_json(text) -> dict | None:
+    """Best-effort: pull a JSON object out of a model text reply, tolerating
+    surrounding prose or a ```json fence. Claude Code returns the model reply as a
+    string in `result`; a strict-JSON instruction usually yields clean JSON but may
+    be fenced or prefixed. Returns None when no JSON object is found."""
+    if not isinstance(text, str):
+        return None
+    s = text.strip()
+    if s.startswith("```"):
+        s = s[3:]
+        if s[:4].lower() == "json":
+            s = s[4:]
+        end = s.rfind("```")
+        if end != -1:
+            s = s[:end]
+        s = s.strip()
+    try:
+        obj = json.loads(s)
+        return obj if isinstance(obj, dict) else None
+    except (json.JSONDecodeError, TypeError):
+        pass
+    start = s.find("{")               # fall back to the first balanced {...}
+    if start == -1:
+        return None
+    depth = 0
+    for i in range(start, len(s)):
+        if s[i] == "{":
+            depth += 1
+        elif s[i] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    obj = json.loads(s[start:i + 1])
+                    return obj if isinstance(obj, dict) else None
+                except (json.JSONDecodeError, TypeError):
+                    return None
+    return None
+
+
 def parse_event_stream(body: str) -> dict:
     """Extract the model's final JSON reply from a newline-delimited JSON event
     stream (opencode `--format json`, pi `--mode json`). The reply is the last
@@ -37,12 +76,9 @@ def parse_event_stream(body: str) -> dict:
         elif ev.get("type") == "text" and isinstance(ev.get("text"), str):
             text = ev["text"]
     if text:
-        try:
-            obj = json.loads(text)
-            if isinstance(obj, dict):
-                return obj
-        except (json.JSONDecodeError, TypeError):
-            pass
+        obj = extract_json(text)
+        if obj is not None:
+            return obj
     return {}
 
 
@@ -136,8 +172,11 @@ class BaseCliAdapter:
     def grade(self, brief: GradeBrief) -> GateResult:
         instruction = (
             "You are an independent grader. Score the diff 1-5 against the "
-            "acceptance criteria and CI status. Reply strictly as JSON: "
-            "{\"score\":N,\"passed\":bool,\"notes\":\"...\"}.")
+            "acceptance criteria and CI status. A 5 requires: every acceptance "
+            "criterion met, tests present and passing, CI green. Reply strictly as "
+            "JSON: {\"score\":N,\"passed\":bool,\"notes\":\"...\"}. ONLY when the "
+            "score is 5 and the work is genuinely complete, include the exact token "
+            "<promise>COMPLETE</promise> inside notes; never include it otherwise.")
         data = json.dumps({"task_id": brief.task_id, "diff": brief.diff,
                            "acceptance": brief.acceptance, "ci_status": brief.ci_status,
                            "diff_coverage": brief.diff_coverage})
