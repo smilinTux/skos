@@ -131,3 +131,39 @@ def phase0_assess(*, board, harness, tasks_dir, caps: Caps, run_id: str,
                                           action_ref=tid, priority=t.get("priority") or "high"))
     deepdive_spawn(board, deepdive_proposals, caps=caps, run_id=run_id, dry_run=dry_run)
     return candidates, decisions
+
+
+def is_untriaged(item: WorkItem) -> bool:
+    return "autopilot-untriaged" in (item.payload.get("tags") or [])
+
+
+def phase1_triage(candidates, harness, *, repo_map, decisions) -> list[tuple[WorkItem, object]]:
+    """Select unblocked+valid+in-scope items whose executor.selectable is True and
+    route them. Non-selectable or decision-shaped items go straight to the decision
+    queue (the executor's escalate is NOT called for selectable=False). untriaged
+    items are never auto-selected."""
+    selected: list[tuple[WorkItem, object]] = []
+    repo_map = repo_map or {}
+    for item in candidates:
+        if is_untriaged(item):
+            continue
+        ex = EXECUTORS.get(item.kind)
+        if ex is None:
+            decisions.append(DecisionItem(qid=stable_qid(f"no-exec:{item.kind}", item.ref),
+                prompt=f"No executor registered for kind '{item.kind}' (task {item.ref}).",
+                options={"skip": "skip"}, action_ref=item.ref, priority="medium"))
+            continue
+        if item.kind == "engineering" and (item.repo is None or item.repo not in repo_map):
+            decisions.append(DecisionItem(qid=stable_qid("which-repo", item.ref),
+                prompt=f"Task {item.ref} has no known repo:<name>; add to repo_map or route?",
+                options={"map": "add-to-repo_map", "skip": "skip"},
+                action_ref=item.ref, priority="high"))
+            continue
+        if ex.selectable(item):
+            selected.append((item, ex))
+        else:
+            decisions.append(DecisionItem(qid=stable_qid("not-selectable", item.ref),
+                prompt=f"Task {item.ref} ({item.kind}) is not autonomously actionable; needs you.",
+                options={"take": "take", "defer": "defer"},
+                action_ref=item.ref, priority="medium"))
+    return selected
