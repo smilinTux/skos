@@ -46,6 +46,8 @@ class Config:
     caps: Caps = field(default_factory=Caps)
     digest_chat: str | None = None
     epic_id: str | None = None
+    dry_run: bool = True
+    dry_run_summary: bool = False
 
     def repo(self, name: str) -> RepoSpec | None:
         return self.repo_map.get(name)
@@ -73,6 +75,8 @@ class Config:
             caps=caps,
             digest_chat=raw.get("digest_chat"),
             epic_id=raw.get("epic_id"),
+            dry_run=bool(raw.get("dry_run", True)),
+            dry_run_summary=bool(raw.get("dry_run_summary", False)),
         )
 
 
@@ -93,6 +97,12 @@ autopilot-daily:
   catchup: false
   enabled: true
 """
+
+
+def load(path: Path | None = None) -> Config:
+    """Module-level convenience so callers can `from skos.autopilot import config;
+    config.load()` without touching the classmethod."""
+    return Config.load(path)
 
 
 def render_autopilot_job_yaml() -> str:
