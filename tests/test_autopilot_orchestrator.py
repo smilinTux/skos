@@ -37,3 +37,84 @@ def test_stable_qid_deterministic():
     b = stable_qid("Merge PR #12 for task X?", "task-x")
     c = stable_qid("Merge PR #12 for task X?", "task-y")
     assert a == b and a != c and len(a) == 12
+
+
+import json
+from unittest.mock import MagicMock
+
+from skos.autopilot.types import Verdict
+
+
+def _write_task(d, tid, **fields):
+    t = {"id": tid, "title": tid, "description": "", "tags": [],
+         "acceptance_criteria": [], "dependencies": [], "status": "open"}
+    t.update(fields)
+    (d / f"{tid}-x.json").write_text(json.dumps(t))
+    return t
+
+
+def _board(unblocked):
+    b = MagicMock()
+    b.unblocked_task_ids.return_value = set(unblocked)
+    return b
+
+
+def test_phase0_reclaims_then_computes_unblocked(tmp_path):
+    _write_task(tmp_path, "t-1", tags=["repo:skos"], acceptance_criteria=["works"])
+    _write_task(tmp_path, "t-2", tags=["repo:skos"])
+    board = _board(["t-1"])
+    harness = MagicMock()
+    harness.assess.return_value = Verdict(verdict="valid", reason="")
+    cands, decisions = orch.phase0_assess(board=board, harness=harness, tasks_dir=tmp_path,
+                                          caps=Caps(), run_id="r1")
+    board.release_stale_claims.assert_called_once_with("autopilot", 3600)
+    assert [c.ref for c in cands] == ["t-1"]          # only unblocked assessed
+    assert decisions == []
+
+
+def test_phase0_applies_verdicts(tmp_path):
+    _write_task(tmp_path, "stale", tags=["repo:skos"])
+    _write_task(tmp_path, "dead", tags=["repo:skos"])
+    _write_task(tmp_path, "ask", tags=["repo:skos"])
+    board = _board(["stale", "dead", "ask"])
+    harness = MagicMock()
+    harness.assess.side_effect = [
+        Verdict(verdict="needs_decision", reason="which repo?"),
+        Verdict(verdict="obsolete", reason="superseded"),
+        Verdict(verdict="stale", reason="drifted", updated_description="new",
+                updated_acceptance=["a"]),
+    ]
+    cands, decisions = orch.phase0_assess(board=board, harness=harness, tasks_dir=tmp_path,
+                                          caps=Caps(), run_id="r1")
+    board.update_task.assert_called_once_with("stale", description="new",
+                                              acceptance_criteria=["a"], run_id="r1")
+    board.close_task_obsolete.assert_called_once_with("dead", "superseded", run_id="r1")
+    assert {c.ref for c in cands} == {"stale"}         # stale rewritten stays actionable
+    assert len(decisions) == 1 and decisions[0].action_ref == "ask"
+
+
+def test_phase0_dry_run_writes_nothing(tmp_path):
+    _write_task(tmp_path, "stale", tags=["repo:skos"])
+    board = _board(["stale"])
+    harness = MagicMock()
+    harness.assess.return_value = Verdict(verdict="stale", reason="d", updated_description="n")
+    orch.phase0_assess(board=board, harness=harness, tasks_dir=tmp_path,
+                       caps=Caps(), run_id="r1", dry_run=True)
+    board.update_task.assert_not_called()
+    board.close_task_obsolete.assert_not_called()
+
+
+def test_deepdive_spawn_caps_and_tags(tmp_path):
+    board = MagicMock()
+    board.create_task.side_effect = ["n1", "n2"]
+    props = [{"title": "a"}, {"title": "b"}, {"title": "c"}]
+    made = orch.deepdive_spawn(board, props, caps=Caps(new_tasks_per_run=2), run_id="r1")
+    assert made == ["n1", "n2"]                        # capped at 2
+    for call in board.create_task.call_args_list:
+        assert "autopilot-untriaged" in call.kwargs["tags"]
+
+
+def test_deepdive_spawn_dry_run_no_writes():
+    board = MagicMock()
+    orch.deepdive_spawn(board, [{"title": "a"}], caps=Caps(), run_id="r1", dry_run=True)
+    board.create_task.assert_not_called()

@@ -43,3 +43,91 @@ def kill_switch_active(enabled: bool) -> bool:
 def stable_qid(prompt: str, action_ref: str | None) -> str:
     """Deterministic 12-char decision id over (action_ref, prompt)."""
     return hashlib.sha256(f"{action_ref}|{prompt}".encode("utf-8")).hexdigest()[:12]
+
+
+def load_raw_tasks(tasks_dir) -> list[dict]:
+    """Load coord tasks as raw dicts so ``meta`` is visible (spec Phase 0)."""
+    d = Path(tasks_dir)
+    out: list[dict] = []
+    if not d.exists():
+        return out
+    for p in sorted(d.glob("*.json")):
+        try:
+            out.append(json.loads(p.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return out
+
+
+def repo_tag(task: dict) -> str | None:
+    """The single ``repo:<name>`` tag, or None when absent/ambiguous."""
+    repos = [t.split(":", 1)[1] for t in (task.get("tags") or []) if t.startswith("repo:")]
+    return repos[0] if len(repos) == 1 else None
+
+
+def classify_kind(task: dict) -> str:
+    """Route to an executor kind by repo tag then source (skjoule vocab)."""
+    if any(t.startswith("repo:") for t in (task.get("tags") or [])):
+        return "engineering"
+    return {"itil": "ops", "email": "research", "telegram": "research",
+            "order": "orders", "calendar": "calendar"}.get(task.get("source", "coord"),
+                                                            "engineering")
+
+
+def _to_workitem(task: dict) -> WorkItem:
+    return WorkItem(kind=classify_kind(task), ref=task["id"],
+                    source=task.get("source", "coord"), repo=repo_tag(task), payload=task)
+
+
+def deepdive_spawn(board, proposals, *, caps: Caps, run_id: str,
+                   dry_run: bool = False) -> list[str]:
+    """Create new coord tasks from deep-dive proposals, capped and marked
+    ``autopilot-untriaged`` so they are never auto-selected (spec section 14)."""
+    made: list[str] = []
+    for spec in (proposals or [])[: caps.new_tasks_per_run]:
+        if dry_run:
+            made.append("(dry-run)")
+            continue
+        made.append(board.create_task(title=spec.get("title", ""),
+                                      description=spec.get("description", ""),
+                                      tags=["autopilot", "autopilot-untriaged"]))
+    return made
+
+
+def phase0_assess(*, board, harness, tasks_dir, caps: Caps, run_id: str,
+                  dry_run: bool = False, codebase_context: str = "",
+                  deepdive_proposals=None) -> tuple[list[WorkItem], list[DecisionItem]]:
+    """Reclaim stale claims, compute unblocked, assess each candidate, apply the
+    verdict (stale rewrite / obsolete close / needs_decision queue), spawn capped
+    deep-dive tasks. Returns (candidates, decisions)."""
+    board.release_stale_claims("autopilot", 3600)
+    by_id = {t.get("id"): t for t in load_raw_tasks(tasks_dir)}
+    candidates: list[WorkItem] = []
+    decisions: list[DecisionItem] = []
+    for tid in sorted(board.unblocked_task_ids()):
+        t = by_id.get(tid)
+        if not t or t.get("status") in ("completed", "closed", "obsolete"):
+            continue
+        brief = AssessBrief(task_id=tid, title=t.get("title", ""),
+                            description=t.get("description", ""),
+                            acceptance=t.get("acceptance_criteria") or [],
+                            tags=t.get("tags") or [], repo=repo_tag(t),
+                            codebase_context=codebase_context)
+        v = harness.assess(brief)
+        if v.verdict == "valid":
+            candidates.append(_to_workitem(t))
+        elif v.verdict == "stale":
+            if not dry_run:
+                board.update_task(tid, description=v.updated_description,
+                                  acceptance_criteria=v.updated_acceptance, run_id=run_id)
+            candidates.append(_to_workitem(t))
+        elif v.verdict == "obsolete":
+            if not dry_run:
+                board.close_task_obsolete(tid, v.reason, run_id=run_id)
+        elif v.verdict == "needs_decision":
+            decisions.append(DecisionItem(qid=stable_qid(v.reason or tid, tid),
+                                          prompt=v.reason or f"Task {tid} needs a decision.",
+                                          options={"promote": "promote", "skip": "skip"},
+                                          action_ref=tid, priority=t.get("priority") or "high"))
+    deepdive_spawn(board, deepdive_proposals, caps=caps, run_id=run_id, dry_run=dry_run)
+    return candidates, decisions
