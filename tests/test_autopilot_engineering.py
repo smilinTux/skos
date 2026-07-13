@@ -255,3 +255,34 @@ def test_finalize_pr_only_when_ci_red(mocker):
     ex.finalize(item, GateResult(score=5, passed=True, notes="", artifact="pr"))
     ex._merge.assert_not_called()
     ex._open_pr.assert_called_once()
+
+
+from skos.autopilot.engineering import revert
+
+
+def test_revert_reverts_sha_and_reopens(mocker):
+    spec = _spec("skrender")
+    cfg = _t.SimpleNamespace(repo_map={"skrender": spec}, automerge_repos=[])
+    task = _t.SimpleNamespace(id="t1", tags=["repo:skrender"],
+                              meta={"autopilot": {"merge": {"sha": "mergesha"}}})
+    agent = _t.SimpleNamespace(agent="autopilot", completed_tasks=["t1", "t9"])
+    board = mocker.Mock()
+    board.load_tasks.return_value = [task]
+    board.load_agent.return_value = agent
+    run = mocker.patch("skos.autopilot.engineering.subprocess.run",
+                       return_value=mocker.Mock(returncode=0, stdout="", stderr=""))
+    revert(board, cfg, "t1")
+    argvs = [c.args[0] for c in run.call_args_list]
+    assert ["git", "-C", "/repos/skrender", "revert", "--no-edit", "mergesha"] in argvs
+    # reopened: dropped from the agent's completed_tasks and saved
+    assert "t1" not in agent.completed_tasks and "t9" in agent.completed_tasks
+    board.save_agent.assert_called_once_with(agent)
+    board._write_task_raw.assert_called_once()   # records meta.autopilot.reverted
+
+
+def test_revert_raises_without_recorded_merge(mocker):
+    task = _t.SimpleNamespace(id="t1", tags=["repo:skrender"], meta={"autopilot": {}})
+    board = mocker.Mock(); board.load_tasks.return_value = [task]
+    cfg = _t.SimpleNamespace(repo_map={"skrender": _spec("skrender")}, automerge_repos=[])
+    with pytest.raises(ValueError):
+        revert(board, cfg, "t1")
