@@ -3,7 +3,9 @@ isolated worktree, grade to 5/5 behind the external-CI twin gate, finalize.
 """
 from __future__ import annotations
 
+import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 
 from .types import GateResult, GradeBrief, RepoSpec, TaskBrief, WorkItem
 
@@ -51,3 +53,25 @@ class EngineeringExecutor:
         execute), then record the lease start so a crash is reclaimable."""
         self.board.claim_task("autopilot", item.ref)
         self.journal.record_claim(item.ref, claimed_at=_now_iso())
+
+    def _worktree_path(self, item: WorkItem, repo: RepoSpec) -> str:
+        base = Path(repo.path)
+        return str(base.parent / f"{base.name}-wt" / item.ref)
+
+    def make_worktree(self, item: WorkItem, repo: RepoSpec) -> str:
+        wt = self._worktree_path(item, repo)
+        try:
+            Path(wt).parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        branch = f"autopilot/{item.ref}"
+        subprocess.run(["git", "-C", repo.path, "worktree", "add", "-b",
+                        branch, wt, repo.base_branch],
+                       check=True, capture_output=True, text=True)
+        return wt
+
+    def prune_worktree(self, repo: RepoSpec, wt: str) -> None:
+        subprocess.run(["git", "-C", repo.path, "worktree", "remove", "--force", wt],
+                       capture_output=True, text=True)
+        subprocess.run(["git", "-C", repo.path, "worktree", "prune"],
+                       capture_output=True, text=True)
