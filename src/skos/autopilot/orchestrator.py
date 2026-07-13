@@ -239,3 +239,44 @@ def phase3_report(decisions, *, dry_run: bool = False, digest_date: str | None =
     digest_mod.write_manifest(manifest)
     return {"dry_run": False, "manifest": manifest,
             "digest_text": digest_mod.build_digest_text(manifest)}
+
+
+def _new_run_id() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _default_tasks_dir() -> Path:
+    home = Path(os.environ.get("SKCAPSTONE_HOME", str(Path.home() / ".skcapstone")))
+    return home / "coordination" / "tasks"
+
+
+def run_once(*, board, harness, config, tasks_dir=None, run_id=None, dry_run=None,
+             ledger: CapLedger | None = None, deepdive_proposals=None) -> dict:
+    """Execute one daily cycle: assess -> triage -> swarm -> report. Journals
+    per-item state so a re-run resumes (see the resume task). Guardrails (kill
+    switch, caps, dry-run) are layered in the following tasks."""
+    run_id = run_id or _new_run_id()
+    dry = config.dry_run if dry_run is None else dry_run
+    caps = config.caps
+    ledger = ledger or CapLedger(caps)
+
+    prior = journal.read_run(run_id) or {}
+    state = dict(prior.get("items") or {})
+
+    candidates, decisions = phase0_assess(
+        board=board, harness=harness, tasks_dir=tasks_dir or _default_tasks_dir(),
+        caps=caps, run_id=run_id, dry_run=dry, deepdive_proposals=deepdive_proposals)
+
+    selected = phase1_triage(candidates, harness, repo_map=config.repo_map, decisions=decisions)
+
+    if not dry:
+        state = phase2_swarm(selected, harness=harness, board=board, caps=caps,
+                             ledger=ledger, decisions=decisions, run_id=run_id,
+                             state=state, enabled=config.enabled)
+
+    report = phase3_report(decisions, dry_run=dry)
+    journal.write_run(run_id, {"run_id": run_id, "phase": "report", "items": state,
+                               "decisions": len(decisions), "dry_run": dry})
+    return {"run_id": run_id, "dry_run": dry,
+            "selected": [it.ref for it, _ in selected],
+            "decisions": len(decisions), "report": report}
