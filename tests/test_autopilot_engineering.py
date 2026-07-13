@@ -127,3 +127,25 @@ def test_prune_worktree_git_argv(mocker, cfg):
     assert ["git", "-C", "/repos/skrender", "worktree", "remove", "--force",
             "/repos/skrender-wt/t1"] in calls
     assert ["git", "-C", "/repos/skrender", "worktree", "prune"] in calls
+
+
+def test_parse_promise_extracts_signal():
+    from skos.autopilot.engineering import parse_promise
+    assert parse_promise("done here <promise>COMPLETE</promise>") == "COMPLETE"
+
+
+def test_parse_promise_none_when_absent():
+    from skos.autopilot.engineering import parse_promise
+    assert parse_promise("still working, not COMPLETE yet") is None
+
+
+def test_is_complete_requires_the_tag_not_prose():
+    from skos.autopilot.engineering import is_complete
+    assert is_complete("<promise>COMPLETE</promise>") is True
+    assert is_complete("not COMPLETE yet") is False          # false-positive resistance
+    assert is_complete("<promise>WORKING</promise>") is False  # wrong signal
+
+
+def test_strip_promise_removes_tag_and_trims():
+    from skos.autopilot.engineering import strip_promise
+    assert strip_promise("great work <promise>COMPLETE</promise>") == "great work"
