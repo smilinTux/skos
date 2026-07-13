@@ -118,3 +118,68 @@ def test_deepdive_spawn_dry_run_no_writes():
     board = MagicMock()
     orch.deepdive_spawn(board, [{"title": "a"}], caps=Caps(), run_id="r1", dry_run=True)
     board.create_task.assert_not_called()
+
+
+from skos.autopilot.executor import EXECUTORS
+from skos.autopilot.types import WorkItem, GateResult, DecisionItem
+
+
+class _Eng:
+    kind = "engineering"
+    def __init__(self, sel): self._sel = sel; self.escalate = MagicMock()
+    def selectable(self, item): return self._sel
+    def run(self, item, harness): return GateResult(5, True, "", None)
+    def finalize(self, item, result): pass
+
+
+@pytest.fixture
+def clean_execs():
+    saved = dict(EXECUTORS); EXECUTORS.clear()
+    yield
+    EXECUTORS.clear(); EXECUTORS.update(saved)
+
+
+def _wi(ref, repo="skos", tags=None):
+    return WorkItem(kind="engineering", ref=ref, source="coord", repo=repo,
+                    payload={"id": ref, "tags": tags if tags is not None else [f"repo:{repo}"]})
+
+
+def test_phase1_selects_only_selectable_in_scope(clean_execs):
+    ex = _Eng(sel=True); EXECUTORS["engineering"] = ex
+    decisions = []
+    selected = orch.phase1_triage([_wi("t-1")], MagicMock(),
+                                  repo_map={"skos": object()}, decisions=decisions)
+    assert [i.ref for i, _ in selected] == ["t-1"] and decisions == []
+
+
+def test_phase1_untriaged_never_selected(clean_execs):
+    ex = _Eng(sel=True); EXECUTORS["engineering"] = ex
+    decisions = []
+    item = _wi("t-u", tags=["repo:skos", "autopilot-untriaged"])
+    selected = orch.phase1_triage([item], MagicMock(),
+                                  repo_map={"skos": object()}, decisions=decisions)
+    assert selected == [] and decisions == []          # promoted by operator, not queued here
+
+
+def test_phase1_unselectable_queues_without_escalate(clean_execs):
+    ex = _Eng(sel=False); EXECUTORS["engineering"] = ex
+    decisions = []
+    selected = orch.phase1_triage([_wi("t-2")], MagicMock(),
+                                  repo_map={"skos": object()}, decisions=decisions)
+    assert selected == [] and len(decisions) == 1 and decisions[0].action_ref == "t-2"
+    ex.escalate.assert_not_called()                     # escalate is only for mid-run gate fail
+
+
+def test_phase1_unknown_repo_queues_decision(clean_execs):
+    ex = _Eng(sel=True); EXECUTORS["engineering"] = ex
+    decisions = []
+    selected = orch.phase1_triage([_wi("t-3", repo="ghost")], MagicMock(),
+                                  repo_map={"skos": object()}, decisions=decisions)
+    assert selected == [] and len(decisions) == 1
+
+
+def test_phase1_no_executor_queues_decision(clean_execs):
+    decisions = []
+    item = WorkItem(kind="research", ref="t-4", source="email", repo=None, payload={"id": "t-4", "tags": []})
+    selected = orch.phase1_triage([item], MagicMock(), repo_map={}, decisions=decisions)
+    assert selected == [] and len(decisions) == 1
