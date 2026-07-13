@@ -288,3 +288,27 @@ def test_run_once_full_pipeline(tmp_path, clean_execs):
     ex.finalize.assert_called_once()
     assert out["selected"] == ["t-1"] and out["run_id"] == "r1"
     assert out["report"]["dry_run"] is False
+
+
+def test_dry_run_is_read_only(tmp_path, monkeypatch, clean_execs, fake_journal):
+    _write_task(tmp_path, "stale", tags=["repo:skos"], acceptance_criteria=["x"])
+    ex = _RunExec(GateResult(5, True, "ok", "pr#1")); EXECUTORS["engineering"] = ex
+    board = _board(["stale"])
+    board.create_task = MagicMock()
+    harness = SimpleNamespace(name="h",
+        assess=lambda brief: Verdict(verdict="stale", reason="d", updated_description="n"))
+    cap = MagicMock(); monkeypatch.setattr("skos.gtd_ingest.capture", cap)
+
+    out = orch.run_once(board=board, harness=harness, config=_config(dry_run=True),
+                        tasks_dir=tmp_path, run_id="rdry",
+                        deepdive_proposals=[{"title": "new"}])
+
+    board.update_task.assert_not_called()           # no coord mutation
+    board.close_task_obsolete.assert_not_called()
+    board.create_task.assert_not_called()
+    board.score_task.assert_not_called()
+    ex.run.assert_not_called()                       # Phase 2 skipped
+    cap.assert_not_called()                          # no GTD write
+    assert out["dry_run"] is True
+    assert out["report"]["dry_run"] is True and "digest_preview" in out["report"]
+    assert any(rid == "rdry" for rid, _ in fake_journal)  # journal entry written
