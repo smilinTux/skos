@@ -44,3 +44,45 @@ def test_two_repo_tags_resolves_none(cfg):
 def test_no_repo_tag_resolves_none(cfg):
     ex = EngineeringExecutor(cfg, board=object(), journal=object())
     assert ex.resolve_repo(_item(["backend"])) is None
+
+
+def _sel_item(**over):
+    p = dict(unblocked=True, verdict="valid", tags=["repo:skrender"],
+             acceptance=["does X"])
+    p.update(over)
+    return WorkItem(kind="engineering", ref="t1", source="coord", repo=None, payload=p)
+
+
+def test_selectable_happy_path(cfg):
+    ex = EngineeringExecutor(cfg, board=object(), journal=object())
+    assert ex.selectable(_sel_item()) is True
+
+
+def test_not_selectable_when_blocked(cfg):
+    ex = EngineeringExecutor(cfg, board=object(), journal=object())
+    assert ex.selectable(_sel_item(unblocked=False)) is False
+
+
+def test_not_selectable_when_not_valid(cfg):
+    ex = EngineeringExecutor(cfg, board=object(), journal=object())
+    assert ex.selectable(_sel_item(verdict="stale")) is False
+
+
+def test_not_selectable_unknown_repo(cfg):
+    ex = EngineeringExecutor(cfg, board=object(), journal=object())
+    assert ex.selectable(_sel_item(tags=["repo:nope"])) is False
+
+
+def test_not_selectable_untriaged(cfg):
+    ex = EngineeringExecutor(cfg, board=object(), journal=object())
+    assert ex.selectable(_sel_item(tags=["repo:skrender", "autopilot-untriaged"])) is False
+
+
+def test_not_selectable_when_not_code_shaped(cfg):
+    ex = EngineeringExecutor(cfg, board=object(), journal=object())
+    assert ex.selectable(_sel_item(acceptance=[], deliverable="")) is False
+
+
+def test_selectable_via_deliverable_without_acceptance(cfg):
+    ex = EngineeringExecutor(cfg, board=object(), journal=object())
+    assert ex.selectable(_sel_item(acceptance=[], deliverable="ship the reloader")) is True

@@ -30,3 +30,18 @@ class EngineeringExecutor:
         if len(names) != 1:
             return None
         return self.config.repo_map.get(names[0])
+
+    def selectable(self, item: WorkItem) -> bool:
+        p = item.payload
+        tags = p.get("tags", [])
+        if not p.get("unblocked"):
+            return False
+        if p.get("verdict") != "valid":
+            return False
+        if "autopilot-untriaged" in tags:
+            return False
+        if self.resolve_repo(item) is None:   # also enforces exactly-one-known
+            return False
+        if not (p.get("acceptance") or p.get("deliverable")):
+            return False
+        return True
