@@ -149,3 +149,64 @@ def test_is_complete_requires_the_tag_not_prose():
 def test_strip_promise_removes_tag_and_trims():
     from skos.autopilot.engineering import strip_promise
     assert strip_promise("great work <promise>COMPLETE</promise>") == "great work"
+
+
+from skos.autopilot.types import GateResult, HarnessResult
+
+
+def _run_ex(mocker, cfg, grades, ci_status="green", cov=0.95):
+    ex = EngineeringExecutor(cfg, board=mocker.Mock(), journal=mocker.Mock())
+    mocker.patch.object(ex, "make_worktree", return_value="/wt/t1")
+    mocker.patch.object(ex, "prune_worktree")
+    mocker.patch.object(ex, "_diff", return_value="DIFF")
+    mocker.patch.object(ex, "_head_sha", return_value="sha1")
+    mocker.patch("skos.autopilot.engineering.external_ci_verdict", return_value=ci_status)
+    mocker.patch("skos.autopilot.engineering.diff_coverage", return_value=cov)
+    harness = mocker.Mock(name="harness")
+    harness.name = "claude-code"
+    harness.run_task.return_value = HarnessResult(ok=True, artifact=None, tokens=1,
+                                                  cost_usd=0.0, raw={})
+    harness.grade.side_effect = grades
+    item = WorkItem(kind="engineering", ref="t1", source="coord", repo=None,
+                    payload={"tags": ["repo:skrender"], "title": "t",
+                             "description": "d", "acceptance": ["a"]})
+    return ex, harness, item
+
+
+def test_run_stops_at_five_with_green_gate(mocker, cfg):
+    grades = [GateResult(score=3, passed=False, notes="thin tests", artifact=None),
+              GateResult(score=5, passed=True,
+                         notes="ready <promise>COMPLETE</promise>", artifact="pr")]
+    ex, harness, item = _run_ex(mocker, cfg, grades)
+    res = ex.run(item, harness)
+    assert res.passed is True and res.score == 5
+    assert harness.run_task.call_count == 2 and harness.grade.call_count == 2
+    assert ex.board.score_task.call_count == 2
+    rounds = [c.kwargs["round"] for c in ex.board.score_task.call_args_list]
+    assert rounds == [1, 2]
+
+
+def test_run_caps_at_four_rounds_then_fails(mocker, cfg):
+    grades = [GateResult(score=4, passed=False, notes="one gap", artifact=None)] * 6
+    ex, harness, item = _run_ex(mocker, cfg, grades)
+    res = ex.run(item, harness)
+    assert res.passed is False
+    assert harness.grade.call_count == 4        # round cap 4
+    assert ex.board.score_task.call_count == 4
+
+
+def test_twin_gate_blocks_merge_when_ci_red_even_at_five(mocker, cfg):
+    grades = [GateResult(score=5, passed=True,
+                         notes="<promise>COMPLETE</promise>", artifact="pr")] * 6
+    ex, harness, item = _run_ex(mocker, cfg, grades, ci_status="red")
+    res = ex.run(item, harness)
+    assert res.passed is False                  # CI red overrides a 5/5
+    assert harness.grade.call_count == 4
+
+
+def test_twin_gate_blocks_when_coverage_under_min(mocker, cfg):
+    grades = [GateResult(score=5, passed=True,
+                         notes="<promise>COMPLETE</promise>", artifact="pr")] * 6
+    ex, harness, item = _run_ex(mocker, cfg, grades, ci_status="green", cov=0.5)
+    res = ex.run(item, harness)
+    assert res.passed is False

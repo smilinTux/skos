@@ -8,6 +8,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .ci import external_ci_verdict, diff_coverage
 from .types import GateResult, GradeBrief, RepoSpec, TaskBrief, WorkItem
 
 
@@ -95,3 +96,51 @@ class EngineeringExecutor:
                        capture_output=True, text=True)
         subprocess.run(["git", "-C", repo.path, "worktree", "prune"],
                        capture_output=True, text=True)
+
+    _MAX_ROUNDS = 4
+
+    def _diff(self, repo: RepoSpec, wt: str) -> str:
+        proc = subprocess.run(["git", "-C", wt, "diff", repo.base_branch],
+                              capture_output=True, text=True)
+        return proc.stdout
+
+    def _head_sha(self, wt: str) -> str:
+        proc = subprocess.run(["git", "-C", wt, "rev-parse", "HEAD"],
+                              capture_output=True, text=True)
+        return proc.stdout.strip()
+
+    def run(self, item: WorkItem, harness) -> GateResult:
+        repo = self.resolve_repo(item)
+        p = item.payload
+        wt = self.make_worktree(item, repo)
+        pr_branch = f"autopilot/{item.ref}"
+        feedback: str | None = None
+        last: GateResult | None = None
+        for rnd in range(1, self._MAX_ROUNDS + 1):
+            # Ralph: a FRESH harness session that re-reads disk state each round.
+            tb = TaskBrief(task_id=item.ref, repo=repo, worktree=wt,
+                           title=p.get("title", ""), description=p.get("description", ""),
+                           acceptance=p.get("acceptance", []),
+                           prior_feedback=feedback, round=rnd)
+            harness.run_task(tb)
+            diff = self._diff(repo, wt)
+            ci_status = external_ci_verdict(repo, pr_branch, self._head_sha(wt))
+            cov = diff_coverage(repo, wt, diff)
+            gb = GradeBrief(task_id=item.ref, repo=repo, worktree=wt, diff=diff,
+                            acceptance=p.get("acceptance", []),
+                            ci_status=ci_status, diff_coverage=cov)
+            gr = harness.grade(gb)              # fresh, no shared context with run_task
+            self.board.score_task(item.ref, round=rnd, score=(gr.score or 0),
+                                  notes=strip_promise(gr.notes), harness=harness.name)
+            last = gr
+            cov_ok = cov is not None and cov >= repo.min_diff_coverage
+            # deterministic twin gate: LLM 5/5 + promise ANDed with CI green + coverage
+            if (gr.score == 5 and is_complete(gr.notes)
+                    and ci_status == "green" and cov_ok):
+                return GateResult(score=5, passed=True,
+                                  notes=strip_promise(gr.notes), artifact=gr.artifact)
+            feedback = strip_promise(gr.notes)
+        return GateResult(score=(last.score if last else None), passed=False,
+                          notes=f"did not converge in {self._MAX_ROUNDS} rounds: "
+                                f"{strip_promise(last.notes) if last else ''}",
+                          artifact=(last.artifact if last else None))
