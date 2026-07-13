@@ -84,3 +84,88 @@ class RunJournal:
         """Refs not yet finalized/escalated: a resumed run re-enters these."""
         return [ref for ref, it in self.data["items"].items()
                 if it.get("state") not in _TERMINAL]
+
+
+def read_run(run_id: str) -> dict:
+    """Read a run from disk. Returns {} if absent."""
+    p = runs_dir() / f"{run_id}.json"
+    if not p.exists():
+        return {}
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def write_run(run_id: str, data: dict) -> None:
+    """Write a run to disk atomically."""
+    p = runs_dir() / f"{run_id}.json"
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str),
+                   encoding="utf-8")
+    os.replace(tmp, p)
+
+
+class RunHandle:
+    """Per-run view used by executors: mutate one run's items through read/write_run."""
+
+    def __init__(self, run_id: str) -> None:
+        self.run_id = run_id
+
+    def _mutate(self, ref: str, patch: dict) -> None:
+        data = read_run(self.run_id) or {"run_id": self.run_id, "items": {},
+                                         "tokens": 0, "cost_usd": 0.0}
+        item = data.setdefault("items", {}).setdefault(ref, {})
+        item.update(patch)
+        item["updated_at"] = _now()
+        write_run(self.run_id, data)
+
+    def record_claim(self, ref: str, claimed_at: str) -> None:
+        self._mutate(ref, {"state": "claimed", "claimed_at": claimed_at})
+
+    def set_worktree(self, ref: str, path: str) -> None:
+        self._mutate(ref, {"worktree": path})
+
+    def worktree_for(self, ref: str) -> str | None:
+        return ((read_run(self.run_id).get("items") or {}).get(ref) or {}).get("worktree")
+
+    def set_item(self, ref: str, state: str, **extra) -> None:
+        self._mutate(ref, {"state": state, **extra})
+
+
+def handle(run_id: str) -> RunHandle:
+    """Return a RunHandle for mutating a run's items."""
+    return RunHandle(run_id)
+
+
+def render_status() -> str:
+    """Render status line for the latest run."""
+    runs = sorted(runs_dir().glob("*.json"))
+    if not runs:
+        return "no autopilot runs yet"
+    latest = read_run(runs[-1].stem)
+    items = latest.get("items", {})
+    return (f"run {latest.get('run_id')} phase={latest.get('phase')} "
+            f"items={len(items)} decisions={latest.get('decisions', 0)} "
+            f"dry_run={latest.get('dry_run')}")
+
+
+def render_run(run_id: str) -> str:
+    """Render a run as JSON."""
+    return json.dumps(read_run(run_id), indent=2, default=str)
+
+
+def render_list(what: str) -> list[str]:
+    """Render list of runs, claims, or decisions."""
+    if what == "runs":
+        return [p.stem for p in sorted(runs_dir().glob("*.json"))]
+    if what == "claims":
+        out = []
+        for p in sorted(runs_dir().glob("*.json")):
+            for ref, it in (read_run(p.stem).get("items") or {}).items():
+                if it.get("state") == "claimed":
+                    out.append(f"{ref} claimed_at={it.get('claimed_at')}")
+        return out
+    # decisions live in the digest manifest, not the run journal
+    from skos.gtd_ingest import gtd_dir
+    mp = gtd_dir() / "autopilot-digest.json"
+    if not mp.exists():
+        return []
+    return [f"{i['n']}. {i['prompt']}" for i in json.loads(mp.read_text()).get("items", [])]
