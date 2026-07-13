@@ -75,3 +75,25 @@ def warn_missing_capabilities(adapter: HarnessAdapter, needed: dict) -> list[str
             warnings.append(msg)
             log.warning(msg)
     return warnings
+
+
+HARNESSES: dict = {}
+
+
+def register_harness(name: str, factory) -> None:
+    """Register (or replace) a harness factory under its selection name."""
+    HARNESSES[name] = factory
+
+
+def build_harness(config, name: str | None = None):
+    """Construct the selected harness from config. Unknown name fails closed."""
+    import skos.autopilot.adapters   # noqa: F401  ensure adapters register
+    name = name or getattr(config, "harness", "claude-code")
+    factory = HARNESSES.get(name)
+    if factory is None:
+        raise ValueError(
+            f"unknown harness {name!r}; registered: {sorted(HARNESSES)}")
+    return factory(config)
+
+
+register_harness("stub", lambda config: StubHarness())
