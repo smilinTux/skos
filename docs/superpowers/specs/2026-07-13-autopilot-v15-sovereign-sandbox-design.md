@@ -20,10 +20,14 @@ Two coupled deliverables:
    and codex can be swapped by name (`--harness`) or config with no change above
    the seam. The sandbox is harness-agnostic: it confines whatever CLI runs inside.
 
-The strategic default is **pi** driving a **local sovereign model via skgateway**,
-because that keeps even the inference channel on the tailnet (no external reach at
-all). `live_execution` stays config-gated regardless of harness: landing v1.5 does
-not turn on live execution; the first live run is a Chef-gated PR-only canary.
+**pi** driving a **local sovereign model via skgateway** is the strategic *target*
+(it keeps even the inference channel on-tailnet, no external reach), but the
+**running default stays `claude-code` (Opus)**. pi and opencode ship as fully
+swappable options; switching the default to pi is a deliberate Chef act **after**
+watching pi-on-a-local-model produce real work in a canary and judging its
+quality against the 5/5 gate, not an automatic flip once the confinement proof is
+green. `live_execution` stays config-gated regardless of harness: landing v1.5
+does not turn on live execution; the first live run is a Chef-gated PR-only canary.
 
 ## 2. Context (what exists, what changed)
 
@@ -207,10 +211,11 @@ node, `live_execution` must not be enabled there.
 
 ## 8. Posture and config gating
 
-- `autopilot.yaml: harness.name` (default `claude-code` until the pi adapter +
-  proof are green, then Chef may switch the default to `pi`), `harness.model`
-  (routing, e.g. skgateway `sk-default` for pi), `harness.live_execution`
-  (**default false**), `harness.sandbox_image` per harness.
+- `autopilot.yaml: harness.name` (**default `claude-code` and it stays there**;
+  switching to `pi` is a deliberate Chef act after a canary validates pi-on-a-
+  local-model quality, never automatic), `harness.model` (routing, e.g. skgateway
+  `sk-default` for pi), `harness.live_execution` (**default false**),
+  `harness.sandbox_image` per harness.
 - Enabling live execution is a two-key act: `harness.live_execution: true` AND an
   explicit `--no-dry-run --canary` on one task. Merging v1.5 does not enable it.
 - First live use: a Chef-gated PR-only canary (`automerge_repos` stays empty).
