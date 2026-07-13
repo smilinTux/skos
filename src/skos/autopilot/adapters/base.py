@@ -139,9 +139,16 @@ class BaseCliAdapter:
     # -- the three seam methods (prompts copied verbatim from ClaudeCodeAdapter) --
     def assess(self, brief: AssessBrief) -> Verdict:
         instruction = (
-            "Assess whether a coord task is still valid work. Reply strictly as "
-            "JSON: {\"verdict\":\"valid|stale|obsolete|needs_decision\","
-            "\"reason\":\"...\"}.")
+            "Assess whether a coord task is still valid work, judging ONLY from its "
+            "title, description, and acceptance criteria. You do NOT have repo access "
+            "in this step; the implementer is given the repo downstream, so do NOT "
+            "return needs_decision merely because you cannot see the repo or its "
+            "files. verdict=valid if it is coherent, actionable work; stale if the "
+            "description is outdated but you can rewrite it (give updated_description "
+            "and updated_acceptance); obsolete if clearly no longer needed; "
+            "needs_decision ONLY if the task itself is ambiguous or self-contradictory. "
+            "Reply strictly as JSON: {\"verdict\":\"valid|stale|obsolete|"
+            "needs_decision\",\"reason\":\"...\"}.")
         data = json.dumps({"task_id": brief.task_id, "title": brief.title,
                            "description": brief.description,
                            "acceptance": brief.acceptance, "tags": brief.tags,
