@@ -26,6 +26,7 @@ class RepoSpec:                       # one entry of repo_map (autopilot.yaml)
     automerge: bool = False
     auto_revert: bool = False
     min_diff_coverage: float = 0.8
+    sandbox_image: str | None = None
 
 
 @dataclass

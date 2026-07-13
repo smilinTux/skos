@@ -17,6 +17,7 @@ from .types import RepoSpec
 _REPO_KEYS = {
     "name", "path", "base_branch", "integration_branch", "test_cmd", "ci",
     "coverage_cmd", "ci_poll_timeout", "automerge", "auto_revert", "min_diff_coverage",
+    "sandbox_image",
 }
 
 
@@ -48,6 +49,11 @@ class Config:
     epic_id: str | None = None
     dry_run: bool = True
     dry_run_summary: bool = False
+    harness_model: str | None = None
+    harness_base_url: str | None = None
+    live_execution: bool = False
+    mcp_endpoints: list[str] = field(default_factory=list)
+    sandbox_image: str | None = None
 
     def repo(self, name: str) -> RepoSpec | None:
         return self.repo_map.get(name)
@@ -77,6 +83,11 @@ class Config:
             epic_id=raw.get("epic_id"),
             dry_run=bool(raw.get("dry_run", True)),
             dry_run_summary=bool(raw.get("dry_run_summary", False)),
+            harness_model=raw.get("harness_model"),
+            harness_base_url=raw.get("harness_base_url"),
+            live_execution=bool(raw.get("live_execution", False)),
+            mcp_endpoints=list(raw.get("mcp_endpoints") or []),
+            sandbox_image=raw.get("sandbox_image"),
         )
 
 
