@@ -337,3 +337,21 @@ def test_caps_stop_and_escalate_between_items(clean_execs, fake_journal):
     ex.run.assert_not_called()                       # stopped before any run
     assert state == {}
     assert len(decisions) == 1 and "budget" in decisions[0].prompt.lower()
+
+
+def test_resume_skips_finalized(tmp_path, monkeypatch, clean_execs):
+    _write_task(tmp_path, "t-A", tags=["repo:skos"], acceptance_criteria=["x"])
+    _write_task(tmp_path, "t-B", tags=["repo:skos"], acceptance_criteria=["x"])
+    ex = _RunExec(GateResult(5, True, "ok", "pr")); EXECUTORS["engineering"] = ex
+    board = _board(["t-A", "t-B"])
+    harness = SimpleNamespace(name="h", assess=lambda b: Verdict(verdict="valid", reason=""))
+    prior = {"run_id": "rr", "items": {"t-A": {"state": "finalized", "round": 1, "score": 5}}}
+    monkeypatch.setattr(orch, "journal", SimpleNamespace(
+        read_run=lambda rid: prior, write_run=lambda rid, d: None))
+
+    orch.run_once(board=board, harness=harness, config=_config(),
+                  tasks_dir=tmp_path, run_id="rr")
+
+    # t-A already finalized -> not re-run; only t-B runs
+    ran = [c.args[0].ref for c in ex.run.call_args_list]
+    assert ran == ["t-B"]
