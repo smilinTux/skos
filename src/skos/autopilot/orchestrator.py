@@ -137,17 +137,19 @@ def is_untriaged(item: WorkItem) -> bool:
     return "autopilot-untriaged" in (item.payload.get("tags") or [])
 
 
-def phase1_triage(candidates, harness, *, repo_map, decisions) -> list[tuple[WorkItem, object]]:
+def phase1_triage(candidates, harness, *, repo_map, decisions,
+                  executors=None) -> list[tuple[WorkItem, object]]:
     """Select unblocked+valid+in-scope items whose executor.selectable is True and
     route them. Non-selectable or decision-shaped items go straight to the decision
     queue (the executor's escalate is NOT called for selectable=False). untriaged
     items are never auto-selected."""
     selected: list[tuple[WorkItem, object]] = []
     repo_map = repo_map or {}
+    table = executors if executors is not None else EXECUTORS
     for item in candidates:
         if is_untriaged(item):
             continue
-        ex = EXECUTORS.get(item.kind)
+        ex = table.get(item.kind)
         if ex is None:
             decisions.append(DecisionItem(qid=stable_qid(f"no-exec:{item.kind}", item.ref),
                 prompt=f"No executor registered for kind '{item.kind}' (task {item.ref}).",
@@ -237,8 +239,23 @@ def _default_tasks_dir() -> Path:
     return home / "coordination" / "tasks"
 
 
+def build_executors(config, board, run_id: str) -> dict:
+    """Assemble this run's executor table: the stub registry plus a fresh
+    EngineeringExecutor bound to run_id's journal handle. Per-run by design, so a
+    second run in one process never reuses a stale RunHandle. Does not mutate the
+    global EXECUTORS."""
+    from . import stubs as _stubs        # noqa: F401  import self-registers the stubs
+    from . import digest as digest_mod
+    from .engineering import EngineeringExecutor
+    table = dict(EXECUTORS)
+    table["engineering"] = EngineeringExecutor(config, board,
+                                               journal.handle(run_id), digest_mod)
+    return table
+
+
 def run_once(*, board, harness, config, tasks_dir=None, run_id=None, dry_run=None,
-             ledger: CapLedger | None = None, deepdive_proposals=None) -> dict:
+             ledger: CapLedger | None = None, deepdive_proposals=None,
+             executors=None) -> dict:
     """Execute one daily cycle: assess -> triage -> swarm -> report. Journals
     per-item state so a re-run resumes (see the resume task). Guardrails (kill
     switch, caps, dry-run) are layered in the following tasks."""
@@ -267,7 +284,9 @@ def run_once(*, board, harness, config, tasks_dir=None, run_id=None, dry_run=Non
     if kill_switch_active(config.enabled):
         return _checkpoint("triage")
 
-    selected = phase1_triage(candidates, harness, repo_map=config.repo_map, decisions=decisions)
+    executors = executors if executors is not None else build_executors(config, board, run_id)
+    selected = phase1_triage(candidates, harness, repo_map=config.repo_map,
+                             decisions=decisions, executors=executors)
     selected = [(it, ex) for it, ex in selected if it.ref not in done]  # resume: skip settled
 
     if not dry:
