@@ -227,3 +227,44 @@ def test_phase2_escalates_on_non_convergence():
     ex.finalize.assert_not_called()
     ex.escalate.assert_called_once()
     assert state["t-2"]["state"] == "escalated" and len(decisions) == 1
+
+
+def _decision(qid="q1", prio="high"):
+    return DecisionItem(qid=qid, prompt=f"Merge PR for {qid}?", options={"yes": "y", "no": "n"},
+                        action_ref="task-x", priority=prio)
+
+
+def test_write_decision_captures_source_autopilot(monkeypatch, tmp_path):
+    monkeypatch.setenv("SK_GTD_DIR", str(tmp_path / "gtd"))
+    import skos.gtd_ingest as gi
+    orch.write_decision(_decision("q1"))
+    items = json.loads((gi.gtd_dir() / "waiting-for.json").read_text())
+    assert items[0]["source"] == "autopilot" and items[0]["source_ref"] == "autopilot:q1"
+    assert items[0]["decision"]["qid"] == "q1" and items[0]["decision"]["answered"] is False
+
+
+def test_write_decision_falls_back_to_upsert_on_dup(monkeypatch):
+    cap = MagicMock(return_value=None)              # simulate duplicate
+    ups = MagicMock(return_value=("id1", "unchanged"))
+    monkeypatch.setattr("skos.gtd_ingest.capture", cap)
+    monkeypatch.setattr("skos.gtd_ingest.upsert", ups)
+    gid = orch.write_decision(_decision("q2"))
+    cap.assert_called_once()
+    ups.assert_called_once()                        # None -> upsert guarantees presence
+    assert gid == "id1"
+
+
+def test_phase3_dry_run_no_gtd_writes(monkeypatch):
+    cap = MagicMock(); monkeypatch.setattr("skos.gtd_ingest.capture", cap)
+    out = orch.phase3_report([_decision("q3")], dry_run=True, digest_date="2026-07-12")
+    cap.assert_not_called()
+    assert out["dry_run"] is True and "digest_preview" in out
+
+
+def test_phase3_writes_and_builds_manifest(monkeypatch, tmp_path):
+    monkeypatch.setenv("SK_GTD_DIR", str(tmp_path / "gtd"))
+    out = orch.phase3_report([_decision("q4")], dry_run=False, digest_date="2026-07-12")
+    from skos.autopilot import digest
+    from skos.gtd_ingest import gtd_dir
+    assert (gtd_dir() / "autopilot-digest.json").exists()
+    assert out["manifest"]["items"][0]["qid"] == "q4"
