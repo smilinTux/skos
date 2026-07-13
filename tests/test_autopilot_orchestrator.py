@@ -400,3 +400,17 @@ def test_run_once_task_filter(tmp_path, clean_execs):
                         tasks_dir=tmp_path, run_id="r1", task="keep",
                         executors={"engineering": ex})
     assert out["selected"] == ["keep"]           # only the targeted task ran
+
+
+def test_phase0_only_scopes_to_single_task(tmp_path):
+    import skos.autopilot.orchestrator as orch
+    from unittest.mock import MagicMock
+    _write_task(tmp_path, "target", tags=["repo:skos"], acceptance_criteria=["x"])
+    _write_task(tmp_path, "other", tags=["repo:skos"], acceptance_criteria=["y"])
+    board = _board(["target", "other"])          # both unblocked
+    harness = MagicMock()
+    harness.assess.return_value = Verdict(verdict="valid", reason="")
+    cands, _ = orch.phase0_assess(board=board, harness=harness, tasks_dir=tmp_path,
+                                  caps=Caps(), run_id="r1", dry_run=True, only="target")
+    assert harness.assess.call_count == 1        # only the one task assessed, not the board
+    assert [c.ref for c in cands] == ["target"]
