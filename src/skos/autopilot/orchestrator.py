@@ -262,6 +262,8 @@ def run_once(*, board, harness, config, tasks_dir=None, run_id=None, dry_run=Non
 
     prior = journal.read_run(run_id) or {}
     state = dict(prior.get("items") or {})
+    done = {ref for ref, st in state.items()
+            if st.get("state") in ("finalized", "escalated")}
 
     def _checkpoint(phase: str):
         journal.write_run(run_id, {"run_id": run_id, "phase": phase,
@@ -279,6 +281,7 @@ def run_once(*, board, harness, config, tasks_dir=None, run_id=None, dry_run=Non
         return _checkpoint("triage")
 
     selected = phase1_triage(candidates, harness, repo_map=config.repo_map, decisions=decisions)
+    selected = [(it, ex) for it, ex in selected if it.ref not in done]  # resume: skip settled
 
     if not dry:
         if kill_switch_active(config.enabled):
