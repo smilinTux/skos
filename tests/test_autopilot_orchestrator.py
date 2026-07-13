@@ -282,7 +282,7 @@ def test_run_once_full_pipeline(tmp_path, clean_execs):
     harness = SimpleNamespace(name="claude-code",
                               assess=lambda brief: Verdict(verdict="valid", reason=""))
     out = orch.run_once(board=board, harness=harness, config=_config(),
-                        tasks_dir=tmp_path, run_id="r1")
+                        tasks_dir=tmp_path, run_id="r1", executors={"engineering": ex})
     ex.run.assert_called_once()
     ex.finalize.assert_called_once()
     assert out["selected"] == ["t-1"] and out["run_id"] == "r1"
@@ -300,7 +300,7 @@ def test_dry_run_is_read_only(tmp_path, monkeypatch, clean_execs, fake_journal):
 
     out = orch.run_once(board=board, harness=harness, config=_config(dry_run=True),
                         tasks_dir=tmp_path, run_id="rdry",
-                        deepdive_proposals=[{"title": "new"}])
+                        deepdive_proposals=[{"title": "new"}], executors={"engineering": ex})
 
     board.update_task.assert_not_called()           # no coord mutation
     board.close_task_obsolete.assert_not_called()
@@ -320,7 +320,7 @@ def test_kill_switch_stops_before_swarm(tmp_path, monkeypatch, clean_execs, fake
     board = _board(["t-1"])
     harness = SimpleNamespace(name="h", assess=lambda b: Verdict(verdict="valid", reason=""))
     out = orch.run_once(board=board, harness=harness, config=_config(),
-                        tasks_dir=tmp_path, run_id="rk")
+                        tasks_dir=tmp_path, run_id="rk", executors={"engineering": ex})
     ex.run.assert_not_called()                       # never entered Phase 2
     assert out["stopped"] == "kill_switch"
 
@@ -349,7 +349,7 @@ def test_resume_skips_finalized(tmp_path, monkeypatch, clean_execs):
         read_run=lambda rid: prior, write_run=lambda rid, d: None))
 
     orch.run_once(board=board, harness=harness, config=_config(),
-                  tasks_dir=tmp_path, run_id="rr")
+                  tasks_dir=tmp_path, run_id="rr", executors={"engineering": ex})
 
     # t-A already finalized -> not re-run; only t-B runs
     ran = [c.args[0].ref for c in ex.run.call_args_list]
