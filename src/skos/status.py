@@ -306,10 +306,9 @@ def run(argv=None):
         # Telegram: the tables are fixed-width, so wrap them in a monospace code
         # fence to preserve column alignment; bold title lives outside the block.
         tg_body = f"📊 *skos Ops Report: {d}*\n\n```\n{report}\n\n{footer}\n```"
-        # single bold title lives inside tg_body (outside the fence); no --subject
-        # header, or Hermes prepends a second identical title (double-title bug).
         subprocess.run(["hermes", "send", "--to", HERMES_DM,
-                        tg_body], capture_output=True, text=True)
+                        "--subject", f"📊 skos Ops Report: {d}", tg_body],
+                       capture_output=True, text=True)
         # console/log copy stays plain-text (no fences)
         print(f"📊 skos Ops Report: {d}\n\n{report}\n\n{footer}")
         return
