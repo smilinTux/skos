@@ -86,3 +86,19 @@ def test_not_selectable_when_not_code_shaped(cfg):
 def test_selectable_via_deliverable_without_acceptance(cfg):
     ex = EngineeringExecutor(cfg, board=object(), journal=object())
     assert ex.selectable(_sel_item(acceptance=[], deliverable="ship the reloader")) is True
+
+
+def test_claim_calls_board_then_journal(mocker, cfg):
+    board = mocker.Mock()
+    journal = mocker.Mock()
+    manager = mocker.Mock()
+    manager.attach_mock(board.claim_task, "claim")
+    manager.attach_mock(journal.record_claim, "record")
+    ex = EngineeringExecutor(cfg, board=board, journal=journal)
+    item = WorkItem(kind="engineering", ref="t1", source="coord", repo=None,
+                    payload={"tags": ["repo:skrender"]})
+    ex.claim(item)
+    board.claim_task.assert_called_once_with("autopilot", "t1")
+    assert journal.record_claim.call_args.kwargs.get("claimed_at") or \
+           journal.record_claim.call_args.args
+    assert [c[0] for c in manager.mock_calls] == ["claim", "record"]
