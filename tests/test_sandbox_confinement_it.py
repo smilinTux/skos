@@ -6,7 +6,10 @@ runs a REAL confined container through Sandbox and proves, not asserts in prose:
   1. host secret trees are absent inside the container;
   2. an off-allowlist host is denied by the egress proxy (403);
   3. an on-allowlist host is not denied (the allowlist distinguishes them);
-  4. the worktree is writable and the container rootfs is read-only.
+  4. the worktree is writable and the container rootfs is read-only;
+  5. a RAW connection with no proxy involved also fails, proving the
+     `--internal` network itself has no external route (not just that the
+     proxy is the one saying no).
 
 Until this passes on a node, harness.live_execution must stay off there.
 """
@@ -61,6 +64,11 @@ try:
     r["allow"] = status("github.com")
 except Exception as e:
     r["allow"] = "ERR:%s" % e
+try:
+    socket.create_connection(("example.com", 443), timeout=6).close()
+    r["direct_egress"] = "REACHED"          # would be a confinement hole
+except OSError:
+    r["direct_egress"] = "blocked"
 print(json.dumps(r))
 '''
 
@@ -89,3 +97,5 @@ def test_sandbox_confinement(tmp_path):
     assert "403" in str(out.get("deny", "")), out
     # 3. on-allowlist not denied (200 tunneled, or 502 if upstream unreachable)
     assert "403" not in str(out.get("allow", "")), out
+    # 5. no direct route out of the --internal network, proxy bypass excluded
+    assert out.get("direct_egress") == "blocked", out

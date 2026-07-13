@@ -57,7 +57,8 @@ class BaseCliAdapter:
     # -- shared spawn helpers --
     def _run_raw(self, instruction: str, data: str, *, worktree: str, repo) -> dict:
         prompt = frame(instruction, data)
-        spec = LaunchSpec(name=self.name, argv=self._argv(prompt), image=self._image(),
+        image = getattr(repo, "sandbox_image", None) or self._image()
+        spec = LaunchSpec(name=self.name, argv=self._argv(prompt), image=image,
                           worktree=worktree, auth_mounts=self._auth_mounts(),
                           auth_env=self._auth_env(), egress_hosts=self.egress_hosts)
         return self.sandbox.spawn(spec, repo_remote_host=self._remote_host(repo),
@@ -93,7 +94,7 @@ class BaseCliAdapter:
         raw = self._run_raw(instruction, data, worktree=brief.worktree, repo=brief.repo)
         usage = raw.get("usage", {}) if isinstance(raw, dict) else {}
         return HarnessResult(
-            ok=not bool(raw.get("is_error")),
+            ok=(not bool(raw.get("is_error"))) and int(raw.get("exit_code", 0) or 0) == 0,
             artifact=brief.worktree,
             tokens=int(usage.get("input_tokens", 0)) + int(usage.get("output_tokens", 0)),
             cost_usd=float(raw.get("total_cost_usd", 0.0) or 0.0),

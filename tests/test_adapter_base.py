@@ -1,6 +1,6 @@
 from skos.autopilot.adapters.base import BaseCliAdapter
 from skos.autopilot.sandbox import Sandbox, LaunchSpec, AuthMount
-from skos.autopilot.types import AssessBrief
+from skos.autopilot.types import AssessBrief, RepoSpec, TaskBrief
 
 
 class _Fake(BaseCliAdapter):
@@ -27,3 +27,52 @@ def test_assess_builds_spec_and_delegates_to_sandbox(monkeypatch):
     assert isinstance(spec, LaunchSpec) and spec.image == "sandbox-fake:1"
     assert spec.argv[0] == "fake" and spec.auth_env["BASE_URL"] == "http://gw.local"
     assert spec.egress_hosts == ["gw.local"]
+
+
+def _repo(**kw):
+    base = dict(name="r", path="/tmp/r", base_branch="main", integration_branch="int",
+                test_cmd="pytest", ci="none")
+    base.update(kw)
+    return RepoSpec(**base)
+
+
+def _task_brief(repo):
+    return TaskBrief(task_id="t1", repo=repo, worktree="/tmp/wt", title="t",
+                     description="d", acceptance=[], prior_feedback=None, round=0)
+
+
+def test_run_task_crash_is_not_ok(monkeypatch):
+    sb = Sandbox(live_execution=True)
+    monkeypatch.setattr(sb, "spawn",
+        lambda spec, **kw: {"result": "boom", "exit_code": 1, "is_error": True})
+    a = _Fake(sb, egress_hosts=[])
+    result = a.run_task(_task_brief(_repo()))
+    assert result.ok is False
+
+
+def test_run_task_clean_json_exit_zero_is_ok(monkeypatch):
+    sb = Sandbox(live_execution=True)
+    monkeypatch.setattr(sb, "spawn", lambda spec, **kw: {"result": {"x": 1}})
+    a = _Fake(sb, egress_hosts=[])
+    result = a.run_task(_task_brief(_repo()))
+    assert result.ok is True
+
+
+def test_run_raw_uses_per_repo_sandbox_image_override(monkeypatch):
+    seen = {}
+    sb = Sandbox(live_execution=True)
+    monkeypatch.setattr(sb, "spawn",
+        lambda spec, **kw: seen.setdefault("spec", spec) and {"result": {}})
+    a = _Fake(sb, egress_hosts=[])
+    a._run_raw("instr", "data", worktree="/tmp/wt", repo=_repo(sandbox_image="repo-img:9"))
+    assert seen["spec"].image == "repo-img:9"
+
+
+def test_run_raw_falls_back_to_adapter_image_when_repo_image_is_none(monkeypatch):
+    seen = {}
+    sb = Sandbox(live_execution=True)
+    monkeypatch.setattr(sb, "spawn",
+        lambda spec, **kw: seen.setdefault("spec", spec) and {"result": {}})
+    a = _Fake(sb, egress_hosts=[])
+    a._run_raw("instr", "data", worktree="/tmp/wt", repo=_repo(sandbox_image=None))
+    assert seen["spec"].image == "sandbox-fake:1"

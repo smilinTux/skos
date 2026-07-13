@@ -19,8 +19,11 @@ class ClaudeCodeAdapter(BaseCliAdapter):
                     f"tool {t!r} is denied by the autopilot firewall (fail closed)")
         self.allowed_tools = list(allowed_tools)
         self.image = image or "sandbox-claude:1"
+        egress = list(mcp_endpoints or [])
+        if "api.anthropic.com" not in egress:
+            egress.append("api.anthropic.com")
         super().__init__(sandbox or Sandbox(live_execution=live_execution),
-                         egress_hosts=mcp_endpoints, live_execution=live_execution)
+                         egress_hosts=egress, live_execution=live_execution)
 
     def capabilities(self):
         return {"session_resume": True, "structured_output": "json",

@@ -30,3 +30,16 @@ def test_no_secret_paths_mounted():
     j = " ".join(Sandbox()._docker_run_argv(_spec(), "n", "p"))
     for secret in (".skcapstone", ".hermes", ".ssh", "skvault"):
         assert secret not in j
+
+
+def test_container_name_is_inserted_without_disturbing_the_tail():
+    argv = Sandbox()._docker_run_argv(_spec(), "n", "p", container_name="sbxrun-x")
+    assert "--name" in argv
+    assert argv[argv.index("--name") + 1] == "sbxrun-x"
+    assert argv[-3:] == ["claude", "-p", "hi"]           # harness argv is still the tail
+
+
+def test_no_container_name_omits_the_flag():
+    argv = Sandbox()._docker_run_argv(_spec(), "n", "p")
+    assert "--name" not in argv
+    assert argv[-3:] == ["claude", "-p", "hi"]
