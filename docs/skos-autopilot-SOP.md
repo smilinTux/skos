@@ -18,10 +18,11 @@ By operator decision (after a security review, 2026-07-12), v1 ships with the
 Claude Code harness HARD-DISABLED from live execution (posture C). v1 runs the
 orchestration, routing, coord-scoring, and digest machinery in dry-run against a
 deterministic `StubHarness` that never spawns a model. Canary and live modes
-return a "disabled in v1" message. The real sovereign sandbox (confined Bash,
-pinned egress) is the v1.5 gate, coord `07c78c7f`. Do NOT set the adapter's
-`live_execution=True` until v1.5 completes and its integration test proves a
-confined session cannot read secrets or reach an off-allowlist host.
+return a "disabled in v1" message. The real sovereign sandbox (Docker
+confinement, pinned egress, section 13 below) is the v1.5 gate, coord
+`07c78c7f`. Do NOT set the adapter's `live_execution=True` until v1.5
+completes and its integration test proves a confined session cannot read
+secrets or reach an off-allowlist host.
 
 ## 3. Build and install (skcapstone first)
 
@@ -118,9 +119,43 @@ ad-hoc run cannot overlap the scheduled one.
   worktree.
 - "disabled in v1" on run: expected for `--no-dry-run`/`--canary` under posture C.
 
-## 13. References
+## 13. The v1.5 sandbox and harness registry
+
+The v1.5 sovereign-sandbox build replaces bwrap confinement with a Docker
+sandbox and makes the harness a swappable registry. Full design and plan:
+`skos-autopilot-architecture.md` section 12,
+`docs/superpowers/specs/2026-07-13-autopilot-v15-sovereign-sandbox-design.md`,
+`docs/superpowers/plans/2026-07-13-autopilot-v15-sandbox.md`.
+
+- **Choosing a harness.** Set `autopilot.yaml: harness.name` (default
+  `claude-code`). Other options: `pi` (the sovereign target), `opencode`,
+  `codex` (stub). `pi` and `opencode` can route to a local model via
+  `harness_model` + `harness_base_url` (point at skgateway), which keeps all
+  inference egress on the tailnet instead of a public-internet leg.
+- **Building the sandbox images.** `bash docker/sandbox/build.sh` builds
+  `sandbox-proxy:1` plus the per-harness images. A node without these images
+  fails closed: no live run is possible there.
+- **Running the confinement proof.** Before enabling live execution on a
+  node, run
+  `RUN_SANDBOX_IT=1 python -m pytest tests/test_sandbox_confinement_it.py`
+  and confirm it passes. This is the evidence gate, not a formality: it
+  asserts a confined session cannot read secrets and cannot reach an
+  off-allowlist host.
+- **Enabling live execution (two-key act).** Both of the following must be
+  true; neither alone is enough:
+  1. `harness.live_execution: true` in `autopilot.yaml`.
+  2. An explicit `skos autopilot run --no-dry-run --canary --task <id>` (a
+     canary targets exactly one task and stays PR-only while
+     `automerge_repos` is empty).
+  Do this only after the confinement proof in the prior step is green on that
+  node.
+
+## 14. References
 
 - Design: `skos-autopilot-architecture.md` (section 12 = harness security model,
   section 21 = adopted Archon patterns).
 - Coord scoring: `../../skcapstone-repos/skcapstone/docs/autopilot-coord-scoring.md`.
 - v1.5 sovereign sandbox: coord `07c78c7f`. Archon-leverage epic: coord `49a74ed2`.
+- v1.5 spec and plan:
+  `docs/superpowers/specs/2026-07-13-autopilot-v15-sovereign-sandbox-design.md`,
+  `docs/superpowers/plans/2026-07-13-autopilot-v15-sandbox.md`.
