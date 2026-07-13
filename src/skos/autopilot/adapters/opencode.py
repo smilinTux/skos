@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 
-from .base import BaseCliAdapter
+from .base import BaseCliAdapter, parse_event_stream
 
 
 class OpenCodeAdapter(BaseCliAdapter):
@@ -25,9 +25,11 @@ class OpenCodeAdapter(BaseCliAdapter):
                 "sandbox": True, "tool_restrictions": True}
 
     def _argv(self, prompt: str) -> list[str]:
-        argv = ["opencode", "run", prompt, "--pure"]
+        # `--format json` emits the raw NDJSON event stream (confirmed from
+        # `opencode run --help`); without it opencode prints formatted text.
+        argv = ["opencode", "run", prompt, "--format", "json", "--pure"]
         if self.model:
-            argv += ["--model", self.model]
+            argv += ["--model", self.model]     # provider/model form, e.g. nvidia/x
         return argv
 
     def _image(self) -> str:
@@ -47,15 +49,19 @@ class OpenCodeAdapter(BaseCliAdapter):
             return {}
         if any(k in raw for k in ("verdict", "score", "passed")):
             return raw
-        for key in ("result", "content", "message", "text", "output"):
-            v = raw.get(key)
-            if isinstance(v, dict):
-                return v
-            if isinstance(v, str):
-                try:
-                    parsed = json.loads(v)
-                    if isinstance(parsed, dict):
-                        return parsed
-                except (json.JSONDecodeError, TypeError):
-                    continue
+        body = raw.get("result")
+        if isinstance(body, dict):
+            return body
+        if isinstance(body, str):
+            # opencode `--format json` is an NDJSON event stream; Sandbox.spawn
+            # could not json.loads it whole, so it arrives as result=<stream>.
+            obj = parse_event_stream(body)
+            if obj:
+                return obj
+            try:                                   # single-object fallback
+                single = json.loads(body)
+                if isinstance(single, dict):
+                    return single
+            except (json.JSONDecodeError, TypeError):
+                pass
         return {}

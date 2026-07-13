@@ -7,8 +7,9 @@ def _a(**kw):
 
 
 def test_argv_default_and_with_model():
-    assert _a()._argv("P") == ["opencode", "run", "P", "--pure"]
-    assert _a(model="ollama/qwen")._argv("P") == ["opencode", "run", "P", "--pure", "--model", "ollama/qwen"]
+    assert _a()._argv("P") == ["opencode", "run", "P", "--format", "json", "--pure"]
+    assert _a(model="nvidia/x")._argv("P") == [
+        "opencode", "run", "P", "--format", "json", "--pure", "--model", "nvidia/x"]
 
 
 def test_image_and_local_routing():
@@ -24,3 +25,16 @@ def test_parse_defensive():
     assert a._parse({"result": {"verdict": "valid"}}) == {"verdict": "valid"}
     assert a._parse({"result": "{\"passed\": true}"}) == {"passed": True}
     assert a._parse({"result": "junk"}) == {}
+
+
+# Real captured `opencode run ... --format json` output: an NDJSON event stream
+# whose final `text` event carries the model reply as part.text.
+REAL_OPENCODE = (
+    '{"type":"step_start","sessionID":"s1","part":{"type":"step-start"}}\n'
+    '{"type":"text","sessionID":"s1","part":{"type":"text",'
+    '"text":"{\\"verdict\\":\\"valid\\",\\"reason\\":\\"ok\\"}"}}\n')
+
+
+def test_parse_real_event_stream():
+    a = _a()
+    assert a._parse({"result": REAL_OPENCODE}) == {"verdict": "valid", "reason": "ok"}

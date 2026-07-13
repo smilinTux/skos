@@ -8,9 +8,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates python3 python3-pip python3-venv curl \
     && rm -rf /var/lib/apt/lists/*
 
-# pinned harness CLI (CONFIRM against opencode.ai):
-RUN npm install -g opencode-ai || \
-    echo "WARNING: opencode install command unconfirmed; see opencode.ai and fix this line"
+# harness CLI: the official installer drops a self-contained binary; copy it onto
+# PATH so any uid can run it.
+RUN curl -fsSL https://opencode.ai/install | bash \
+    && cp /root/.opencode/bin/opencode /usr/local/bin/opencode \
+    && chmod 0755 /usr/local/bin/opencode
 
 RUN pip3 install --no-cache-dir --break-system-packages pytest coverage \
     || pip3 install --no-cache-dir pytest coverage

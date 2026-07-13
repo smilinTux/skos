@@ -31,3 +31,10 @@ def test_parse_extracts_model_reply_dict():
     assert a._parse({"result": "{\"verdict\": \"stale\"}"}) == {"verdict": "stale"}
     # unparseable -> empty dict, never crash
     assert a._parse({"result": "not json"}) == {}
+
+
+def test_parse_event_stream_ndjson():
+    a = _a()
+    stream = ('{"type":"text","part":{"type":"text",'
+              '"text":"{\\"score\\":5,\\"passed\\":true}"}}\n')
+    assert a._parse({"result": stream}) == {"score": 5, "passed": True}

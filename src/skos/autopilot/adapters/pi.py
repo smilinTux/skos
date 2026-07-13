@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from .base import BaseCliAdapter
+from .base import BaseCliAdapter, parse_event_stream
 
 
 class PiAdapter(BaseCliAdapter):
@@ -48,15 +48,19 @@ class PiAdapter(BaseCliAdapter):
         # already the model reply dict
         if any(k in raw for k in ("verdict", "score", "passed")):
             return raw
-        for key in ("result", "content", "message", "text", "output"):
-            v = raw.get(key)
-            if isinstance(v, dict):
-                return v
-            if isinstance(v, str):
-                try:
-                    parsed = json.loads(v)
-                    if isinstance(parsed, dict):
-                        return parsed
-                except (json.JSONDecodeError, TypeError):
-                    continue
+        body = raw.get("result")
+        if isinstance(body, dict):
+            return body
+        if isinstance(body, str):
+            # pi `--mode json` is an event stream (same shape family as opencode);
+            # Sandbox.spawn hands it over as result=<stream> when not a lone object.
+            obj = parse_event_stream(body)
+            if obj:
+                return obj
+            try:                                   # single-object fallback
+                single = json.loads(body)
+                if isinstance(single, dict):
+                    return single
+            except (json.JSONDecodeError, TypeError):
+                pass
         return {}
