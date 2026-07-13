@@ -2,6 +2,13 @@
 deny-by-default security model (spec section 12). Every control is expressed as
 a composed argv / prompt / LaunchConfig that an assertion can inspect; `_spawn`
 is the only method that touches a subprocess. Fail closed everywhere.
+
+v1 POSTURE (option C): live execution is hard-disabled (_spawn raises unless
+live_execution=True, which v1 never sets). v1.5 must complete the sovereign
+sandbox before enabling: bind claude auth (~/.claude) read-only into the jail,
+replace --share-net with --unshare-net plus a pinned egress proxy enforcing
+egress_allowlist, and confirm claude runs correctly confined. Do NOT set
+live_execution=True until then.
 """
 from __future__ import annotations
 
@@ -18,10 +25,21 @@ from .types import (AssessBrief, GateResult, GradeBrief, HarnessResult,
 # -- deny-by-default tool firewall (spec section 12) --
 _FORBIDDEN_EXACT = {
     "capauth_secret_get", "run_ansible_playbook",
-    "send_message", "telegram_send", "skchat_send", "comm_notify",
     "sk-access run", "sk-access exec", "run", "exec",
 }
-_FORBIDDEN_PREFIX = ("kms_", "trustee_", "skstacks_secret")
+_FORBIDDEN_PREFIX = ("kms_", "trustee_", "skstacks_secret", "capauth_secret",
+                     "skstacks_secret_get", "skstacks_secret_set")
+# any tool whose bare name contains one of these is an outbound-comms / exfil
+# vector and is denied by category (deny-by-default guard, safe to over-block a
+# curated code allowlist of Read/Edit/Write/Bash/coord_score):
+_FORBIDDEN_SUBSTR = ("send", "notify", "telegram", "skchat", "comm_notify",
+                     "chat_send", "group_send", "group_add", "p2p", "call_peer",
+                     "initiate_call", "file_send", "send_file", "transfer",
+                     "webhook", "secret")
+
+
+def _norm(tool: str) -> str:
+    return tool.strip().lower()
 
 
 def _bare(tool: str) -> str:
@@ -30,10 +48,19 @@ def _bare(tool: str) -> str:
 
 
 def is_forbidden(tool: str) -> bool:
-    t = _bare(tool)
-    if tool in _FORBIDDEN_EXACT or t in _FORBIDDEN_EXACT:
+    t = _norm(tool)
+    # whole-server MCP grant "mcp__server" (exactly one "__", no tool segment)
+    # would allow every tool on that server -> never allowed.
+    if t.startswith("mcp__") and t.count("__") == 1:
         return True
-    return any(t.startswith(p) for p in _FORBIDDEN_PREFIX)
+    bare = _bare(t)
+    if t in _FORBIDDEN_EXACT or bare in _FORBIDDEN_EXACT:
+        return True
+    if any(bare.startswith(p) for p in _FORBIDDEN_PREFIX):
+        return True
+    if any(s in bare for s in _FORBIDDEN_SUBSTR):
+        return True
+    return False
 
 
 # -- untrusted-input framing (spec section 12) --
@@ -88,7 +115,7 @@ def assert_within_worktree(path: str, worktree: str) -> str:
 
 
 def _wrapper_bin() -> str | None:
-    return shutil.which("bwrap") or shutil.which("unshare")
+    return shutil.which("bwrap")
 
 
 class ClaudeCodeAdapter:
@@ -98,13 +125,14 @@ class ClaudeCodeAdapter:
 
     name = "claude-code"
 
-    def __init__(self, allowed_tools, mcp_endpoints=None):
+    def __init__(self, allowed_tools, mcp_endpoints=None, live_execution: bool = False):
         for t in allowed_tools:
             if is_forbidden(t):
                 raise ForbiddenToolError(
                     f"tool {t!r} is denied by the autopilot firewall (fail closed)")
         self.allowed_tools = list(allowed_tools)
         self.mcp_endpoints = list(mcp_endpoints or [])
+        self.live_execution = live_execution
 
     def capabilities(self):
         return {"session_resume": True, "structured_output": "json",
@@ -127,22 +155,18 @@ class ClaudeCodeAdapter:
                 "no bwrap/unshare on this node; engineering execution disabled "
                 "(fail closed)")
         home = os.path.expanduser("~")
-        if os.path.basename(binp) == "bwrap":
-            return [
-                binp, "--unshare-all", "--share-net", "--die-with-parent",
-                "--ro-bind", "/usr", "/usr",
-                "--ro-bind", "/bin", "/bin",
-                "--ro-bind", "/lib", "/lib",
-                "--ro-bind", "/lib64", "/lib64",
-                "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf",
-                "--proc", "/proc", "--dev", "/dev",
-                "--tmpfs", home,                 # hides ~/.skcapstone ~/.hermes ~/.ssh skvault
-                "--bind", worktree, worktree,    # RW: worktree only
-                "--chdir", worktree,
-            ]
-        # unshare fallback: fresh mount+user ns, worktree as cwd
-        return [binp, "--mount", "--user", "--map-root-user",
-                "--", "env", "-C", worktree]
+        return [
+            binp, "--unshare-all", "--share-net", "--die-with-parent",
+            "--ro-bind", "/usr", "/usr",
+            "--ro-bind", "/bin", "/bin",
+            "--ro-bind", "/lib", "/lib",
+            "--ro-bind", "/lib64", "/lib64",
+            "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf",
+            "--proc", "/proc", "--dev", "/dev",
+            "--tmpfs", home,                 # hides ~/.skcapstone ~/.hermes ~/.ssh skvault
+            "--bind", worktree, worktree,    # RW: worktree only
+            "--chdir", worktree,
+        ]
 
     # -- pinned egress allowlist --
     def _egress(self, repo_remote, ci_endpoint) -> list[str]:
@@ -169,7 +193,15 @@ class ClaudeCodeAdapter:
 
     # -- the only subprocess boundary --
     def _spawn(self, cfg: LaunchConfig) -> dict:
-        proc = subprocess.run(cfg.argv, capture_output=True, text=True, cwd=cfg.worktree)
+        if not self.live_execution:
+            raise HarnessUnavailable(
+                "live harness execution is disabled in v1 (posture C): the "
+                "sovereign sandbox is not yet wired. Enable only after the v1.5 "
+                "sandbox build (bind claude auth read-only, unshare-net + pinned "
+                "egress proxy).")
+        # when enabled (v1.5): run INSIDE the confinement wrapper, never bare argv
+        cmd = list(cfg.bash_wrapper) + ["--"] + list(cfg.argv)
+        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=cfg.worktree)
         try:
             return json.loads(proc.stdout or "{}")
         except json.JSONDecodeError:

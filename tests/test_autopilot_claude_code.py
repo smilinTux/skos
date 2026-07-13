@@ -7,7 +7,7 @@ from skos.autopilot.claude_code import (
     ClaudeCodeAdapter, ForbiddenToolError, HarnessUnavailable, PathGuardError,
     LaunchConfig, DATA_BEGIN, DATA_END, frame, is_forbidden, assert_within_worktree,
 )
-from skos.autopilot.types import TaskBrief, RepoSpec
+from skos.autopilot.types import AssessBrief, TaskBrief, RepoSpec
 
 ALLOWED = ["Read", "Edit", "Write", "Bash", "mcp__skcapstone__coord_score"]
 
@@ -29,6 +29,11 @@ def test_argv_carries_skip_permissions_json_and_allowlist():
     "telegram_send", "skchat_send", "comm_notify", "send_message",
     "mcp__skcapstone__capauth_secret_get", "mcp__skcapstone__kms_status",
     "mcp__sk-access__run",
+    "mcp__skcapstone",                    # whole-server MCP grant (bypass)
+    "mcp__skchat__group_send",
+    "send_file", "send_notification", "p2p_send", "group_send",
+    "KMS_ROTATE",                         # case variant
+    " kms_rotate ",                       # whitespace variant
 ])
 def test_forbidden_tool_fails_closed(tool):
     assert is_forbidden(tool)
@@ -60,6 +65,39 @@ def test_bash_wrapper_fails_closed_without_primitive(monkeypatch):
     a = ClaudeCodeAdapter(ALLOWED)
     with pytest.raises(HarnessUnavailable):
         a._bash_wrapper("/some/wt")
+
+
+def test_spawn_disabled_by_default_fails_closed(monkeypatch):
+    monkeypatch.setattr("skos.autopilot.claude_code._wrapper_bin", lambda: "/usr/bin/bwrap")
+    a = ClaudeCodeAdapter(ALLOWED)                          # live_execution defaults False
+    assert a.live_execution is False
+    brief = AssessBrief(task_id="t-1", title="x", description="d",
+                        acceptance=["a"], tags=[], repo=None, codebase_context="c")
+    with pytest.raises(HarnessUnavailable):
+        a.assess(brief)
+
+
+def test_spawn_when_enabled_runs_inside_wrapper(monkeypatch, tmp_path):
+    monkeypatch.setattr("skos.autopilot.claude_code._wrapper_bin", lambda: "/usr/bin/bwrap")
+    a = ClaudeCodeAdapter(["Read", "Edit", "Write", "Bash"], live_execution=True)
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"result":{}}', stderr="")
+
+    monkeypatch.setattr("skos.autopilot.claude_code.subprocess.run", fake_run)
+    brief = AssessBrief(task_id="t-1", title="x", description="d",
+                        acceptance=["a"], tags=[], repo=None, codebase_context="c")
+    a.assess(brief)
+
+    assert len(calls) == 1
+    cmd = calls[0]
+    assert cmd[0] == "/usr/bin/bwrap"                        # wrapper is APPLIED, not bare argv
+    assert "--" in cmd
+    dash_idx = cmd.index("--")
+    assert "claude" in cmd[dash_idx + 1:]                    # claude argv follows the wrapper
 
 
 def test_path_guard_rejects_paths_outside_worktree(tmp_path):
@@ -111,7 +149,7 @@ def test_integration_real_claude_edits_worktree(tmp_path):
                     "commit", "-qm", "seed"], cwd=repo, check=True)
     if not shutil.which("claude"):
         pytest.skip("no claude binary")
-    a = ClaudeCodeAdapter(["Read", "Edit", "Write", "Bash"])
+    a = ClaudeCodeAdapter(["Read", "Edit", "Write", "Bash"], live_execution=True)
     brief = TaskBrief(
         task_id="it-1",
         repo=RepoSpec("fixture", str(repo), "main", "ap", "true", "none"),
