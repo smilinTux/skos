@@ -102,3 +102,28 @@ def test_claim_calls_board_then_journal(mocker, cfg):
     assert journal.record_claim.call_args.kwargs.get("claimed_at") or \
            journal.record_claim.call_args.args
     assert [c[0] for c in manager.mock_calls] == ["claim", "record"]
+
+
+def test_make_worktree_git_argv(mocker, cfg):
+    run = mocker.patch("skos.autopilot.engineering.subprocess.run",
+                       return_value=mocker.Mock(returncode=0, stdout="", stderr=""))
+    ex = EngineeringExecutor(cfg, board=object(), journal=object())
+    item = WorkItem(kind="engineering", ref="t1", source="coord", repo=None, payload={})
+    spec = cfg.repo_map["skrender"]
+    wt = ex.make_worktree(item, spec)
+    argv = run.call_args_list[0].args[0]
+    assert argv[:6] == ["git", "-C", "/repos/skrender", "worktree", "add", "-b"]
+    assert argv[6] == "autopilot/t1"          # new branch name
+    assert argv[7] == wt                       # worktree path
+    assert argv[8] == "main"                   # base_branch checkout point
+
+
+def test_prune_worktree_git_argv(mocker, cfg):
+    run = mocker.patch("skos.autopilot.engineering.subprocess.run",
+                       return_value=mocker.Mock(returncode=0, stdout="", stderr=""))
+    ex = EngineeringExecutor(cfg, board=object(), journal=object())
+    ex.prune_worktree(cfg.repo_map["skrender"], "/repos/skrender-wt/t1")
+    calls = [c.args[0] for c in run.call_args_list]
+    assert ["git", "-C", "/repos/skrender", "worktree", "remove", "--force",
+            "/repos/skrender-wt/t1"] in calls
+    assert ["git", "-C", "/repos/skrender", "worktree", "prune"] in calls
