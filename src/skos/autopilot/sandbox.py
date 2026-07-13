@@ -74,4 +74,27 @@ class Sandbox:
                 "harness.live_execution=true only after the confinement proof passes.")
         self._ensure_capable(spec)
         allow = [h for h in ([repo_remote_host, ci_host] + list(spec.egress_hosts)) if h]
-        raise NotImplementedError("Sandbox.spawn network/proxy lifecycle lands in A3")
+        net = f"sbxnet-{os.getpid()}-{len(allow)}"
+        proxy_alias = "sbxproxy"
+        proxy_name = f"{proxy_alias}-{os.getpid()}"
+        try:
+            subprocess.run([self.docker, "network", "create", "--internal", net],
+                           capture_output=True, text=True, check=True)
+            # proxy sidecar: dual-homed (internal net + default bridge) so it is the
+            # ONLY route out; started with the pinned allowlist; reached by alias.
+            subprocess.run(
+                [self.docker, "run", "-d", "--name", proxy_name, "--network", net,
+                 "--network-alias", proxy_alias, "sandbox-proxy:1",
+                 "python", "-m", "skos.autopilot.sandbox_proxy", str(PROXY_PORT), *allow],
+                capture_output=True, text=True, check=True)
+            subprocess.run([self.docker, "network", "connect", "bridge", proxy_name],
+                           capture_output=True, text=True)          # give proxy outward egress
+            proc = subprocess.run(self._docker_run_argv(spec, net, proxy_alias),
+                                  capture_output=True, text=True, cwd=spec.worktree)
+            try:
+                return json.loads(proc.stdout or "{}")
+            except json.JSONDecodeError:
+                return {"result": proc.stdout, "stderr": proc.stderr, "exit_code": proc.returncode}
+        finally:
+            subprocess.run([self.docker, "rm", "-f", proxy_name], capture_output=True, text=True)
+            subprocess.run([self.docker, "network", "rm", net], capture_output=True, text=True)
