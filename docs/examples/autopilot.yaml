@@ -1,0 +1,50 @@
+# SKOS Autopilot config. Copy to ~/.skcapstone/config/autopilot.yaml and edit.
+# Missing file => disabled default (autopilot never runs). Start disabled.
+enabled: false
+
+# Harness seam (spec section 11). "claude-code" is the only v1 adapter.
+harness: claude-code
+
+# Deny-by-default tool allowlist passed as --allowedTools (spec section 12).
+# NEVER add capauth_secret_get / skstacks_secret_* / kms_* / trustee_* /
+# run_ansible_playbook / sk-access run / telegram_send / skchat_send /
+# comm_notify / send_message : the adapter fails closed if any appear here.
+allowed_tools:
+  - Read
+  - Edit
+  - Write
+  - Bash
+  - mcp__skcapstone__coord_score
+
+# Operative live merge gate. Empty until you have watched canary/PR-only runs
+# and name a first repo. A repo auto-merges only when it is BOTH here AND
+# repo_map[name].automerge: true AND ci is not "none" AND external CI is green.
+automerge_repos: []
+
+caps:
+  max_concurrent: 3
+  new_tasks_per_run: 10
+  max_tokens_per_run: 2000000
+  max_usd_per_day: 25.0
+
+digest_chat: chef-dm
+epic_id: null
+
+repo_map:
+  skos:
+    path: /home/cbrd21/clawd/skos
+    base_branch: main
+    integration_branch: autopilot/integration
+    test_cmd: "pytest -q"
+    ci: github-actions
+    coverage_cmd: "pytest --cov --cov-report=xml"
+    ci_poll_timeout: 1200
+    automerge: false          # static opt-in; still PR-only until in automerge_repos
+    auto_revert: false
+    min_diff_coverage: 0.8
+  skcapstone:
+    path: /home/cbrd21/clawd/skcapstone-repos/skcapstone
+    base_branch: main
+    integration_branch: autopilot/integration
+    test_cmd: "pytest -q"
+    ci: none                  # external CI waived => always PR-only, never auto-merge
