@@ -31,3 +31,4 @@ capabilities:
   - {name: skwaf,    group: core,    description: "Web app firewall",                     default: coraza,         alternates: [bunkerweb]}
   - {name: skca,     group: core,    description: "Internal PKI / mTLS",                  default: step-ca,        alternates: []}
   - {name: skvault,  group: core,    description: "Secret resolution",                    default: vault-file,     alternates: [capauth, hashicorp-vault]}
+  - {name: autopilot, group: core,   description: "Autonomous assess/triage/swarm/grade/report over the GTD spine", default: skos-autopilot, alternates: []}
