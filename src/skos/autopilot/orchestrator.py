@@ -201,19 +201,9 @@ def phase2_swarm(selected, *, harness, board, caps: Caps, ledger: CapLedger,
 
 
 def write_decision(d: DecisionItem) -> str | None:
-    """Write one decision to GTD via the gtd_ingest port with source='autopilot'.
-    capture() returns None on a duplicate (source, source_ref); fall back to
-    upsert() so the resolver's source_ref always resolves (spec section 9.1)."""
-    from skos import gtd_ingest
-    c = gtd_ingest.GtdCapture(
-        text=d.prompt, source="autopilot", source_ref=f"autopilot:{d.qid}",
-        status="waiting", context="@decide", priority=d.priority or "high",
-        meta={"decision": {"qid": d.qid, "prompt": d.prompt, "options": d.options,
-                           "answered": False, "answer": None, "action_ref": d.action_ref}})
-    gid = gtd_ingest.capture(c)
-    if gid is None:
-        gid, _action = gtd_ingest.upsert(c)
-    return gid
+    """Delegate to digest.queue_decision, the single decision-write path."""
+    from . import digest as digest_mod
+    return digest_mod.queue_decision(d.prompt, d.options, d.action_ref, d.priority, qid=d.qid)
 
 
 def _decision_preview(d: DecisionItem) -> dict:
