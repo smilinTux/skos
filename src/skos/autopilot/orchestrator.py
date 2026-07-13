@@ -181,7 +181,7 @@ def phase2_swarm(selected, *, harness, board, caps: Caps, ledger: CapLedger,
             break
         if ledger.exceeded():
             decisions.append(DecisionItem(qid=stable_qid("budget-hit", run_id),
-                prompt="Autopilot hit its run token/dollar ceiling; stopped early.",
+                prompt="Autopilot hit its budget ceiling (token/dollar limits); stopped early.",
                 options={"ok": "acknowledge"}, action_ref=run_id, priority="high"))
             break
         result = ex.run(item, harness)
@@ -263,13 +263,26 @@ def run_once(*, board, harness, config, tasks_dir=None, run_id=None, dry_run=Non
     prior = journal.read_run(run_id) or {}
     state = dict(prior.get("items") or {})
 
+    def _checkpoint(phase: str):
+        journal.write_run(run_id, {"run_id": run_id, "phase": phase,
+                                   "stopped": "kill_switch", "items": state})
+        return {"run_id": run_id, "dry_run": dry, "stopped": "kill_switch"}
+
+    if kill_switch_active(config.enabled):
+        return _checkpoint("assess")
+
     candidates, decisions = phase0_assess(
         board=board, harness=harness, tasks_dir=tasks_dir or _default_tasks_dir(),
         caps=caps, run_id=run_id, dry_run=dry, deepdive_proposals=deepdive_proposals)
 
+    if kill_switch_active(config.enabled):
+        return _checkpoint("triage")
+
     selected = phase1_triage(candidates, harness, repo_map=config.repo_map, decisions=decisions)
 
     if not dry:
+        if kill_switch_active(config.enabled):
+            return _checkpoint("swarm")
         state = phase2_swarm(selected, harness=harness, board=board, caps=caps,
                              ledger=ledger, decisions=decisions, run_id=run_id,
                              state=state, enabled=config.enabled)
