@@ -1,10 +1,10 @@
-"""skos.models — single source of truth for LLM/embedding model selection.
+"""skos.models: single source of truth for LLM/embedding model selection.
 
 One registry file (YAML) defines:
   - backends : concrete servable endpoints (url + model + ctx + kind + vision …)
   - roles    : logical names (sk-default, sk-synth, sk-code, sk-vision, sk-embed)
                mapped to a backend
-  - contexts : the TOGGLE switch — a named context (group-chat / job / service /
+  - contexts : the TOGGLE switch, a named context (group-chat / job / service /
                agent) overrides the role/backend for that context only
   - defaults : the fallback role (sk-default)
 
@@ -16,7 +16,7 @@ Public API:
     b = resolve(context="chat:dr-chiro-group")
     b = resolve(service="skingest.vision")
 
-Keep deps minimal (pyyaml only). Unknown role/context never crashes — it falls
+Keep deps minimal (pyyaml only). Unknown role/context never crashes, it falls
 back to the default role with a warning on stderr.
 """
 from __future__ import annotations
@@ -156,7 +156,7 @@ class Registry:
             origin = f"{origin}->auto-degrade:sk-default"
 
         if backend_name is None:
-            # Unknown role/context/backend — warn, fall back to default role.
+            # Unknown role/context/backend: warn, fall back to default role.
             warnings.warn(
                 f"skos.models: unresolved target {candidate!r} (from {origin}); "
                 f"falling back to default role {self.default_role!r}",

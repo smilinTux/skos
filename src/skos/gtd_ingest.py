@@ -1,10 +1,10 @@
-"""gtd-ingest — the unified-GTD capture port.
+"""gtd-ingest: the unified-GTD capture port.
 
 Every input to Chef's one GTD (ITIL incidents, email across N mailboxes,
 telegram, voice, calendar, cron failures) is a *source adapter* that produces
 ``GtdCapture`` objects and hands them to the single :func:`capture` sink. The
 sink normalizes, dedupes (by ``(source, source_ref)``), and appends to the
-unified GTD store — the same JSON store the skcapstone GTD/ITIL tools use.
+unified GTD store, the same JSON store the skcapstone GTD/ITIL tools use.
 
 Design: docs/gtd-ingest-architecture.md. Adding a source = one adapter, no core
 changes.
@@ -44,7 +44,7 @@ def gtd_dir() -> Path:
     if env:
         d = Path(env).expanduser()
     else:
-        try:  # optional, soft — align with skcapstone's exact store location
+        try:  # optional, soft: align with skcapstone's exact store location
             from skcapstone.mcp_tools.gtd_tools import _gtd_dir as _sk_gtd_dir
             return _sk_gtd_dir()  # already mkdirs
         except Exception:
@@ -155,7 +155,7 @@ def upsert(c: GtdCapture) -> tuple[str, str]:
 
     Returns ``(item_id, action)`` with ``action`` in
     ``{created, unchanged, updated, completed}``. On ``unchanged`` it performs **no
-    write** — the property that keeps polling idempotent and notifications quiet.
+    write**, the property that keeps polling idempotent and notifications quiet.
     """
     if not c.source_ref:
         return (capture(c) or ""), "created"

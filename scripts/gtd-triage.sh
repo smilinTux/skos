@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# gtd-triage.sh — keep Gmail inboxes near zero by sweeping low-value categories
+# gtd-triage.sh: keep Gmail inboxes near zero by sweeping low-value categories
 # into the "3 Read" label and out of the inbox (archive = remove INBOX label).
 #
-# SAFE / reversible: nothing is trashed or deleted — messages are labelled
+# SAFE / reversible: nothing is trashed or deleted. Messages are labelled
 # "3 Read" and archived (still searchable; re-add INBOX to undo). Starred and
 # important mail is never touched. Real (category:primary) mail is left in the
 # inbox for human/agent judgment into 1 Action / 2 Waiting.

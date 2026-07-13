@@ -1,4 +1,4 @@
-"""skmodels — CLI for the skos model registry (single source of truth).
+"""skmodels: CLI for the skos model registry (single source of truth).
 
 Subcommands:
   list                          roles + backends + contexts + default
@@ -61,7 +61,7 @@ def cmd_list(args) -> int:
     _p("")
     _p("CONTEXTS (toggles)")
     if not reg.contexts:
-        _p("  (none set — use `skmodels set <key> <role|backend>`)")
+        _p("  (none set, use `skmodels set <key> <role|backend>`)")
     for key, target in reg.contexts.items():
         _p(f"  {key:<28} -> {target}")
     return 0
@@ -127,7 +127,7 @@ def _probe(b: Backend, timeout: int = 6) -> tuple[bool, str]:
     if not b.url:
         return False, "no url"
     if b.kind == "embed":
-        # embed endpoints (e.g. Ollama /api/embed) — probe the /api/tags sibling
+        # embed endpoints (e.g. Ollama /api/embed): probe the /api/tags sibling
         base = b.url.rsplit("/api/", 1)[0] if "/api/" in b.url else b.url.rstrip("/")
         probe = base.rstrip("/") + "/api/tags"
     else:

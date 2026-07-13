@@ -1,7 +1,7 @@
-# skos gtd-ingest — Stateful Order/Shipment Tracking + the `upsert` primitive
+# skos gtd-ingest: Stateful Order/Shipment Tracking + the `upsert` primitive
 
 **Status:** design (2026-07-03) · **Owner:** Opus (Claude Code) + Chef · **Sibling:** [`gtd-ingest-architecture.md`](./gtd-ingest-architecture.md), [`gtd-ingest-SOP.md`](./gtd-ingest-SOP.md)
-**Scope:** the *one real gap* on top of the existing gtd-ingest framework — a
+**Scope:** the *one real gap* on top of the existing gtd-ingest framework: a
 capture path that **updates an existing GTD item through a lifecycle** (not just
 create-or-skip), a **stateful pull adapter** that drives deliveries/orders through
 it, and the **Claude-Code operating convention** so this runtime defaults to
@@ -13,13 +13,13 @@ routing work through skos. Pilot: Chef's iPhone-13-mini battery order.
 
 ---
 
-## 1. Context — what already exists (reuse, don't reinvent)
+## 1. Context: what already exists (reuse, don't reinvent)
 
 `skos.gtd_ingest` is a working ports-and-adapters framework:
 
-- **Sink:** `capture(GtdCapture) -> id | None` — normalizes, **dedupes by
+- **Sink:** `capture(GtdCapture) -> id | None`: normalizes, **dedupes by
   `(source, source_ref)`**, appends to the unified JSON GTD store.
-- **Port:** `GtdSourceAdapter` — push adapters call `emit()`; pull adapters
+- **Port:** `GtdSourceAdapter`: push adapters call `emit()`; pull adapters
   implement `poll() -> list[GtdCapture]` and are drained by `drain()`.
 - **Live adapters:** `email`, `telegram`, `calendar` (pull); `itil`, `cron` (push).
 - **Scheduling:** `skingest-maintain.timer` (systemd --user) + a `sk-cron-run`
@@ -44,11 +44,11 @@ auto-complete it. Delivery/order tracking is the first source whose items are
 **Goals**
 1. Add an **`upsert` capture path** to `skos.gtd_ingest`: given a stable
    `source_ref`, create the item if new, else **update it in place** (text, status,
-   meta, list-file move) — additive, does not change existing `capture()` callers.
+   meta, list-file move). This is additive and does not change existing `capture()` callers.
 2. Add a **stateful `order` pull adapter** that tracks deliveries and drives their
    GTD items through a lifecycle via `upsert`, auto-completing on delivered.
 3. **Derive one Telegram notification per real state change** (quiet by default,
-   tier-aware), reusing the existing sk-alert/digest machinery — never on a poll
+   tier-aware), reusing the existing sk-alert/digest machinery. Never on a poll
    that finds no change.
 4. Route any LLM-touch (parse an Amazon status email → normalized state) through
    **skgateway** so the auto-router lands it on **ornith**.
@@ -58,17 +58,17 @@ auto-complete it. Delivery/order tracking is the first source whose items are
    end-to-end on the existing timer.
 
 **Non-goals**
-- No new store, no new scheduler, no new notify channel — all exist.
+- No new store, no new scheduler, no new notify channel: all exist.
 - No rewrite of `capture()` semantics for existing push/pull adapters.
 - No new app: the pane-of-glass is the existing skchat-app `features/skos`.
-- Order tracking is not a general "workflow engine" — just a linear state list
+- Order tracking is not a general "workflow engine": just a linear state list
   with a terminal `complete_on` state. (ITIL owns richer workflows.)
 
 ---
 
 ## 3. The `upsert` primitive (the one core change)
 
-### 3.1 Where the "watch recipe" lives — inside the GTD item
+### 3.1 Where the "watch recipe" lives: inside the GTD item
 
 Per the source-of-truth decision, the tracking state lives **on the waiting-for
 item itself**, namespaced under `meta` (matches the existing `email_*`/`itil_*`
@@ -76,7 +76,7 @@ convention), so there is no second store to drift:
 
 ```jsonc
 {
-  "id": "…", "text": "WAITING: iPhone 13 mini battery ×2 — arriving Sun Jul 5",
+  "id": "…", "text": "WAITING: iPhone 13 mini battery ×2, arriving Sun Jul 5",
   "source": "order", "source_ref": "amazon:113-5638977-2258657",
   "status": "waiting", "context": "@errand", "priority": "low",
   "order": {                                   // the watch recipe, in-item
@@ -127,7 +127,7 @@ Design rules:
 
 ## 4. The `order` pull adapter
 
-`skos/adapters/order.py` — subclasses `GtdSourceAdapter`, auto-registers, drained
+`skos/adapters/order.py`: subclasses `GtdSourceAdapter`, auto-registers, drained
 by `skos ingest order`.
 
 ```python
@@ -149,7 +149,7 @@ class OrderAdapter(GtdSourceAdapter):
         return out
 ```
 
-**State extraction (`_classify`)** — the only LLM touch:
+**State extraction (`_classify`), the only LLM touch:**
 - Deterministic first: regex/subject match on Amazon's own phrasing
   (`"has shipped"`, `"Arriving"`, `"out for delivery"`, `"was delivered"`,
   `"delivery attempted"`, `"delayed"`). Covers ~all Amazon mail with zero tokens.
@@ -166,12 +166,12 @@ convenience, specced in §7.)
 
 ---
 
-## 5. Notify — derived, tiered, on-change-only
+## 5. Notify: derived, tiered, on-change-only
 
 `OrderAdapter._notify(obs, action)`:
 - `normal` tier → one line to Chef's Telegram DM via the existing send path
   (`skcapstone telegram send` / sk-alert normal), e.g.
-  `📦 iPhone 13 mini battery ×2 — out for delivery (ETA today).`
+  `📦 iPhone 13 mini battery ×2, out for delivery (ETA today).`
 - `completed` → `✅ Delivered: iPhone 13 mini battery ×2. Marked done + archived.`
 - `high` tier → same, plus escalation channels per the item's `notify_tier`.
 - **Never** fires on `unchanged`/`created`-by-poll noise. State changes only.
@@ -181,17 +181,17 @@ reads the store), so even a missed push still surfaces in the daily digest.
 
 ---
 
-## 6. Pilot — the battery order
+## 6. Pilot: the battery order
 
 1. Seed a waiting-for item with the `meta.order` block above
    (`source_ref = amazon:113-5638977-2258657`, `account` = the mailbox that got the
    Amazon confirmation, `eta = 2026-07-05`).
 2. The existing `skingest-maintain` timer (or a `sk-cron-run`-wrapped
    `skos ingest order` line) drains the adapter on schedule.
-3. Expected: `ordered → out_for_delivery → delivered` over Jul 3–5, one Telegram
+3. Expected: `ordered → out_for_delivery → delivered` over Jul 3-5, one Telegram
    ping per transition, auto-complete + archive on delivered.
 4. **Acceptance:** the item transitions without duplicates, exactly one notify per
-   real change, and it lands in `archive.json` with `status=done` on delivery —
+   real change, and it lands in `archive.json` with `status=done` on delivery,
    with the adapter having written nothing on no-change polls (verify via
    run-ledger + a store diff).
 
@@ -203,7 +203,7 @@ New doc `docs/CLAUDE-CODE-GTD-CONVENTION.md` (skos repo) + a block appended to
 `~/.claude/CLAUDE.md` so **this runtime** defaults to skos. Proposed block:
 
 ```md
-## SKOS GTD — single pane of glass (default for all work)
+## SKOS GTD: single pane of glass (default for all work)
 skos gtd-ingest is Chef's ONE unified GTD. Default to it, don't invent side-lists:
 - **Capture:** any actionable item that surfaces in a session → capture to the
   unified GTD (`skcapstone gtd capture` / `skos.gtd_ingest.capture`), tagged with a
@@ -212,7 +212,7 @@ skos gtd-ingest is Chef's ONE unified GTD. Default to it, don't invent side-list
   order/delivery, attach a `meta.order` block so the `order` adapter drives it.
 - **Session start:** read open next-actions + waiting-fors (`skcapstone gtd next`,
   `gtd waiting`); surface anything overdue/stale.
-- **Process, don't just add:** when touching GTD, reconcile — dedupe, age, complete
+- **Process, don't just add:** when touching GTD, reconcile: dedupe, age, complete
   finished items, link ITIL/projects.
 - **Adding a source = one adapter** on the gtd-ingest port. Never a parallel store.
 - **Inference** for any triage/parse/summarize step → skgateway `:18780`
@@ -229,10 +229,10 @@ be seeded by hand first).
 
 | Risk | Mitigation |
 |---|---|
-| **Unknown-field round-trip** — does the skcapstone GTD manager preserve `meta.order` on rewrite (clarify/move/done)? | The skos sink loads→appends→saves whole dicts, so it round-trips. Verify the skcapstone CLI path preserves unknown keys; if it strips them, keep all order state under `meta` (already dict-passthrough in `capture()`) and never round-trip order items through the lossy CLI path. Add a test. |
+| **Unknown-field round-trip**: does the skcapstone GTD manager preserve `meta.order` on rewrite (clarify/move/done)? | The skos sink loads→appends→saves whole dicts, so it round-trips. Verify the skcapstone CLI path preserves unknown keys; if it strips them, keep all order state under `meta` (already dict-passthrough in `capture()`) and never round-trip order items through the lossy CLI path. Add a test. |
 | Amazon email phrasing drift | Deterministic matcher first; LLM fallback via ornith; unknown ⇒ `unchanged` (never guess). |
 | skgateway/ornith down | `_classify` degrades to deterministic-only; on total ambiguity returns `unchanged`. No crash, no false transition. |
-| Secrets in cron env | Reuse the existing pattern — `GOG_KEYRING_PASSWORD` is already exported in the `sk-cron-run` cron lines. |
+| Secrets in cron env | Reuse the existing pattern: `GOG_KEYRING_PASSWORD` is already exported in the `sk-cron-run` cron lines. |
 | Duplicate notifications | Single source of truth for "did state change" is the `unchanged` short-circuit in `upsert`; notify only on `updated`/`completed`. |
 | Scope creep into a workflow engine | Linear `states` + terminal `complete_on` only. Anything richer routes to ITIL. |
 
@@ -240,14 +240,14 @@ be seeded by hand first).
 
 ## 9. Test plan
 
-- **Unit:** `upsert()` — created / unchanged (no write) / updated (+list move) /
+- **Unit:** `upsert()`: created / unchanged (no write) / updated (+list move) /
   completed (→archive). Golden store fixtures; assert byte-level no-write on
   unchanged.
 - **Unit:** `_classify` deterministic matcher over a corpus of real Amazon subject
   lines (ship/out-for-delivery/delivered/delayed); LLM path mocked.
 - **Integration:** seed a fake order item, feed staged emails, drain, assert the
   single item walks the lifecycle with one notify per change and lands in archive.
-- **E2E (pilot):** the real battery order over Jul 3–5 (marker-gated so CI skips).
+- **E2E (pilot):** the real battery order over Jul 3-5 (marker-gated so CI skips).
 
 ---
 
@@ -257,4 +257,4 @@ be seeded by hand first).
   backends behind the same adapter.
 - Generic "watch" sources (build status, PR review, reply-awaited) = additional
   stateful adapters using the same `upsert` primitive.
-- The skchat-app `features/skos` surface rendering tracked orders — separate FE work.
+- The skchat-app `features/skos` surface rendering tracked orders. Separate FE work.

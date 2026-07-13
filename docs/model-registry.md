@@ -1,4 +1,4 @@
-# skos Model Registry — single source of truth for model selection
+# skos Model Registry: single source of truth for model selection
 
 Swapping a model should be editing **one place**. This registry makes that true
 across roles, services, and per-context (group-chat / job) selection.
@@ -17,7 +17,7 @@ across roles, services, and per-context (group-chat / job) selection.
 |---|---|---|
 | `backends` | concrete servable endpoints (`url` + `model` + `ctx` + `kind` + `vision`/`dim`) | **swap a model** (change one line) |
 | `roles` | logical names code asks for (`sk-default`, `sk-synth`, `sk-code`, `sk-vision`, `sk-embed`) → a backend | re-route everything on a role at once |
-| `contexts` | **the toggle** — override role/backend for ONE named context | pin a group-chat / job / service / agent to a different model |
+| `contexts` | **the toggle**: override role/backend for ONE named context | pin a group-chat / job / service / agent to a different model |
 | `defaults` | fallback `role` when nothing else matches (`sk-default`) | change the global default |
 
 ### Verified backends (2026-07-03, all live)
@@ -27,7 +27,7 @@ across roles, services, and per-context (group-chat / job) selection.
 | `ornith` | `http://192.168.0.100:8082/v1` | `ornith-1.0-9b` | chat (ctx 65536) | .100 5060 Ti shared LLM (name-agnostic serving) |
 | `qwen-vl` | `http://100.81.238.58:11436/v1` | `Qwen3.6-27b-abliterated-Q4_K_M` | chat, `vision: true` | chiap08 over Tailscale (LAN alt `10.0.0.139`); mmproj, OCR-verified |
 | `mxbai` | `http://192.168.0.100:11434/api/embed` | `mxbai-embed-large` | embed (dim 1024) | live embedding default everywhere |
-| `opus` *(defined, commented)* | `http://192.168.0.41:18780/v1` | `claude-opus-4-8` | chat | SKGateway route unverified — see below |
+| `opus` *(defined, commented)* | `http://192.168.0.41:18780/v1` | `claude-opus-4-8` | chat | SKGateway route unverified, see below |
 
 ### Roles
 
@@ -42,10 +42,10 @@ sk-vision  -> qwen-vl    sk-embed -> mxbai
 context  >  service  >  role  >  default
 ```
 
-- **context** — exact key match in `contexts` (e.g. `chat:dr-chiro-group`)
-- **service** — key `service:<name>` match in `contexts` (e.g. `service:skingest.vision`)
-- **role** — the logical role the caller asked for (e.g. `sk-vision`)
-- **default** — `defaults.role`
+- **context**: exact key match in `contexts` (e.g. `chat:dr-chiro-group`)
+- **service**: key `service:<name>` match in `contexts` (e.g. `service:skingest.vision`)
+- **role**: the logical role the caller asked for (e.g. `sk-vision`)
+- **default**: `defaults.role`
 
 A context target may be a **role** (`sk-*`) or a **concrete backend** name.
 Unknown target → falls back to `defaults.role` with a stderr warning; it never
@@ -88,7 +88,7 @@ backend), edit `roles.sk-synth: <backend>`.
 
 ## How to TOGGLE per group-chat / job / service
 
-Use the CLI — this writes the `contexts:` block:
+Use the CLI. This writes the `contexts:` block:
 
 ```bash
 skmodels set chat:dr-chiro-group sk-vision     # this group chat now uses the VL model
@@ -126,10 +126,10 @@ b = resolve(service="skingest.vision")   # looks up contexts["service:skingest.v
 b.url; b.model; b.ctx; b.vision; b.kind
 ```
 
-- `load_registry(path=None)` — path from arg > `$SKMODELS_REGISTRY` > default.
-- `resolve(role, context, service)` — precedence context > service > role > default.
+- `load_registry(path=None)`: path from arg > `$SKMODELS_REGISTRY` > default.
+- `resolve(role, context, service)`: precedence context > service > role > default.
 - `list_roles()`, `list_backends()`, `list_contexts()`.
-- `set_context(key, target)` — writes the YAML (drops comments — the live file is
+- `set_context(key, target)`: writes the YAML (drops comments, the live file is
   data; the committed `.example.yaml` keeps the documented comments).
 
 ## Wired reference implementations
@@ -146,13 +146,13 @@ Both keep an **env fallback** (nothing breaks if the registry is missing) and
 > Registry backend urls include the trailing `/v1`. `vision.py` builds `/v1/...`
 > paths itself, so its wiring strips a trailing `/v1` from the resolved url.
 
-## SKGateway (.41:18780) integration — intended, not yet wired
+## SKGateway (.41:18780) integration (intended, not yet wired)
 
 SKGateway already routes skchat/Opus traffic by an in-app model picker
 (`claude-opus-4-8` ↔ `qwen3.6-27b`). The registry is designed to become the
 gateway's routing table:
 
-- Define a backend per gateway-reachable model (e.g. `opus` above — kept
+- Define a backend per gateway-reachable model (e.g. `opus` above, kept
   **commented** until the gateway `/v1` route is verified end-to-end).
 - Map a role or a `chat:<id>` context to that backend.
 - The gateway resolves the inbound request's role/context via `skos.models.resolve`

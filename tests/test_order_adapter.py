@@ -21,7 +21,7 @@ def _load(name):
 
 def _seed_battery():
     capture(GtdCapture(
-        text="iPhone 13 mini battery ×2 — ordered",
+        text="iPhone 13 mini battery ×2 - ordered",
         source="order", source_ref="amazon:113-5638977-2258657",
         status="waiting", context="@errand", priority="low",
         meta={"order": {"vendor": "amazon", "order_id": "113-5638977-2258657",

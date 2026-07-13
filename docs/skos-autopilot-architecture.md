@@ -1,4 +1,4 @@
-# SKOS Autopilot — Autonomous Assess / Plan / Swarm / Grade / Report over the GTD Spine
+# SKOS Autopilot: Autonomous Assess / Plan / Swarm / Grade / Report over the GTD Spine
 
 **Status:** design v2 (2026-07-12) · **Owner:** Lumina + Chef · **Epic:** (coord, to be filed)
 **Companion SOP:** `skos-autopilot-SOP.md` (build / test / deploy / config / API, written alongside implementation)

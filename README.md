@@ -1,7 +1,7 @@
-# skos — the Sovereign Agent OS 🐧
+# skos: the Sovereign Agent OS 🐧
 
 > **Your agents. Your infrastructure. Deploy anything, anywhere, own all of it.**
-> One model — ports & adapters — from a laptop to a Kubernetes cluster, personal to
+> One model (ports & adapters), from a laptop to a Kubernetes cluster, personal to
 > enterprise, with zero lock-in.
 
 skos is the **filesystem, packaging, and capability foundation** of the
@@ -28,14 +28,14 @@ skos path memory                         # print an abs path under $SK_DATA_ROOT
 
 ## Where it lives in SKStack v2
 
-skos is the **substrate the whole stack stands on** — it defines the filesystem,
+skos is the **substrate the whole stack stands on**: it defines the filesystem,
 the descriptor, and the capability/adapter resolution that every other sk* service
 is deployed through.
 
 ```mermaid
 flowchart TD
     OP["operator / agent"] -->|"skos install --profile"| SKOS
-    subgraph SKOS["**skos** — sovereign agent OS"]
+    subgraph SKOS["**skos** - sovereign agent OS"]
       RES["resolver<br/>(capability → adapter, per profile)"]
       DESC["app.yaml descriptor + renderers<br/>(compose / k8s / nomad)"]
       PATHS["$SK_DATA_ROOT paths + profile"]
@@ -59,23 +59,23 @@ flowchart TD
 |---|---|
 | **`$SK_DATA_ROOT`** | one data-root abstraction; `skos path <subdir>` resolves it for the active profile |
 | **`app.yaml` descriptor** | the universal service descriptor; `skos descriptor` validates it |
-| **Capability catalog** | the 4 C's — every `sk*` port + its default & alternate adapters (`skos capabilities`) |
+| **Capability catalog** | the 4 C's, every `sk*` port + its default & alternate adapters (`skos capabilities`) |
 | **Resolver** | capability → adapter for a profile (`skos resolve <cap> --profile <p>`) |
 | **Renderers** | descriptor → platform manifest (compose / k8s / nomad) (`skos render`) |
 | **Packaging adapter** | OCI materialization (`skos materialize`) |
 | **Profiles** | personal → team → enterprise; same model, different adapters |
 | **Brain** | self-building entity-graph knowledge ontology (`skos brain init`, EntityNode schema) |
 | **Surfaces** | runtime adapters (obsidian / claude-code / codex / n8n) that expose the brain (`skos surface …`) |
-| **Unified GTD (`gtd-ingest`)** | one GTD, every input an adapter — email/ITIL/cron/calendar/telegram → one `capture()` sink; daily digests + `skos status`/`skos ingest` |
+| **Unified GTD (`gtd-ingest`)** | one GTD, every input an adapter: email/ITIL/cron/calendar/telegram → one `capture()` sink; daily digests + `skos status`/`skos ingest` |
 
 ## Documentation
 
 | Doc | Contents |
 |---|---|
 | **[Architecture](docs/ARCHITECTURE.md)** | ports/adapters model, the install flow, the brain, surfaces, where it lives (mermaids) |
-| **[Capabilities](docs/CAPABILITIES.md)** | the full 4-C catalog — every port, default adapter, and alternates |
-| **[Unified GTD — architecture](docs/gtd-ingest-architecture.md)** | the `gtd-ingest` spec: one port, pluggable sources, phased roadmap (mermaids) |
-| **[Unified GTD — SOP](docs/gtd-ingest-SOP.md)** | build/test/deploy/config/API/troubleshoot for the GTD subsystem (crons, CLI, adapters) |
+| **[Capabilities](docs/CAPABILITIES.md)** | the full 4-C catalog: every port, default adapter, and alternates |
+| **[Unified GTD: architecture](docs/gtd-ingest-architecture.md)** | the `gtd-ingest` spec: one port, pluggable sources, phased roadmap (mermaids) |
+| **[Unified GTD: SOP](docs/gtd-ingest-SOP.md)** | build/test/deploy/config/API/troubleshoot for the GTD subsystem (crons, CLI, adapters) |
 | **[Secret migration](docs/SECRET-MIGRATION.md)** | moving secrets into the skvault secret plane |
 
 ## Profiles (one model, every scale)
@@ -86,21 +86,21 @@ flowchart LR
     P -.->|same app.yaml<br/>different adapters| E
 ```
 
-The descriptor never changes — only which adapter each capability resolves to. A
+The descriptor never changes: only which adapter each capability resolves to. A
 `skdata` port is a local Postgres on a laptop and a clustered one in production; you
 don't rewrite anything to grow.
 
 ## Standards conformance
 
-- 📐 **Docs/SOP** — per [`SK_REPO_DOC_STANDARD`](https://github.com/smilinTux/sk-standards/blob/main/standards/SK_REPO_DOC_STANDARD.md): README-as-hub, 9-section SOPs, mermaid-first, cross-linked. The GTD subsystem ships an [architecture](docs/gtd-ingest-architecture.md) + [SOP](docs/gtd-ingest-SOP.md).
-- 🔭 **Observability & Scheduling** — the `gtd-ingest` subsystem is the **reference implementation** of [`OBSERVABILITY_AND_SCHEDULING_STANDARD`](https://github.com/smilinTux/sk-standards/blob/main/standards/OBSERVABILITY_AND_SCHEDULING_STANDARD.md): every scheduled job wrapped (run-ledger + failure→GTD + `sk-alert`), inputs captured through one `source_ref`-deduped sink, daily ops report + on-demand `skos status`.
-- 🧪 **Testing** — green-bar gate per [`TESTING_AND_CI_STANDARD`](https://github.com/smilinTux/sk-standards/blob/main/standards/TESTING_AND_CI_STANDARD.md).
+- 📐 **Docs/SOP**, per [`SK_REPO_DOC_STANDARD`](https://github.com/smilinTux/sk-standards/blob/main/standards/SK_REPO_DOC_STANDARD.md): README-as-hub, 9-section SOPs, mermaid-first, cross-linked. The GTD subsystem ships an [architecture](docs/gtd-ingest-architecture.md) + [SOP](docs/gtd-ingest-SOP.md).
+- 🔭 **Observability & Scheduling**, the `gtd-ingest` subsystem is the **reference implementation** of [`OBSERVABILITY_AND_SCHEDULING_STANDARD`](https://github.com/smilinTux/sk-standards/blob/main/standards/OBSERVABILITY_AND_SCHEDULING_STANDARD.md): every scheduled job wrapped (run-ledger + failure→GTD + `sk-alert`), inputs captured through one `source_ref`-deduped sink, daily ops report + on-demand `skos status`.
+- 🧪 **Testing**, green-bar gate per [`TESTING_AND_CI_STANDARD`](https://github.com/smilinTux/sk-standards/blob/main/standards/TESTING_AND_CI_STANDARD.md).
 
 ## Related projects / See also
 
-- ⬇️ **Used by:** [skcapstone](https://github.com/smilinTux/skcapstone) — its ITIL ops are a push adapter on skos `gtd-ingest`; consumes the data-root + resolver.
+- ⬇️ **Used by:** [skcapstone](https://github.com/smilinTux/skcapstone), its ITIL ops are a push adapter on skos `gtd-ingest`; consumes the data-root + resolver.
 - ↔️ **Siblings:** [skmemory](https://github.com/smilinTux/skmemory) (agent memory · a `skos` capability) · [skvault](https://github.com/smilinTux/skvault) (secrets plane · `skos.secrets`) · [SKStacks](https://github.com/smilinTux/SKStacks) (deploy fabric).
-- 📐 **Standards:** [sk-standards](https://github.com/smilinTux/sk-standards) — doc/SOP, architecture/dataflow, testing, **observability & scheduling**, version, backup.
+- 📐 **Standards:** [sk-standards](https://github.com/smilinTux/sk-standards): doc/SOP, architecture/dataflow, testing, **observability & scheduling**, version, backup.
 
 Part of the **[SKWorld](https://skworld.io)** sovereign ecosystem · site:
 **[skos.skworld.io](https://skos.skworld.io)** · `curl -fsSL https://skos.skworld.io/install.sh | sh` · 🐧 smilinTux

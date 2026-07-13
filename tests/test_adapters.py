@@ -1,4 +1,4 @@
-"""Tests for gtd-ingest pull adapters (calendar + telegram) — pure logic, no network."""
+"""Tests for gtd-ingest pull adapters (calendar + telegram): pure logic, no network."""
 import pytest
 
 from skos.adapters import telegram as T
