@@ -354,3 +354,49 @@ def test_resume_skips_finalized(tmp_path, monkeypatch, clean_execs):
     # t-A already finalized -> not re-run; only t-B runs
     ran = [c.args[0].ref for c in ex.run.call_args_list]
     assert ran == ["t-B"]
+
+
+def test_run_cli_dry_run_uses_stub(monkeypatch):
+    import skos.autopilot.orchestrator as o
+    seen = {}
+    monkeypatch.setattr(o.Config, "load", classmethod(lambda cls, *a, **k: _config(live_execution=False)))
+    monkeypatch.setattr(o, "run_once", lambda **kw: seen.update(kw) or {"ok": True})
+    monkeypatch.setattr("skcapstone.coordination.Board", lambda *a, **k: object())
+    monkeypatch.setattr("skcapstone.mcp_tools._helpers._shared_root", lambda: "/tmp")
+    o.run_cli(dry_run=True)
+    assert seen["harness"].name == "stub" and seen["dry_run"] is True
+
+
+def test_run_cli_canary_disabled_when_live_execution_off(monkeypatch):
+    import skos.autopilot.orchestrator as o
+    monkeypatch.setattr(o.Config, "load", classmethod(lambda cls, *a, **k: _config(live_execution=False)))
+    monkeypatch.setattr("skcapstone.coordination.Board", lambda *a, **k: object())
+    monkeypatch.setattr("skcapstone.mcp_tools._helpers._shared_root", lambda: "/tmp")
+    out = o.run_cli(dry_run=False, canary=True, task="t-1", harness="pi")
+    assert "disabled" in out                     # live_execution off -> no spawn
+
+
+def test_run_cli_live_builds_real_harness(monkeypatch):
+    import skos.autopilot.orchestrator as o
+    from types import SimpleNamespace
+    seen = {}
+    monkeypatch.setattr(o.Config, "load", classmethod(lambda cls, *a, **k: _config(live_execution=True)))
+    monkeypatch.setattr(o, "build_harness", lambda config, name=None: SimpleNamespace(name=name or "pi"))
+    monkeypatch.setattr(o, "run_once", lambda **kw: seen.update(kw) or {"ok": True})
+    monkeypatch.setattr("skcapstone.coordination.Board", lambda *a, **k: object())
+    monkeypatch.setattr("skcapstone.mcp_tools._helpers._shared_root", lambda: "/tmp")
+    o.run_cli(dry_run=False, canary=True, task="t-1", harness="pi")
+    assert seen["harness"].name == "pi" and seen["dry_run"] is False and seen["task"] == "t-1"
+
+
+def test_run_once_task_filter(tmp_path, clean_execs):
+    import skos.autopilot.orchestrator as orch
+    _write_task(tmp_path, "keep", tags=["repo:skos"], acceptance_criteria=["x"])
+    _write_task(tmp_path, "drop", tags=["repo:skos"], acceptance_criteria=["x"])
+    ex = _RunExec(GateResult(5, True, "ok", "pr#1")); EXECUTORS["engineering"] = ex
+    board = _board(["keep", "drop"])
+    harness = SimpleNamespace(name="h", assess=lambda b: Verdict(verdict="valid", reason=""))
+    out = orch.run_once(board=board, harness=harness, config=_config(dry_run=False),
+                        tasks_dir=tmp_path, run_id="r1", task="keep",
+                        executors={"engineering": ex})
+    assert out["selected"] == ["keep"]           # only the targeted task ran
