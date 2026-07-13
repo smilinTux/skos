@@ -102,16 +102,22 @@ def deepdive_spawn(board, proposals, *, caps: Caps, run_id: str,
 
 def phase0_assess(*, board, harness, tasks_dir, caps: Caps, run_id: str,
                   dry_run: bool = False, codebase_context: str = "",
-                  deepdive_proposals=None) -> tuple[list[WorkItem], list[DecisionItem]]:
+                  deepdive_proposals=None, only: str | None = None
+                  ) -> tuple[list[WorkItem], list[DecisionItem]]:
     """Reclaim stale claims, compute unblocked, assess each candidate, apply the
     verdict (stale rewrite / obsolete close / needs_decision queue), spawn capped
-    deep-dive tasks. Returns (candidates, decisions)."""
+    deep-dive tasks. Returns (candidates, decisions).
+
+    ``only`` scopes assessment to a single task id (a targeted canary/--task run),
+    so one task does not trigger a live assess call for the whole board.
+    """
     if not dry_run:
         board.release_stale_claims("autopilot", 3600)
     by_id = {t.get("id"): t for t in load_raw_tasks(tasks_dir)}
     candidates: list[WorkItem] = []
     decisions: list[DecisionItem] = []
-    for tid in sorted(board.unblocked_task_ids()):
+    ids = [only] if only else sorted(board.unblocked_task_ids())
+    for tid in ids:
         t = by_id.get(tid)
         if not t or t.get("status") in ("completed", "closed", "obsolete"):
             continue
@@ -136,7 +142,8 @@ def phase0_assess(*, board, harness, tasks_dir, caps: Caps, run_id: str,
                                           prompt=v.reason or f"Task {tid} needs a decision.",
                                           options={"promote": "promote", "skip": "skip"},
                                           action_ref=tid, priority=t.get("priority") or "high"))
-    deepdive_spawn(board, deepdive_proposals, caps=caps, run_id=run_id, dry_run=dry_run)
+    if not only:                        # a targeted --task run never spawns new work
+        deepdive_spawn(board, deepdive_proposals, caps=caps, run_id=run_id, dry_run=dry_run)
     return candidates, decisions
 
 
@@ -286,7 +293,8 @@ def run_once(*, board, harness, config, tasks_dir=None, run_id=None, dry_run=Non
 
     candidates, decisions = phase0_assess(
         board=board, harness=harness, tasks_dir=tasks_dir or _default_tasks_dir(),
-        caps=caps, run_id=run_id, dry_run=dry, deepdive_proposals=deepdive_proposals)
+        caps=caps, run_id=run_id, dry_run=dry, deepdive_proposals=deepdive_proposals,
+        only=task)
 
     if kill_switch_active(config.enabled):
         return _checkpoint("triage")
