@@ -37,4 +37,9 @@ def external_ci_verdict(repo: RepoSpec, pr_branch: str, head_sha: str) -> str:
             if time.monotonic() >= deadline:
                 return "red"
             time.sleep(_POLL_INTERVAL)
+    if repo.ci.startswith("local:"):
+        cmd = repo.ci[len("local:"):]
+        proc = subprocess.run(cmd, shell=True, cwd=repo.path,
+                              capture_output=True, text=True)
+        return "green" if proc.returncode == 0 else "red"
     return "red"
