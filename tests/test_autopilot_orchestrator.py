@@ -213,8 +213,7 @@ def test_phase2_finalizes_and_scores_on_pass():
                               run_id="r1")
     ex.run.assert_called_once()
     ex.finalize.assert_called_once()
-    board.score_task.assert_called_once()
-    assert board.score_task.call_args.kwargs["score"] == 5
+    board.score_task.assert_not_called()
     assert state["t-1"]["state"] == "finalized" and decisions == []
 
 

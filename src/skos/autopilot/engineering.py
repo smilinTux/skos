@@ -188,7 +188,7 @@ class EngineeringExecutor:
             # leave the task claimed (not completed) until the operator approves
 
 
-def revert(board, config, task_id: str, agent: str = "autopilot") -> None:
+def _revert_impl(board, config, task_id: str, agent: str = "autopilot") -> None:
     """Revert the recorded merge commit and reopen the coord task.
 
     Governance: autopilot reverts only a merge it recorded (meta.autopilot.merge).
@@ -213,3 +213,19 @@ def revert(board, config, task_id: str, agent: str = "autopilot") -> None:
         task_id,
         lambda d: d.setdefault("meta", {}).setdefault("autopilot", {})
                   .__setitem__("reverted", {"sha": merge["sha"], "ts": _now_iso()}))
+
+
+def _load_board():
+    from skcapstone.coordination import Board
+    from skcapstone.mcp_tools._helpers import _shared_root
+    return Board(_shared_root())
+
+
+def _load_config():
+    from skos.autopilot import config
+    return config.load()
+
+
+def revert(task_id: str, agent: str = "autopilot") -> dict:
+    """One-arg convenience for the CLI: load Board + Config, delegate to _revert_impl."""
+    return _revert_impl(_load_board(), _load_config(), task_id, agent)

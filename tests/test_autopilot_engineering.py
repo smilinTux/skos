@@ -257,7 +257,7 @@ def test_finalize_pr_only_when_ci_red(mocker):
     ex._open_pr.assert_called_once()
 
 
-from skos.autopilot.engineering import revert
+from skos.autopilot.engineering import _revert_impl
 
 
 def test_revert_reverts_sha_and_reopens(mocker):
@@ -271,7 +271,7 @@ def test_revert_reverts_sha_and_reopens(mocker):
     board.load_agent.return_value = agent
     run = mocker.patch("skos.autopilot.engineering.subprocess.run",
                        return_value=mocker.Mock(returncode=0, stdout="", stderr=""))
-    revert(board, cfg, "t1")
+    _revert_impl(board, cfg, "t1")
     argvs = [c.args[0] for c in run.call_args_list]
     assert ["git", "-C", "/repos/skrender", "revert", "--no-edit", "mergesha"] in argvs
     # reopened: dropped from the agent's completed_tasks and saved
@@ -285,4 +285,4 @@ def test_revert_raises_without_recorded_merge(mocker):
     board = mocker.Mock(); board.load_tasks.return_value = [task]
     cfg = _t.SimpleNamespace(repo_map={"skrender": _spec("skrender")}, automerge_repos=[])
     with pytest.raises(ValueError):
-        revert(board, cfg, "t1")
+        _revert_impl(board, cfg, "t1")
