@@ -43,3 +43,13 @@ def test_no_container_name_omits_the_flag():
     argv = Sandbox()._docker_run_argv(_spec(), "n", "p")
     assert "--name" not in argv
     assert argv[-3:] == ["claude", "-p", "hi"]
+
+
+def test_auth_mount_parent_is_writable_tmpfs():
+    # docker auto-creates a cred-mount parent as root-owned; the sandbox must
+    # tmpfs it writable so the harness can write siblings (claude session-env).
+    argv = Sandbox()._docker_run_argv(_spec(), network="n", proxy_alias="p")
+    assert "--tmpfs" in argv
+    assert any(a == "/home/sbx/.claude:mode=1777" for a in argv), argv
+    # the RO cred still mounts inside it
+    assert any("/home/sbx/.claude/.credentials.json" in a and "readonly" in a for a in argv)

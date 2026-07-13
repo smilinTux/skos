@@ -61,6 +61,13 @@ class Sandbox:
             "--env", f"HTTPS_PROXY=http://{proxy_alias}:{PROXY_PORT}",
             "--env", f"HTTP_PROXY=http://{proxy_alias}:{PROXY_PORT}",
         ]
+        # Each auth mount's parent dir is auto-created by docker as a root-owned,
+        # non-writable dir; the harness (e.g. claude) needs to write siblings there
+        # (session-env, cache). Mount a writable tmpfs at each such parent first so
+        # the RO cred file binds inside a writable dir. Skip HOME/root, already tmpfs.
+        for parent in sorted({os.path.dirname(m.dst) for m in spec.auth_mounts}):
+            if parent and parent not in ("/", "/home/sbx"):
+                argv += ["--tmpfs", f"{parent}:mode=1777"]
         for m in spec.auth_mounts:
             src = os.path.realpath(os.path.expanduser(m.src))
             ro = ",readonly" if m.ro else ""
