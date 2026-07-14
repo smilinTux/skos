@@ -1,3 +1,5 @@
+import json
+
 from skos.autopilot.adapters.pi import PiAdapter
 from skos.autopilot.sandbox import Sandbox
 
@@ -13,12 +15,28 @@ def test_argv_and_image():
     assert a.name == "pi"
 
 
-def test_local_model_routes_to_skgateway_with_no_external_cred():
-    a = _a(model="sk-default", base_url="http://localhost:18780/v1")
+def test_local_model_routes_to_skgateway_via_injected_models_json():
+    a = _a(model="ornith-big", base_url="http://localhost:18780/v1")
+    assert a._argv("P") == ["pi", "-p", "P", "--mode", "json", "--no-session",
+                            "--model", "skgw/ornith-big", "--api-key", "sk-local"]
     env = a._auth_env()
-    assert env["OPENAI_BASE_URL"] == "http://localhost:18780/v1"
-    assert env["PI_MODEL"] == "sk-default"
-    assert a._auth_mounts() == []                 # local: no external cred to mount
+    assert env["PI_CODING_AGENT_DIR"] == "/agent"
+    assert "OPENAI_BASE_URL" not in env            # pi ignores it; hits real OpenAI otherwise
+    assert a._auth_mounts() == []                  # local: no external cred to mount
+    cfg = a._config_files()
+    models = json.loads(cfg["/agent/models.json"])
+    skgw = models["providers"]["skgw"]
+    assert skgw["api"] == "openai-completions"
+    assert skgw["baseUrl"] == "http://localhost:18780/v1"
+    assert skgw["compat"]["supportsDeveloperRole"] is False
+    assert skgw["models"][0]["id"] == "ornith-big"
+    assert skgw["models"][0]["limit"]["output"] == 32768
+
+
+def test_no_base_url_means_no_config_files_and_plain_argv():
+    a = _a()
+    assert a._config_files() == {}
+    assert a._argv("P") == ["pi", "-p", "P", "--mode", "json", "--no-session"]
 
 
 def test_parse_extracts_model_reply_dict():

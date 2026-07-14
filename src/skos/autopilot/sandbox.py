@@ -1,6 +1,13 @@
 """Harness-agnostic Docker confinement: the single subprocess boundary for live
 harness execution. Secrets are confined by absence (nothing secret is mounted);
-egress is an internal network whose only route out is the allowlist proxy."""
+egress is an internal network whose only route out is the allowlist proxy.
+
+NOTE: a LaunchSpec can also carry `config_files` (container-path -> content) for
+an adapter to inject a GENERATED config into the container (e.g. pi's
+models.json routing to a local skgateway model). Sandbox.spawn writes those to
+a per-run host temp dir and mounts them read-only; it does NOT open any new
+egress. Reaching a local http service (skgateway) from inside the sandbox is a
+separate networking concern; see adapters/pi.py for that follow-up note."""
 from __future__ import annotations
 
 import json
@@ -8,6 +15,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 
 from .claude_code import HarnessUnavailable
@@ -31,6 +39,7 @@ class LaunchSpec:
     auth_mounts: list[AuthMount] = field(default_factory=list)
     auth_env: dict[str, str] = field(default_factory=dict)
     egress_hosts: list[str] = field(default_factory=list)
+    config_files: dict[str, str] = field(default_factory=dict)
 
 
 class Sandbox:
@@ -41,8 +50,10 @@ class Sandbox:
         self.run_timeout = run_timeout
 
     def _docker_run_argv(self, spec: LaunchSpec, network: str, proxy_alias: str,
-                         container_name: str | None = None) -> list[str]:
+                         container_name: str | None = None,
+                         extra_mounts: list[AuthMount] | None = None) -> list[str]:
         wt = os.path.realpath(spec.worktree)
+        all_mounts = list(spec.auth_mounts) + list(extra_mounts or [])
         argv = [self.docker, "run"]
         if container_name:
             argv += ["--name", container_name]
@@ -65,10 +76,12 @@ class Sandbox:
         # non-writable dir; the harness (e.g. claude) needs to write siblings there
         # (session-env, cache). Mount a writable tmpfs at each such parent first so
         # the RO cred file binds inside a writable dir. Skip HOME/root, already tmpfs.
-        for parent in sorted({os.path.dirname(m.dst) for m in spec.auth_mounts}):
+        # Injected config files (extra_mounts) get the same treatment: their parent
+        # dir also needs to be a writable tmpfs before the RO file binds inside it.
+        for parent in sorted({os.path.dirname(m.dst) for m in all_mounts}):
             if parent and parent not in ("/", "/home/sbx"):
                 argv += ["--tmpfs", f"{parent}:mode=1777"]
-        for m in spec.auth_mounts:
+        for m in all_mounts:
             src = os.path.realpath(os.path.expanduser(m.src))
             ro = ",readonly" if m.ro else ""
             argv += ["--mount", f"type=bind,src={src},dst={m.dst}{ro}"]
@@ -98,7 +111,16 @@ class Sandbox:
         proxy_alias = "sbxproxy"
         proxy_name = f"sbxproxy-{token}"
         harness_name = f"sbxrun-{token}"
+        cfg_dir = None
         try:
+            cfg_mounts = []
+            if spec.config_files:
+                cfg_dir = tempfile.mkdtemp(prefix="sbxcfg-")
+                for i, (dst, content) in enumerate(spec.config_files.items()):
+                    host_path = os.path.join(cfg_dir, f"cfg{i}")
+                    with open(host_path, "w") as fh:
+                        fh.write(content)
+                    cfg_mounts.append(AuthMount(src=host_path, dst=dst, ro=True))
             subprocess.run([self.docker, "network", "create", "--internal", net],
                            capture_output=True, text=True, check=True)
             # proxy sidecar: dual-homed (internal net + default bridge) so it is the
@@ -112,7 +134,8 @@ class Sandbox:
                            capture_output=True, text=True)          # give proxy outward egress
             try:
                 proc = subprocess.run(
-                    self._docker_run_argv(spec, net, proxy_alias, container_name=harness_name),
+                    self._docker_run_argv(spec, net, proxy_alias, container_name=harness_name,
+                                          extra_mounts=cfg_mounts),
                     capture_output=True, text=True, cwd=spec.worktree, timeout=self.run_timeout)
             except subprocess.TimeoutExpired:
                 return {"result": "", "is_error": True, "exit_code": 124, "timeout": True}
@@ -125,3 +148,5 @@ class Sandbox:
             subprocess.run([self.docker, "rm", "-f", harness_name], capture_output=True, text=True)
             subprocess.run([self.docker, "rm", "-f", proxy_name], capture_output=True, text=True)
             subprocess.run([self.docker, "network", "rm", net], capture_output=True, text=True)
+            if cfg_dir:
+                shutil.rmtree(cfg_dir, ignore_errors=True)

@@ -111,6 +111,7 @@ class BaseCliAdapter:
     def _image(self) -> str: raise NotImplementedError
     def _auth_mounts(self) -> list: raise NotImplementedError
     def _auth_env(self) -> dict: raise NotImplementedError
+    def _config_files(self) -> dict: return {}
     def _parse(self, raw: dict) -> dict: raise NotImplementedError
     def capabilities(self): raise NotImplementedError
 
@@ -145,7 +146,8 @@ class BaseCliAdapter:
         image = getattr(repo, "sandbox_image", None) or self._image()
         spec = LaunchSpec(name=self.name, argv=self._argv(prompt), image=image,
                           worktree=worktree, auth_mounts=self._auth_mounts(),
-                          auth_env=self._auth_env(), egress_hosts=self.egress_hosts)
+                          auth_env=self._auth_env(), egress_hosts=self.egress_hosts,
+                          config_files=self._config_files())
         return self.sandbox.spawn(spec, repo_remote_host=self._remote_host(repo),
                                   ci_host=self._ci_host(repo))
 

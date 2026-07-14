@@ -78,6 +78,25 @@ def test_run_raw_falls_back_to_adapter_image_when_repo_image_is_none(monkeypatch
     assert seen["spec"].image == "sandbox-fake:1"
 
 
+def test_config_files_hook_defaults_to_empty():
+    a = _Fake(Sandbox(), egress_hosts=[])
+    assert a._config_files() == {}
+
+
+def test_run_raw_passes_config_files_to_launch_spec(monkeypatch):
+    class _FakeCfg(_Fake):
+        def _config_files(self):
+            return {"/agent/x.json": "hi"}
+
+    seen = {}
+    sb = Sandbox(live_execution=True)
+    monkeypatch.setattr(sb, "spawn",
+        lambda spec, **kw: seen.setdefault("spec", spec) and {"result": {}})
+    a = _FakeCfg(sb, egress_hosts=[])
+    a._run_raw("instr", "data", worktree="/tmp/wt", repo=_repo(sandbox_image=None))
+    assert seen["spec"].config_files == {"/agent/x.json": "hi"}
+
+
 def test_extract_json_tolerates_fences_and_prose():
     from skos.autopilot.adapters.base import extract_json
     assert extract_json('{"score": 5}') == {"score": 5}

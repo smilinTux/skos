@@ -3,7 +3,14 @@ pi routes to a local model via skgateway, keeping all egress on-tailnet.
 
 NOTE: pi is not installed on this node, so `_parse` is defensive. Validate the
 real `pi -p --mode json` output shape against a captured sample before enabling
-pi as a live harness (E1 / first canary)."""
+pi as a live harness (E1 / first canary).
+
+NOTE (sandbox networking follow-up): the injected models.json routes pi to
+skgateway, but the sandbox container must still be able to REACH skgateway (a
+local http service); the current internal-network + https-CONNECT proxy does
+not cover a local http endpoint, so live pi-on-skgateway in the sandbox needs a
+networking follow-up (allow the container to reach the host skgateway). This
+adapter delivers the config-injection + routing config, not the networking."""
 from __future__ import annotations
 
 import json
@@ -28,7 +35,10 @@ class PiAdapter(BaseCliAdapter):
                 "sandbox": True, "tool_restrictions": True}
 
     def _argv(self, prompt: str) -> list[str]:
-        return ["pi", "-p", prompt, "--mode", "json", "--no-session"]
+        if not self.model:
+            return ["pi", "-p", prompt, "--mode", "json", "--no-session"]
+        return ["pi", "-p", prompt, "--mode", "json", "--no-session",
+                "--model", f"skgw/{self.model}", "--api-key", "sk-local"]
 
     def _image(self) -> str:
         return self.image
@@ -37,10 +47,26 @@ class PiAdapter(BaseCliAdapter):
         return []                              # local skgateway: no external cred
 
     def _auth_env(self):
+        # points pi at the injected config dir (models.json); do NOT set
+        # OPENAI_BASE_URL, pi ignores it and hits real OpenAI instead.
+        return {"PI_CODING_AGENT_DIR": "/agent"}
+
+    def _config_files(self):
         if not self.base_url:
             return {}
-        return {"OPENAI_BASE_URL": self.base_url, "OPENAI_API_KEY": "sk-local",
-                "PI_MODEL": self.model or ""}
+        models = {
+            "providers": {
+                "skgw": {
+                    "baseUrl": self.base_url,
+                    "api": "openai-completions",
+                    "apiKey": "sk-local",
+                    "compat": {"supportsDeveloperRole": False},
+                    "models": [{"id": self.model,
+                                "limit": {"context": 32768, "output": 32768}}],
+                }
+            }
+        }
+        return {"/agent/models.json": json.dumps(models)}
 
     def _parse(self, raw: dict) -> dict:
         if not isinstance(raw, dict):
