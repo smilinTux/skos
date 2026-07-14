@@ -195,12 +195,32 @@ class EngineeringExecutor:
         subprocess.run(["git", "-C", wt, "push", "-u", "origin", pr_branch],
                        capture_output=True, text=True)          # best-effort (needs origin)
 
+    def _pr_base(self, repo: RepoSpec) -> str:
+        """The base branch to open the PR against. Prefer integration_branch, but
+        fall back to base_branch when the integration branch does not exist on
+        origin. Learned the hard way: a configured integration_branch that was
+        never created (e.g. 'autopilot/integration') makes `gh pr create` fail
+        AFTER the work is committed+pushed — the branch lands but no PR opens, and
+        the failure was swallowed. base_branch always exists (we branched from it)."""
+        chk = subprocess.run(["git", "-C", repo.path, "ls-remote", "--heads",
+                              "origin", repo.integration_branch],
+                             capture_output=True, text=True)
+        if chk.stdout.strip():
+            return repo.integration_branch
+        return repo.base_branch
+
     def _open_pr(self, repo: RepoSpec, pr_branch: str, item: WorkItem) -> str:
+        base = self._pr_base(repo)
         proc = subprocess.run(
-            ["gh", "pr", "create", "--head", pr_branch, "--base", repo.integration_branch,
+            ["gh", "pr", "create", "--head", pr_branch, "--base", base,
              "--title", f"autopilot: {item.payload.get('title', item.ref)}",
              "--body", f"Autopilot task {item.ref}"],
             cwd=repo.path, capture_output=True, text=True)
+        if proc.returncode != 0:
+            # never eat a PR-open failure silently: the branch is already pushed,
+            # so a swallowed error looks like "no work done". Surface it.
+            print(f"autopilot: gh pr create failed for {pr_branch} (base={base}): "
+                  f"{proc.stderr.strip()}")
         return proc.stdout.strip()
 
     def finalize(self, item: WorkItem, result: GateResult) -> None:
