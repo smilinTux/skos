@@ -1,16 +1,16 @@
-"""PiAdapter: pi (pi.dev) on the shared BaseCliAdapter. Sovereign default target:
-pi routes to a local model via skgateway, keeping all egress on-tailnet.
+"""PiAdapter: pi (pi.dev) on the shared BaseCliAdapter. Sovereign target harness:
+pi routes to a local model via skgateway, keeping all egress on-tailnet. Verified
+live end-to-end in the confined sandbox against skgateway/ornith-tiny.
 
-NOTE: pi is not installed on this node, so `_parse` is defensive. Validate the
-real `pi -p --mode json` output shape against a captured sample before enabling
-pi as a live harness (E1 / first canary).
-
-NOTE (sandbox networking follow-up): the injected models.json routes pi to
-skgateway, but the sandbox container must still be able to REACH skgateway (a
-local http service); the current internal-network + https-CONNECT proxy does
-not cover a local http endpoint, so live pi-on-skgateway in the sandbox needs a
-networking follow-up (allow the container to reach the host skgateway). This
-adapter delivers the config-injection + routing config, not the networking."""
+Routing recipe (all proven): inject /agent/models.json (skgw provider, api=
+`openai-completions`, `compat.supportsDeveloperRole: false` -- REQUIRED for ornith
+or it 400s) + PI_CODING_AGENT_DIR=/agent; `--model skgw/<model>` + `--api-key`;
+`--no-session` (else the container-uid session mkdir EACCESes). pi IGNORES the
+OPENAI_BASE_URL env (it hits real OpenAI), so routing MUST go through models.json.
+The sandbox proxy forwards plain HTTP for allowlisted hosts, so the internal-net
+container reaches the local http skgateway through it. pi's `--mode json` reply is
+the assistant `message_end` event's content[].text; `_parse` handles that event
+stream plus the single-object shape."""
 from __future__ import annotations
 
 import json
@@ -27,14 +27,24 @@ class PiAdapter(BaseCliAdapter):
     _DEFAULT_MAX_TOKENS = 131072
 
     def __init__(self, sandbox=None, model=None, base_url=None, egress_hosts=None,
-                 live_execution: bool = False, image=None, max_tokens=None):
+                 live_execution: bool = False, image=None, max_tokens=None,
+                 run_timeout=None):
         from ..sandbox import Sandbox
         self.model = model
         self.base_url = base_url
         self.image = image or "sandbox-pi:1"
         self.max_tokens = int(max_tokens) if max_tokens else self._DEFAULT_MAX_TOKENS
-        super().__init__(sandbox or Sandbox(live_execution=live_execution),
-                         egress_hosts=egress_hosts, live_execution=live_execution)
+        # pi does one turn and terminates (measured ~3.6s for a classification prompt
+        # against ornith-tiny), so unlike opencode it needs no aggressive cap -- it
+        # keeps the sandbox default. run_timeout is exposed only so a caller can bound
+        # a long coding run if wanted; None -> the Sandbox default.
+        sb = sandbox
+        if sb is None:
+            kw = {"live_execution": live_execution}
+            if run_timeout:
+                kw["run_timeout"] = int(run_timeout)
+            sb = Sandbox(**kw)
+        super().__init__(sb, egress_hosts=egress_hosts, live_execution=live_execution)
 
     def capabilities(self):
         return {"session_resume": True, "structured_output": "json",
