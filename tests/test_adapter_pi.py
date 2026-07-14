@@ -30,7 +30,7 @@ def test_local_model_routes_to_skgateway_via_injected_models_json():
     assert skgw["baseUrl"] == "http://localhost:18780/v1"
     assert skgw["compat"]["supportsDeveloperRole"] is False
     assert skgw["models"][0]["id"] == "ornith-big"
-    assert skgw["models"][0]["limit"]["output"] == 32768
+    assert skgw["models"][0]["limit"]["output"] == 131072      # generous default (ornith is uncapped)
 
 
 def test_no_base_url_means_no_config_files_and_plain_argv():
@@ -67,3 +67,15 @@ def test_parse_real_pi_event_schema():
         '[{"type":"text","text":"{\\"verdict\\":\\"valid\\",\\"reason\\":\\"ok\\"}"}]}}\n'
         '{"type":"agent_end"}\n')
     assert a._parse({"result": stream}) == {"verdict": "valid", "reason": "ok"}
+
+
+def test_config_files_budget_overridable():
+    import json
+    from skos.autopilot.sandbox import Sandbox
+    from skos.autopilot.adapters.pi import PiAdapter
+    a = PiAdapter(Sandbox(), model="ornith-big", base_url="http://x/v1", max_tokens=262144)
+    lim = json.loads(a._config_files()["/agent/models.json"])["providers"]["skgw"]["models"][0]["limit"]
+    assert lim["output"] == 262144 and lim["context"] == 262144
+    # default when unset is the generous ceiling
+    b = PiAdapter(Sandbox(), model="m", base_url="http://x/v1")
+    assert json.loads(b._config_files()["/agent/models.json"])["providers"]["skgw"]["models"][0]["limit"]["output"] == 131072
