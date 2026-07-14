@@ -73,11 +73,14 @@ def _event_text(ev: dict) -> str | None:
 
 
 def parse_event_stream(body: str) -> dict:
-    """Extract the model's final JSON reply from a newline-delimited JSON event
-    stream (opencode `--format json`, pi `--mode json`). Takes the last event that
-    carries assistant text, json-decoded. Returns {} when no decodable reply is
-    present. Grounded in captured opencode + pi samples."""
-    text = None
+    """Extract the model's JSON reply from a newline-delimited JSON event stream
+    (opencode `--format json`, pi `--mode json`). Takes the FIRST event that carries
+    assistant text decoding to a JSON object, not the last: opencode's first
+    assistant text chunk is the model's direct reply, and it then agentic-loops
+    with further (non-JSON, rambling) chunks that must not clobber the real answer.
+    pi emits its reply once, in the assistant message_end event, so first-valid-JSON
+    is unchanged for pi. Returns {} when no decodable reply is present. Grounded in
+    captured opencode + pi samples."""
     for line in (body or "").splitlines():
         line = line.strip()
         if not line:
@@ -88,10 +91,9 @@ def parse_event_stream(body: str) -> dict:
             continue
         if not isinstance(ev, dict):
             continue
-        t = _event_text(ev)
-        if t:
-            text = t
-    if text:
+        text = _event_text(ev)
+        if not text:
+            continue
         obj = extract_json(text)
         if obj is not None:
             return obj
@@ -112,6 +114,7 @@ class BaseCliAdapter:
     def _auth_mounts(self) -> list: raise NotImplementedError
     def _auth_env(self) -> dict: raise NotImplementedError
     def _config_files(self) -> dict: return {}
+    def _stdin_for(self, prompt: str) -> str | None: return None
     def _parse(self, raw: dict) -> dict: raise NotImplementedError
     def capabilities(self): raise NotImplementedError
 
@@ -147,7 +150,8 @@ class BaseCliAdapter:
         spec = LaunchSpec(name=self.name, argv=self._argv(prompt), image=image,
                           worktree=worktree, auth_mounts=self._auth_mounts(),
                           auth_env=self._auth_env(), egress_hosts=self.egress_hosts,
-                          config_files=self._config_files())
+                          config_files=self._config_files(),
+                          stdin=self._stdin_for(prompt))
         return self.sandbox.spawn(spec, repo_remote_host=self._remote_host(repo),
                                   ci_host=self._ci_host(repo))
 

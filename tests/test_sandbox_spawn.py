@@ -39,3 +39,42 @@ def test_spawn_runs_container_and_tears_down(monkeypatch):
     proxy_start = next(c for c in calls if c[0] == "docker" and "run" in c and "-d" in c)
     for host in ("github.com", "ci.local", "gw.local"):
         assert host in proxy_start
+
+
+def test_spawn_passes_stdin_to_container_subprocess(monkeypatch):
+    seen_kwargs = []
+    def fake_run(argv, **kw):
+        if "timeout" in kw:                     # only the harness container run sets this
+            seen_kwargs.append(kw)
+        class P:
+            returncode = 0
+            stdout = json.dumps({"result": {"ok": True}}) if argv[:2] == ["docker", "run"] else ""
+            stderr = ""
+        return P()
+    sb = Sandbox(live_execution=True)
+    monkeypatch.setattr(sb, "_ensure_capable", lambda spec: None)
+    monkeypatch.setattr("skos.autopilot.sandbox.subprocess.run", fake_run)
+    spec = LaunchSpec(name="opencode", argv=["opencode", "run", "--format", "json"],
+                      image="sandbox-opencode:1", worktree="/tmp/wt",
+                      egress_hosts=["gw.local"], stdin="PROMPT")
+    sb.spawn(spec, repo_remote_host="github.com", ci_host="ci.local")
+    assert len(seen_kwargs) == 1
+    assert seen_kwargs[0]["input"] == "PROMPT"
+
+
+def test_spawn_omits_input_when_stdin_is_none(monkeypatch):
+    seen_kwargs = []
+    def fake_run(argv, **kw):
+        if "timeout" in kw:                     # only the harness container run sets this
+            seen_kwargs.append(kw)
+        class P:
+            returncode = 0
+            stdout = json.dumps({"result": {"ok": True}}) if argv[:2] == ["docker", "run"] else ""
+            stderr = ""
+        return P()
+    sb = Sandbox(live_execution=True)
+    monkeypatch.setattr(sb, "_ensure_capable", lambda spec: None)
+    monkeypatch.setattr("skos.autopilot.sandbox.subprocess.run", fake_run)
+    sb.spawn(_spec(), repo_remote_host="github.com", ci_host="ci.local")
+    assert len(seen_kwargs) == 1
+    assert "input" not in seen_kwargs[0]

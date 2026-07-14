@@ -7,9 +7,15 @@ def _a(**kw):
 
 
 def test_argv_default_and_with_model():
-    assert _a()._argv("P") == ["opencode", "run", "P", "--format", "json", "--pure"]
+    # the prompt is NOT a positional arg: `opencode run "<msg>"` silently no-ops;
+    # it is fed via stdin instead (see _stdin_for).
+    assert _a()._argv("P") == ["opencode", "run", "--format", "json", "--pure"]
     assert _a(model="nvidia/x")._argv("P") == [
-        "opencode", "run", "P", "--format", "json", "--pure", "--model", "nvidia/x"]
+        "opencode", "run", "--format", "json", "--pure", "--model", "nvidia/x"]
+
+
+def test_stdin_for_feeds_the_prompt():
+    assert _a()._stdin_for("P") == "P"
 
 
 def test_image_and_local_routing():
@@ -38,3 +44,19 @@ REAL_OPENCODE = (
 def test_parse_real_event_stream():
     a = _a()
     assert a._parse({"result": REAL_OPENCODE}) == {"verdict": "valid", "reason": "ok"}
+
+
+# opencode's first assistant text chunk is the model's direct JSON reply; it then
+# agentic-loops with more chunks (rambling prose). The parser must take the FIRST
+# valid-JSON reply, not the last, or the rambling clobbers the real answer.
+OPENCODE_THEN_RAMBLE = (
+    '{"type":"step_start","sessionID":"s1","part":{"type":"step-start"}}\n'
+    '{"type":"text","sessionID":"s1","part":{"type":"text",'
+    '"text":"{\\"verdict\\":\\"valid\\"}"}}\n'
+    '{"type":"text","sessionID":"s1","part":{"type":"text",'
+    '"text":"## rambling further exploration of the task..."}}\n')
+
+
+def test_parse_takes_first_valid_json_not_last_rambling_text():
+    a = _a()
+    assert a._parse({"result": OPENCODE_THEN_RAMBLE}) == {"verdict": "valid"}
