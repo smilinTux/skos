@@ -18,6 +18,16 @@ def test_stdin_for_feeds_the_prompt():
     assert _a()._stdin_for("P") == "P"
 
 
+def test_default_run_timeout_bounds_the_sandbox():
+    # opencode over-runs; the adapter must bound the sandbox it creates so a
+    # classification prompt can't loop for the 30-min sandbox default.
+    a = OpenCodeAdapter(model="ornith-tiny", base_url="http://gw:18780/v1")
+    assert a.sandbox.run_timeout == OpenCodeAdapter._DEFAULT_RUN_TIMEOUT
+    assert a.sandbox.run_timeout < 1800
+    b = OpenCodeAdapter(model="x", base_url="http://gw/v1", run_timeout=900)
+    assert b.sandbox.run_timeout == 900
+
+
 def test_image_and_local_routing():
     a = _a(base_url="http://localhost:18780/v1", model="sk-default")
     assert a._image() == "sandbox-opencode:1" and a.name == "opencode"
