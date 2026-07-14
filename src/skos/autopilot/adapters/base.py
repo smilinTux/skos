@@ -52,13 +52,31 @@ def extract_json(text) -> dict | None:
     return None
 
 
+def _event_text(ev: dict) -> str | None:
+    """Pull assistant text out of one event, tolerating the two real shapes:
+    opencode `--format json`: {"type":"text","part":{"type":"text","text":...}}
+    pi `--mode json`: {"type":"message_end","message":{"role":"assistant",
+                        "content":[{"type":"text","text":...}]}}
+    """
+    part = ev.get("part")
+    if isinstance(part, dict) and part.get("type") == "text" and part.get("text"):
+        return part["text"]
+    if ev.get("type") == "text" and isinstance(ev.get("text"), str):
+        return ev["text"]
+    msg = ev.get("message")                       # pi: assistant message with content list
+    if isinstance(msg, dict) and msg.get("role") == "assistant":
+        chunks = [c.get("text") for c in (msg.get("content") or [])
+                  if isinstance(c, dict) and c.get("type") == "text" and c.get("text")]
+        if chunks:
+            return "".join(chunks)
+    return None
+
+
 def parse_event_stream(body: str) -> dict:
     """Extract the model's final JSON reply from a newline-delimited JSON event
-    stream (opencode `--format json`, pi `--mode json`). The reply is the last
-    `text` event's `part.text` (or a top-level `text`), json-decoded. Returns {}
-    when no decodable reply is present. Grounded in a captured opencode sample:
-    events like {"type":"text","part":{"type":"text","text":"{...json...}"}}.
-    """
+    stream (opencode `--format json`, pi `--mode json`). Takes the last event that
+    carries assistant text, json-decoded. Returns {} when no decodable reply is
+    present. Grounded in captured opencode + pi samples."""
     text = None
     for line in (body or "").splitlines():
         line = line.strip()
@@ -70,11 +88,9 @@ def parse_event_stream(body: str) -> dict:
             continue
         if not isinstance(ev, dict):
             continue
-        part = ev.get("part")
-        if isinstance(part, dict) and part.get("type") == "text" and part.get("text"):
-            text = part["text"]
-        elif ev.get("type") == "text" and isinstance(ev.get("text"), str):
-            text = ev["text"]
+        t = _event_text(ev)
+        if t:
+            text = t
     if text:
         obj = extract_json(text)
         if obj is not None:

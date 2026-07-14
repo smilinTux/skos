@@ -28,7 +28,7 @@ class PiAdapter(BaseCliAdapter):
                 "sandbox": True, "tool_restrictions": True}
 
     def _argv(self, prompt: str) -> list[str]:
-        return ["pi", "-p", prompt, "--mode", "json"]
+        return ["pi", "-p", prompt, "--mode", "json", "--no-session"]
 
     def _image(self) -> str:
         return self.image

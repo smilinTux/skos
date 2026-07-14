@@ -8,7 +8,7 @@ def _a(**kw):
 
 def test_argv_and_image():
     a = _a()
-    assert a._argv("P") == ["pi", "-p", "P", "--mode", "json"]
+    assert a._argv("P") == ["pi", "-p", "P", "--mode", "json", "--no-session"]
     assert a._image() == "sandbox-pi:1"
     assert a.name == "pi"
 
@@ -38,3 +38,14 @@ def test_parse_event_stream_ndjson():
     stream = ('{"type":"text","part":{"type":"text",'
               '"text":"{\\"score\\":5,\\"passed\\":true}"}}\n')
     assert a._parse({"result": stream}) == {"score": 5, "passed": True}
+
+
+def test_parse_real_pi_event_schema():
+    # pi --mode json: reply is in the assistant message_end event's content[].text
+    a = _a()
+    stream = (
+        '{"type":"turn_start"}\n'
+        '{"type":"message_end","message":{"role":"assistant","content":'
+        '[{"type":"text","text":"{\\"verdict\\":\\"valid\\",\\"reason\\":\\"ok\\"}"}]}}\n'
+        '{"type":"agent_end"}\n')
+    assert a._parse({"result": stream}) == {"verdict": "valid", "reason": "ok"}
