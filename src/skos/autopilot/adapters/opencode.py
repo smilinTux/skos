@@ -24,12 +24,15 @@ from .base import BaseCliAdapter, parse_event_stream
 class OpenCodeAdapter(BaseCliAdapter):
     name = "opencode"
 
+    _DEFAULT_MAX_TOKENS = 131072            # generous ceiling (ornith is uncapped)
+
     def __init__(self, sandbox=None, model=None, base_url=None, egress_hosts=None,
-                 live_execution: bool = False, image=None):
+                 live_execution: bool = False, image=None, max_tokens=None):
         from ..sandbox import Sandbox
         self.model = model
         self.base_url = base_url
         self.image = image or "sandbox-opencode:1"
+        self.max_tokens = int(max_tokens) if max_tokens else self._DEFAULT_MAX_TOKENS
         super().__init__(sandbox or Sandbox(live_execution=live_execution),
                          egress_hosts=egress_hosts, live_execution=live_execution)
 
@@ -44,7 +47,10 @@ class OpenCodeAdapter(BaseCliAdapter):
         # no-ops, so it is fed via stdin instead (see _stdin_for).
         argv = ["opencode", "run", "--format", "json", "--pure"]
         if self.model:
-            argv += ["--model", self.model]     # provider/model form, e.g. nvidia/x
+            # skgateway routing goes through the injected `skgw` custom provider
+            # (see _config_files); otherwise a built-in provider/model id as-is.
+            model = f"skgw/{self.model}" if self.base_url else self.model
+            argv += ["--model", model]
         return argv
 
     def _stdin_for(self, prompt: str) -> str | None:
@@ -57,10 +63,31 @@ class OpenCodeAdapter(BaseCliAdapter):
         return []
 
     def _auth_env(self):
+        # point opencode at the injected config (custom skgw provider); OPENAI_BASE_URL
+        # does NOT work for opencode. Empty when no local endpoint is configured.
+        return {"OPENCODE_CONFIG": "/cfg/opencode.json"} if self.base_url else {}
+
+    def _config_files(self):
         if not self.base_url:
             return {}
-        return {"OPENAI_BASE_URL": self.base_url, "OPENAI_API_KEY": "sk-local",
-                "OPENCODE_MODEL": self.model or ""}
+        cfg = {
+            "$schema": "https://opencode.ai/config.json",
+            "provider": {
+                "skgw": {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "name": "skgateway",
+                    "options": {"baseURL": self.base_url, "apiKey": "sk-local"},
+                    "models": {self.model: {
+                        "name": self.model,
+                        "limit": {"context": self.max_tokens, "output": self.max_tokens}}},
+                }
+            },
+        }
+        # config's options.apiKey authenticates the custom provider (verified live);
+        # do NOT also mount ~/.local/share/opencode/auth.json: that nested mount makes
+        # docker create ~/.local root-owned, and opencode then EACCES on mkdir
+        # ~/.local/state. HOME stays a clean writable tmpfs so opencode makes its dirs.
+        return {"/cfg/opencode.json": json.dumps(cfg)}
 
     def _parse(self, raw: dict) -> dict:
         if not isinstance(raw, dict):

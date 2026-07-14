@@ -21,7 +21,7 @@ def test_stdin_for_feeds_the_prompt():
 def test_image_and_local_routing():
     a = _a(base_url="http://localhost:18780/v1", model="sk-default")
     assert a._image() == "sandbox-opencode:1" and a.name == "opencode"
-    assert a._auth_env()["OPENAI_BASE_URL"] == "http://localhost:18780/v1"
+    assert a._auth_env()["OPENCODE_CONFIG"] == "/cfg/opencode.json"
     assert a._auth_mounts() == []
 
 
@@ -60,3 +60,26 @@ OPENCODE_THEN_RAMBLE = (
 def test_parse_takes_first_valid_json_not_last_rambling_text():
     a = _a()
     assert a._parse({"result": OPENCODE_THEN_RAMBLE}) == {"verdict": "valid"}
+
+
+def test_config_injection_to_skgateway():
+    import json
+    from skos.autopilot.sandbox import Sandbox
+    from skos.autopilot.adapters.opencode import OpenCodeAdapter
+    a = OpenCodeAdapter(Sandbox(), model="ornith-big",
+                        base_url="http://172.17.0.1:18780/v1", max_tokens=131072)
+    # argv routes to the injected skgw provider
+    assert a._argv("P") == ["opencode", "run", "--format", "json", "--pure",
+                            "--model", "skgw/ornith-big"]
+    assert a._auth_env() == {"OPENCODE_CONFIG": "/cfg/opencode.json"}
+    cf = a._config_files()
+    cfg = json.loads(cf["/cfg/opencode.json"])
+    prov = cfg["provider"]["skgw"]
+    assert prov["npm"] == "@ai-sdk/openai-compatible"
+    assert prov["options"]["baseURL"] == "http://172.17.0.1:18780/v1"
+    assert prov["models"]["ornith-big"]["limit"]["output"] == 131072
+    # no base_url -> no injection, plain model
+    b = OpenCodeAdapter(Sandbox(), model="opencode/deepseek-v4-flash-free")
+    assert b._config_files() == {} and b._auth_env() == {}
+    assert b._argv("P") == ["opencode", "run", "--format", "json", "--pure",
+                            "--model", "opencode/deepseek-v4-flash-free"]
