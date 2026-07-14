@@ -78,3 +78,28 @@ def test_spawn_omits_input_when_stdin_is_none(monkeypatch):
     sb.spawn(_spec(), repo_remote_host="github.com", ci_host="ci.local")
     assert len(seen_kwargs) == 1
     assert "input" not in seen_kwargs[0]
+
+
+def test_spawn_preserves_partial_stdout_on_timeout(monkeypatch):
+    import subprocess
+    # the harness container run (the one with `timeout=`) over-runs and is killed;
+    # subprocess.run raises TimeoutExpired carrying the partial captured stdout.
+    partial = ('{"type":"text","part":{"type":"text",'
+               '"text":"{\\"verdict\\":\\"valid\\"}"}}\n'
+               '{"type":"text","part":{"type":"text","text":"## rambling..."}}\n')
+
+    def fake_run(argv, **kw):
+        if "timeout" in kw:
+            raise subprocess.TimeoutExpired(argv, kw["timeout"], output=partial)
+        class P:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return P()
+    sb = Sandbox(live_execution=True)
+    monkeypatch.setattr(sb, "_ensure_capable", lambda spec: None)
+    monkeypatch.setattr("skos.autopilot.sandbox.subprocess.run", fake_run)
+    out = sb.spawn(_spec(), repo_remote_host="github.com", ci_host=None)
+    assert out["timeout"] is True and out["exit_code"] == 124
+    # the partial stream survives so the adapter's _parse can still recover the answer
+    assert out["result"] == partial

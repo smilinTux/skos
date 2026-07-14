@@ -144,8 +144,16 @@ class Sandbox:
                     self._docker_run_argv(spec, net, proxy_alias, container_name=harness_name,
                                           extra_mounts=cfg_mounts),
                     **run_kwargs)
-            except subprocess.TimeoutExpired:
-                return {"result": "", "is_error": True, "exit_code": 124, "timeout": True}
+            except subprocess.TimeoutExpired as e:
+                # Preserve whatever the harness streamed before the kill. An agentic
+                # harness (opencode) emits its direct answer in the FIRST event, then
+                # over-runs; discarding partial stdout here would throw that answer
+                # away on every timeout. The adapter's _parse pulls the first valid
+                # JSON reply out of the partial stream.
+                partial = e.stdout if isinstance(e.stdout, str) else (
+                    e.stdout.decode(errors="replace") if e.stdout else "")
+                return {"result": partial, "is_error": True, "exit_code": 124,
+                        "timeout": True}
             try:
                 return json.loads(proc.stdout or "{}")
             except json.JSONDecodeError:
