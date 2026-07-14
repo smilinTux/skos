@@ -16,8 +16,8 @@ from .types import RepoSpec
 
 _REPO_KEYS = {
     "name", "path", "base_branch", "integration_branch", "test_cmd", "ci",
-    "coverage_cmd", "ci_poll_timeout", "automerge", "auto_revert", "min_diff_coverage",
-    "sandbox_image",
+    "coverage_cmd", "ci_poll_timeout", "ci_scope", "automerge", "auto_revert",
+    "min_diff_coverage", "sandbox_image",
 }
 
 

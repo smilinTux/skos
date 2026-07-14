@@ -135,7 +135,8 @@ class EngineeringExecutor:
                            prior_feedback=feedback, round=rnd)
             harness.run_task(tb)
             diff = self._diff(repo, wt)
-            ci_status = external_ci_verdict(repo, pr_branch, self._head_sha(wt), worktree=wt)
+            ci_status = external_ci_verdict(repo, pr_branch, self._head_sha(wt),
+                                            worktree=wt, diff=diff)
             cov = diff_coverage(repo, wt, diff)
             gb = GradeBrief(task_id=item.ref, repo=repo, worktree=wt, diff=diff,
                             acceptance=p.get("acceptance", []),
