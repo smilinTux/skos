@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import subprocess
 import time
 import xml.etree.ElementTree as ET
@@ -17,8 +18,55 @@ _RED_CONCLUSIONS = {"failure", "cancelled", "timed_out",
                     "action_required", "startup_failure"}
 
 
+def _is_test_file(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1]
+    return name.startswith("test_") and name.endswith(".py")
+
+
+def scoped_test_targets(diff: str, worktree: str) -> list[str]:
+    """Worktree-relative test files relevant to a unified diff.
+
+    The pre-commit twin gate must green a CORRECT change without being held
+    hostage to unrelated pre-existing suite red (which, run whole, never clears
+    and burns every Ralph round). So map the diff to just the tests that matter:
+
+      * a changed/added test file (``test_*.py``) is included directly;
+      * a changed source module ``.../foo.py`` pulls in every ``test_foo*.py``
+        found under the worktree (catches the module's OWN existing regressions).
+
+    Returns sorted, de-duplicated, existing paths relative to the worktree.
+    """
+    root = Path(worktree)
+    targets: set[str] = set()
+    for path in _changed_lines(diff):
+        if _is_test_file(path):
+            if (root / path).exists():
+                targets.add(path)
+            continue
+        if path.endswith(".py"):
+            stem = path.rsplit("/", 1)[-1][:-3]
+            for hit in root.rglob(f"test_{stem}*.py"):
+                targets.add(hit.relative_to(root).as_posix())
+    return sorted(targets)
+
+
+def _scoped_cmd(cmd: str, repo: RepoSpec, worktree: str | None,
+                diff: str | None) -> str:
+    """Append changed test targets to a pytest-style cmd when ci_scope=changed.
+
+    Falls back to the verbatim cmd when scope is off, no diff/worktree is
+    available, or the diff maps to no test targets (an untested change still
+    runs the full cmd rather than passing by default)."""
+    if getattr(repo, "ci_scope", "full") != "changed" or not diff or not worktree:
+        return cmd
+    targets = scoped_test_targets(diff, worktree)
+    if not targets:
+        return cmd
+    return cmd + " " + " ".join(shlex.quote(t) for t in targets)
+
+
 def external_ci_verdict(repo: RepoSpec, pr_branch: str, head_sha: str,
-                        worktree: str | None = None) -> str:
+                        worktree: str | None = None, diff: str | None = None) -> str:
     """Return green|red|pending|none for the repo's external CI over head_sha.
 
     github-actions: poll `gh run list` up to ci_poll_timeout, map the run whose
@@ -44,7 +92,7 @@ def external_ci_verdict(repo: RepoSpec, pr_branch: str, head_sha: str,
                 return "red"
             time.sleep(_POLL_INTERVAL)
     if repo.ci.startswith("local:"):
-        cmd = repo.ci[len("local:"):]
+        cmd = _scoped_cmd(repo.ci[len("local:"):], repo, worktree, diff)
         proc = subprocess.run(cmd, shell=True, cwd=(worktree or repo.path),
                               capture_output=True, text=True)
         return "green" if proc.returncode == 0 else "red"
@@ -82,7 +130,8 @@ def diff_coverage(repo: RepoSpec, worktree: str, diff: str) -> float | None:
     """
     if not repo.coverage_cmd:
         return None
-    subprocess.run(repo.coverage_cmd, shell=True, cwd=worktree,
+    cov_cmd = _scoped_cmd(repo.coverage_cmd, repo, worktree, diff)
+    subprocess.run(cov_cmd, shell=True, cwd=worktree,
                    capture_output=True, text=True)
     changed = _changed_lines(diff)
     root = ET.parse(str(Path(worktree) / "coverage.xml")).getroot()

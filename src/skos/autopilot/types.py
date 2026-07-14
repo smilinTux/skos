@@ -23,6 +23,7 @@ class RepoSpec:                       # one entry of repo_map (autopilot.yaml)
     ci: str                           # "github-actions" | "local:<cmd>" | "none"
     coverage_cmd: str | None = None   # emits Cobertura/lcov; None -> PR-only
     ci_poll_timeout: int = 1200       # seconds to poll github-actions before red
+    ci_scope: str = "full"            # "full" (whole suite) | "changed" (tests for the diff)
     automerge: bool = False
     auto_revert: bool = False
     min_diff_coverage: float = 0.8

@@ -121,3 +121,112 @@ def test_diff_coverage_none_when_no_coverage_cmd(mocker, tmp_path):
     repo.coverage_cmd = None
     assert ci.diff_coverage(repo, str(tmp_path), _DIFF) is None
     run.assert_not_called()
+
+
+# ── changed-scope CI: gate a correct change without being hostage to unrelated
+# pre-existing suite red (the pre-commit Ralph-loop convergence fix) ──────────
+
+def _scope_tree(tmp_path):
+    """A worktree with src modules + their test files, mirroring skchat layout."""
+    (tmp_path / "src" / "skchat").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    for p in ["src/skchat/transport.py", "src/skchat/crypto.py", "src/skchat/daemon.py"]:
+        (tmp_path / p).write_text("x = 1\n", encoding="utf-8")
+    for p in ["tests/test_transport.py", "tests/test_transport_fail_closed.py",
+              "tests/test_crypto_signing_degraded.py", "tests/test_unrelated.py"]:
+        (tmp_path / p).write_text("def test_x():\n    assert True\n", encoding="utf-8")
+    return tmp_path
+
+
+_SCOPE_DIFF = (
+    "diff --git a/src/skchat/transport.py b/src/skchat/transport.py\n"
+    "--- a/src/skchat/transport.py\n+++ b/src/skchat/transport.py\n"
+    "@@ -1,1 +1,2 @@\n+added = 1\n"
+    "diff --git a/src/skchat/crypto.py b/src/skchat/crypto.py\n"
+    "--- a/src/skchat/crypto.py\n+++ b/src/skchat/crypto.py\n"
+    "@@ -1,1 +1,2 @@\n+added = 2\n"
+    "diff --git a/tests/test_transport_fail_closed.py b/tests/test_transport_fail_closed.py\n"
+    "--- /dev/null\n+++ b/tests/test_transport_fail_closed.py\n"
+    "@@ -0,0 +1,2 @@\n+def test_new():\n+    assert True\n"
+    "diff --git a/tests/test_crypto_signing_degraded.py b/tests/test_crypto_signing_degraded.py\n"
+    "--- /dev/null\n+++ b/tests/test_crypto_signing_degraded.py\n"
+    "@@ -0,0 +1,2 @@\n+def test_new2():\n+    assert True\n"
+)
+
+
+def test_scoped_test_targets_maps_changed_sources_and_includes_changed_tests(tmp_path):
+    _scope_tree(tmp_path)
+    targets = ci.scoped_test_targets(_SCOPE_DIFF, str(tmp_path))
+    # changed source transport.py -> its existing + new test files;
+    # changed source crypto.py -> its degraded test; changed test files included directly.
+    assert set(targets) == {
+        "tests/test_transport.py",
+        "tests/test_transport_fail_closed.py",
+        "tests/test_crypto_signing_degraded.py",
+    }
+    # an unrelated test file is NOT pulled in (that's the whole point)
+    assert "tests/test_unrelated.py" not in targets
+
+
+def test_scoped_test_targets_empty_when_no_test_mapping(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "orphan.py").write_text("x=1\n", encoding="utf-8")
+    diff = ("diff --git a/src/orphan.py b/src/orphan.py\n"
+            "--- a/src/orphan.py\n+++ b/src/orphan.py\n@@ -1 +1,2 @@\n+y=2\n")
+    assert ci.scoped_test_targets(diff, str(tmp_path)) == []
+
+
+def test_local_changed_scope_runs_only_changed_targets(mocker, tmp_path):
+    _scope_tree(tmp_path)
+    run = mocker.patch("skos.autopilot.ci.subprocess.run",
+                       return_value=subprocess.CompletedProcess(args=[], returncode=0))
+    repo = RepoSpec(name="skchat", path=str(tmp_path), base_branch="main",
+                    integration_branch="develop", test_cmd="pytest",
+                    ci="local:pytest -q -m 'not integration'", ci_scope="changed")
+    assert ci.external_ci_verdict(repo, "b", "sha", worktree=str(tmp_path),
+                                  diff=_SCOPE_DIFF) == "green"
+    cmd = run.call_args.args[0]
+    assert cmd.startswith("pytest -q -m 'not integration'")
+    assert "tests/test_transport.py" in cmd
+    assert "tests/test_crypto_signing_degraded.py" in cmd
+    assert "tests/test_unrelated.py" not in cmd      # unrelated red can't block us
+
+
+def test_local_changed_scope_falls_back_to_full_when_no_targets(mocker, tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "orphan.py").write_text("x=1\n", encoding="utf-8")
+    diff = ("diff --git a/src/orphan.py b/src/orphan.py\n"
+            "--- a/src/orphan.py\n+++ b/src/orphan.py\n@@ -1 +1,2 @@\n+y=2\n")
+    run = mocker.patch("skos.autopilot.ci.subprocess.run",
+                       return_value=subprocess.CompletedProcess(args=[], returncode=0))
+    repo = RepoSpec(name="skchat", path=str(tmp_path), base_branch="main",
+                    integration_branch="develop", test_cmd="pytest",
+                    ci="local:pytest -q", ci_scope="changed")
+    ci.external_ci_verdict(repo, "b", "sha", worktree=str(tmp_path), diff=diff)
+    assert run.call_args.args[0] == "pytest -q"      # no targets -> run full cmd
+
+
+def test_local_full_scope_is_unchanged_default(mocker, tmp_path):
+    _scope_tree(tmp_path)
+    run = mocker.patch("skos.autopilot.ci.subprocess.run",
+                       return_value=subprocess.CompletedProcess(args=[], returncode=0))
+    # default ci_scope="full": the diff is ignored, the whole cmd runs verbatim
+    repo = RepoSpec(name="skchat", path=str(tmp_path), base_branch="main",
+                    integration_branch="develop", test_cmd="pytest", ci="local:pytest -q")
+    ci.external_ci_verdict(repo, "b", "sha", worktree=str(tmp_path), diff=_SCOPE_DIFF)
+    assert run.call_args.args[0] == "pytest -q"
+
+
+def test_diff_coverage_scopes_cmd_to_changed_targets(mocker, tmp_path):
+    _scope_tree(tmp_path)
+    (tmp_path / "coverage.xml").write_text(_COBERTURA, encoding="utf-8")
+    run = mocker.patch("skos.autopilot.ci.subprocess.run",
+                       return_value=subprocess.CompletedProcess(args=[], returncode=0))
+    repo = RepoSpec(name="skchat", path=str(tmp_path), base_branch="main",
+                    integration_branch="develop", test_cmd="pytest",
+                    ci="none", coverage_cmd="pytest --cov --cov-report=xml",
+                    ci_scope="changed")
+    ci.diff_coverage(repo, str(tmp_path), _SCOPE_DIFF)
+    cmd = run.call_args.args[0]
+    assert cmd.startswith("pytest --cov --cov-report=xml")
+    assert "tests/test_transport.py" in cmd
