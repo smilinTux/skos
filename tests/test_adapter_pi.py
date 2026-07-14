@@ -39,6 +39,15 @@ def test_no_base_url_means_no_config_files_and_plain_argv():
     assert a._argv("P") == ["pi", "-p", "P", "--mode", "json", "--no-session"]
 
 
+def test_run_timeout_defaults_to_sandbox_default_but_is_overridable():
+    # pi terminates on its own (fast), so it keeps the sandbox default rather than
+    # opencode's aggressive cap; the knob still lets a caller bound a long run.
+    a = PiAdapter(model="ornith-tiny", base_url="http://gw:18780/v1")
+    assert a.sandbox.run_timeout == 1800                       # sandbox default, uncapped
+    b = PiAdapter(model="ornith-tiny", base_url="http://gw:18780/v1", run_timeout=600)
+    assert b.sandbox.run_timeout == 600
+
+
 def test_parse_extracts_model_reply_dict():
     a = _a()
     # already-parsed object
