@@ -1,6 +1,19 @@
 """OpenCodeAdapter: opencode (opencode.ai) on the shared BaseCliAdapter. Installed
 sovereign fallback; can target a local model. `_parse` is defensive; validate the
-real `opencode run` output shape before enabling opencode as a live harness."""
+real `opencode run` output shape before enabling opencode as a live harness.
+
+NOTE: `opencode run "<msg>"` (message as a positional arg) silently produces zero
+output; `echo "<msg>" | opencode run` (message on stdin) works and returns the
+NDJSON stream. So `_argv` drops the prompt positional and `_stdin_for` feeds it
+via stdin instead (see Sandbox/LaunchSpec.stdin). Also, opencode's first assistant
+text chunk is the model's direct JSON reply; it then agentic-loops with further
+chunks, so `parse_event_stream` takes the FIRST valid-JSON reply, not the last.
+This is NOT a skgateway bug: opencode reaches skgateway and the model answers
+correctly. Remaining follow-ups for a live sandbox opencode-on-skgateway run:
+inject opencode.json (custom openai-compatible provider) + auth.json via
+config_files (mirror PiAdapter), and tame opencode's agentic over-run on simple
+assess/grade prompts (it produced ~87KB and ran long; the correct reply is the
+first chunk)."""
 from __future__ import annotations
 
 import json
@@ -26,11 +39,16 @@ class OpenCodeAdapter(BaseCliAdapter):
 
     def _argv(self, prompt: str) -> list[str]:
         # `--format json` emits the raw NDJSON event stream (confirmed from
-        # `opencode run --help`); without it opencode prints formatted text.
-        argv = ["opencode", "run", prompt, "--format", "json", "--pure"]
+        # `opencode run --help`); without it opencode prints formatted text. The
+        # prompt is NOT a positional arg here: `opencode run "<msg>"` silently
+        # no-ops, so it is fed via stdin instead (see _stdin_for).
+        argv = ["opencode", "run", "--format", "json", "--pure"]
         if self.model:
             argv += ["--model", self.model]     # provider/model form, e.g. nvidia/x
         return argv
+
+    def _stdin_for(self, prompt: str) -> str | None:
+        return prompt
 
     def _image(self) -> str:
         return self.image

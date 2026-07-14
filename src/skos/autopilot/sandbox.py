@@ -40,6 +40,7 @@ class LaunchSpec:
     auth_env: dict[str, str] = field(default_factory=dict)
     egress_hosts: list[str] = field(default_factory=list)
     config_files: dict[str, str] = field(default_factory=dict)
+    stdin: str | None = None
 
 
 class Sandbox:
@@ -57,6 +58,8 @@ class Sandbox:
         argv = [self.docker, "run"]
         if container_name:
             argv += ["--name", container_name]
+        if spec.stdin is not None:
+            argv += ["-i"]                      # keep stdin open so the harness can read it
         argv += [
             "--rm", "--network", network,
             # run as the host uid:gid so the bind-mounted worktree is writable;
@@ -132,11 +135,15 @@ class Sandbox:
                 capture_output=True, text=True, check=True)
             subprocess.run([self.docker, "network", "connect", "bridge", proxy_name],
                            capture_output=True, text=True)          # give proxy outward egress
+            run_kwargs = {"capture_output": True, "text": True, "cwd": spec.worktree,
+                          "timeout": self.run_timeout}
+            if spec.stdin is not None:
+                run_kwargs["input"] = spec.stdin
             try:
                 proc = subprocess.run(
                     self._docker_run_argv(spec, net, proxy_alias, container_name=harness_name,
                                           extra_mounts=cfg_mounts),
-                    capture_output=True, text=True, cwd=spec.worktree, timeout=self.run_timeout)
+                    **run_kwargs)
             except subprocess.TimeoutExpired:
                 return {"result": "", "is_error": True, "exit_code": 124, "timeout": True}
             try:

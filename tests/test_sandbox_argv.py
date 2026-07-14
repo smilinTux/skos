@@ -45,6 +45,16 @@ def test_no_container_name_omits_the_flag():
     assert argv[-3:] == ["claude", "-p", "hi"]
 
 
+def test_stdin_spec_adds_interactive_flag():
+    argv = Sandbox()._docker_run_argv(_spec(stdin="hi"), network="n", proxy_alias="p")
+    assert "-i" in argv
+
+
+def test_no_stdin_spec_omits_interactive_flag():
+    argv = Sandbox()._docker_run_argv(_spec(), network="n", proxy_alias="p")
+    assert "-i" not in argv
+
+
 def test_auth_mount_parent_is_writable_tmpfs():
     # docker auto-creates a cred-mount parent as root-owned; the sandbox must
     # tmpfs it writable so the harness can write siblings (claude session-env).

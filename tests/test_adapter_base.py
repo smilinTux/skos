@@ -83,6 +83,26 @@ def test_config_files_hook_defaults_to_empty():
     assert a._config_files() == {}
 
 
+def test_stdin_for_hook_defaults_to_none():
+    a = _Fake(Sandbox(), egress_hosts=[])
+    assert a._stdin_for("prompt") is None
+
+
+def test_run_raw_sets_stdin_from_hook_override(monkeypatch):
+    class _FakeStdin(_Fake):
+        def _stdin_for(self, prompt):
+            return prompt
+
+    seen = {}
+    sb = Sandbox(live_execution=True)
+    monkeypatch.setattr(sb, "spawn",
+        lambda spec, **kw: seen.setdefault("spec", spec) and {"result": {}})
+    a = _FakeStdin(sb, egress_hosts=[])
+    a._run_raw("instr", "data", worktree="/tmp/wt", repo=_repo(sandbox_image=None))
+    framed_prompt = seen["spec"].argv[1]           # _Fake._argv returns ["fake", prompt]
+    assert seen["spec"].stdin == framed_prompt
+
+
 def test_run_raw_passes_config_files_to_launch_spec(monkeypatch):
     class _FakeCfg(_Fake):
         def _config_files(self):
