@@ -17,7 +17,7 @@ register_harness("claude-code", lambda c: ClaudeCodeAdapter(
 register_harness("pi", lambda c: PiAdapter(
     model=_g(c, "harness_model"), base_url=_g(c, "harness_base_url"),
     egress_hosts=_g(c, "mcp_endpoints") or [], live_execution=_g(c, "live_execution", False),
-    image=_g(c, "sandbox_image")))
+    image=_g(c, "sandbox_image"), max_tokens=_g(c, "harness_max_tokens")))
 register_harness("opencode", lambda c: OpenCodeAdapter(
     model=_g(c, "harness_model"), base_url=_g(c, "harness_base_url"),
     egress_hosts=_g(c, "mcp_endpoints") or [], live_execution=_g(c, "live_execution", False),

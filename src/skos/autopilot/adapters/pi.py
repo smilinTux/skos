@@ -21,12 +21,18 @@ from .base import BaseCliAdapter, parse_event_stream
 class PiAdapter(BaseCliAdapter):
     name = "pi"
 
+    # ornith-big (Tyler's server) has no reasoning/output cap, so we give pi a
+    # generous ceiling rather than a small one that a thinking model exhausts on
+    # reasoning before emitting content. Overridable via config.harness_max_tokens.
+    _DEFAULT_MAX_TOKENS = 131072
+
     def __init__(self, sandbox=None, model=None, base_url=None, egress_hosts=None,
-                 live_execution: bool = False, image=None):
+                 live_execution: bool = False, image=None, max_tokens=None):
         from ..sandbox import Sandbox
         self.model = model
         self.base_url = base_url
         self.image = image or "sandbox-pi:1"
+        self.max_tokens = int(max_tokens) if max_tokens else self._DEFAULT_MAX_TOKENS
         super().__init__(sandbox or Sandbox(live_execution=live_execution),
                          egress_hosts=egress_hosts, live_execution=live_execution)
 
@@ -62,7 +68,8 @@ class PiAdapter(BaseCliAdapter):
                     "apiKey": "sk-local",
                     "compat": {"supportsDeveloperRole": False},
                     "models": [{"id": self.model,
-                                "limit": {"context": 32768, "output": 32768}}],
+                                "limit": {"context": self.max_tokens,
+                                          "output": self.max_tokens}}],
                 }
             }
         }
