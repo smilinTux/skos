@@ -100,8 +100,25 @@ class EngineeringExecutor:
 
     _MAX_ROUNDS = 4
 
+    def _stage_work(self, wt: str) -> None:
+        """Stage the harness's edits INCLUDING new/untracked files, minus CI/coverage
+        byproducts. The harness writes new files (e.g. fresh test files) but never
+        `git add`s them; a plain `git diff` omits untracked files, so the grade would
+        see 'no tests present', and scoped CI + diff-coverage would never run the new
+        tests (coverage reads ~0 on the new source). The twin gate then can NEVER pass
+        a correct TDD change. Staging first is what makes new tests visible to all
+        three gate arms."""
+        subprocess.run(["git", "-C", wt, "add", "-A"], capture_output=True, text=True)
+        subprocess.run(["git", "-C", wt, "reset", "-q", "--",
+                        "coverage.xml", ".coverage", ".pytest_cache",
+                        ":(glob)**/__pycache__/**", ":(glob)**/*.pyc"],
+                       capture_output=True, text=True)
+
     def _diff(self, repo: RepoSpec, wt: str) -> str:
-        proc = subprocess.run(["git", "-C", wt, "diff", repo.base_branch],
+        # Stage first so untracked new files (fresh test files!) appear in the diff;
+        # `--cached` then diffs the full staged worktree against base.
+        self._stage_work(wt)
+        proc = subprocess.run(["git", "-C", wt, "diff", "--cached", repo.base_branch],
                               capture_output=True, text=True)
         return proc.stdout
 
@@ -170,13 +187,8 @@ class EngineeringExecutor:
         """Commit the harness's worktree edits onto pr_branch and push. The harness
         edits the worktree but does not commit, so a PR/merge would otherwise have
         no commits. Push is best-effort (a repo with no origin stays local)."""
-        subprocess.run(["git", "-C", wt, "add", "-A"], check=True, capture_output=True, text=True)
-        # never commit autopilot's own CI/coverage byproducts (generated during the
-        # twin-gate loop, not the harness's work)
-        subprocess.run(["git", "-C", wt, "reset", "-q", "--",
-                        "coverage.xml", ".coverage", ".pytest_cache",
-                        ":(glob)**/__pycache__/**", ":(glob)**/*.pyc"],
-                       capture_output=True, text=True)
+        # same staging as the gate (new files in, CI/coverage byproducts out)
+        self._stage_work(wt)
         title = item.payload.get("title", item.ref)
         subprocess.run(["git", "-C", wt, "commit", "-m", f"autopilot: {title}"],
                        capture_output=True, text=True)          # no-op commit tolerated

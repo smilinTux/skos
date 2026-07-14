@@ -315,3 +315,32 @@ def test_revert_raises_without_recorded_merge(mocker):
     cfg = _t.SimpleNamespace(repo_map={"skrender": _spec("skrender")}, automerge_repos=[])
     with pytest.raises(ValueError):
         _revert_impl(board, cfg, "t1")
+
+
+# ── _diff must include NEW/untracked files (the harness writes tests but never
+# `git add`s them; a plain `git diff` omitted them, so grade/CI/coverage saw no
+# tests and the twin gate could never pass a TDD change) ──────────────────────
+
+def _git(wt, *args):
+    import subprocess
+    return subprocess.run(["git", "-C", str(wt), *args], capture_output=True, text=True)
+
+
+def test_diff_includes_untracked_new_files_and_excludes_coverage_byproducts(tmp_path):
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.email", "a@b.c")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "src.py").write_text("x = 1\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A"); _git(tmp_path, "commit", "-qm", "base")
+    # harness edits: modify a tracked file + write a NEW untracked test + a byproduct
+    (tmp_path / "src.py").write_text("x = 1\ny = 2\n", encoding="utf-8")
+    (tmp_path / "test_new.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
+    (tmp_path / "coverage.xml").write_text("<coverage/>\n", encoding="utf-8")
+
+    ex = EngineeringExecutor(_t.SimpleNamespace(repo_map={}, automerge_repos=[]),
+                             board=object(), journal=object())
+    diff = ex._diff(_spec("r").__class__(name="r", path=str(tmp_path), base_branch="main",
+                     integration_branch="develop", test_cmd="pytest", ci="none"), str(tmp_path))
+    assert "test_new.py" in diff          # the untracked new test IS visible now
+    assert "+y = 2" in diff               # the tracked modification too
+    assert "coverage.xml" not in diff     # CI/coverage byproducts stay excluded
