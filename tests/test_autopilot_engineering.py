@@ -344,3 +344,32 @@ def test_diff_includes_untracked_new_files_and_excludes_coverage_byproducts(tmp_
     assert "test_new.py" in diff          # the untracked new test IS visible now
     assert "+y = 2" in diff               # the tracked modification too
     assert "coverage.xml" not in diff     # CI/coverage byproducts stay excluded
+
+
+# ── _pr_base: fall back to base_branch when integration_branch doesn't exist on
+# origin (a missing integration branch made gh pr create fail AFTER push, silently
+# eating the PR) ──────────────────────────────────────────────────────────────
+
+def _pr_spec():
+    return RepoSpec(name="skchat", path="/repos/skchat", base_branch="main",
+                    integration_branch="autopilot/integration", test_cmd="pytest", ci="none")
+
+
+def test_pr_base_falls_back_to_base_when_integration_branch_absent(mocker):
+    ex = EngineeringExecutor(_t.SimpleNamespace(repo_map={}, automerge_repos=[]),
+                             board=object(), journal=object())
+    import subprocess
+    mocker.patch("skos.autopilot.engineering.subprocess.run",
+                 return_value=subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""))
+    assert ex._pr_base(_pr_spec()) == "main"        # integration branch absent -> base
+
+
+def test_pr_base_uses_integration_branch_when_it_exists(mocker):
+    ex = EngineeringExecutor(_t.SimpleNamespace(repo_map={}, automerge_repos=[]),
+                             board=object(), journal=object())
+    import subprocess
+    mocker.patch("skos.autopilot.engineering.subprocess.run",
+                 return_value=subprocess.CompletedProcess(
+                     args=[], returncode=0,
+                     stdout="abc123\trefs/heads/autopilot/integration\n", stderr=""))
+    assert ex._pr_base(_pr_spec()) == "autopilot/integration"
