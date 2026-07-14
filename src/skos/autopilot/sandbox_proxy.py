@@ -10,6 +10,12 @@ import socket
 import urllib.parse
 
 _HOP_BY_HOP = {"proxy-connection", "connection"}
+# Response framing headers the proxy must NOT copy through: it buffers the full
+# upstream body (resp.read() de-chunks it), so forwarding the upstream's
+# `Transfer-Encoding: chunked` or original `Content-Length` would describe a body
+# that no longer matches what we write, and a strict client (undici/opencode) then
+# rejects it as InvalidHTTPResponse. We drop these and set Content-Length ourselves.
+_RESP_FRAMING = {"transfer-encoding", "content-length", "keep-alive"}
 
 
 class AllowlistProxy:
@@ -70,9 +76,12 @@ def _handler(proxy: AllowlistProxy, log):
 
             self.send_response(resp.status)
             for name, value in resp.getheaders():
-                if name.lower() in _HOP_BY_HOP:
+                if name.lower() in _HOP_BY_HOP or name.lower() in _RESP_FRAMING:
                     continue
                 self.send_header(name, value)
+            # we buffered the whole body; describe exactly what we write so a strict
+            # client parses a well-formed HTTP/1.1 message (see _RESP_FRAMING).
+            self.send_header("Content-Length", str(len(resp_body or b"")))
             self.end_headers()
             if resp_body:
                 self.wfile.write(resp_body)
