@@ -1,0 +1,9 @@
+From: Amazon <ship-confirm@amazon.com>
+To: chef@example.com
+Subject: Your package has shipped
+Message-ID: <msg-777@amazon.com>
+Date: Wed, 15 Jul 2026 10:00:00 -0400
+Content-Type: text/plain; charset=utf-8
+
+Your order 112-555 has shipped and will arrive Thursday.
+Track it at the link below.
