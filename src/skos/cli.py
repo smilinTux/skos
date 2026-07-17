@@ -79,6 +79,66 @@ def ingest(
     typer.echo(f"{adapter}: captured {_ad.drain(adapter)} new GTD item(s)")
 
 
+gtd_app = typer.Typer(help="Unified GTD store: capture/upsert through the ONE locked sink")
+app.add_typer(gtd_app, name="gtd")
+
+
+def _gtd_capture_obj(text, source, source_ref, context, priority, privacy,
+                     status, delegate_to, meta):
+    import json as _json
+    from skos.gtd_ingest import GtdCapture
+    try:
+        m = _json.loads(meta) if meta else {}
+        if not isinstance(m, dict):
+            raise ValueError("--meta must be a JSON object")
+    except ValueError as e:
+        raise typer.BadParameter(f"--meta: {e}") from e
+    return GtdCapture(text=text, source=source, source_ref=source_ref,
+                      context=context, priority=priority or None, privacy=privacy,
+                      status=status, delegate_to=delegate_to or None, meta=m)
+
+
+@gtd_app.command("capture")
+def gtd_capture(
+    text: str = typer.Argument(..., help="Item text"),
+    source: str = typer.Option("manual", "--source", help="itil|email|cron|telegram|voice|calendar|manual"),
+    source_ref: str = typer.Option("", "--source-ref", help="Stable dedup key; dedupes across the WHOLE store"),
+    context: str = typer.Option("@inbox", "--context"),
+    priority: str = typer.Option("", "--priority", help="critical|high|medium|low"),
+    privacy: str = typer.Option("private", "--privacy"),
+    status: str = typer.Option("inbox", "--status", help="inbox|next|project|waiting|someday|reference"),
+    delegate_to: str = typer.Option("", "--delegate-to"),
+    meta: str = typer.Option("", "--meta", help="JSON object of source-specific fields"),
+):
+    """Create-or-skip capture into the unified GTD (dedupe by source+source_ref)."""
+    from skos.gtd_ingest import capture as _capture
+    iid = _capture(_gtd_capture_obj(text, source, source_ref, context, priority,
+                                    privacy, status, delegate_to, meta))
+    if iid is None:
+        typer.echo(f"duplicate: ({source}, {source_ref}) already in store")
+    else:
+        typer.echo(f"captured {iid}")
+
+
+@gtd_app.command("upsert")
+def gtd_upsert(
+    text: str = typer.Argument(..., help="Item text"),
+    source: str = typer.Option("manual", "--source"),
+    source_ref: str = typer.Option("", "--source-ref", help="Stable key; create-or-update"),
+    context: str = typer.Option("@inbox", "--context"),
+    priority: str = typer.Option("", "--priority"),
+    privacy: str = typer.Option("private", "--privacy"),
+    status: str = typer.Option("inbox", "--status", help="inbox|next|project|waiting|someday|reference|done"),
+    delegate_to: str = typer.Option("", "--delegate-to"),
+    meta: str = typer.Option("", "--meta", help="JSON object of source-specific fields"),
+):
+    """Create-or-update a stateful item (moves lists on status change; done archives)."""
+    from skos.gtd_ingest import upsert as _upsert
+    iid, action = _upsert(_gtd_capture_obj(text, source, source_ref, context, priority,
+                                           privacy, status, delegate_to, meta))
+    typer.echo(f"{action} {iid}")
+
+
 @app.command()
 def install(app_yaml: str):
     """Materialize an app via its packaging adapter and record it."""

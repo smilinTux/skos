@@ -8,8 +8,8 @@
 set -uo pipefail
 JOB="${1:?usage: sk-cron-run <job-name> <command...>}"; shift
 LEDGER="$HOME/.skcapstone/logs/cron-ledger.jsonl"
-GTD_INBOX="$HOME/.skcapstone/coordination/gtd/inbox.json"
 PY="${PY:-/home/cbrd21/.skenv/bin/python3}"
+SKOS_BIN="${SKOS_BIN:-$HOME/.skenv/bin/skos}"
 mkdir -p "$(dirname "$LEDGER")"
 
 start_iso=$(date -Iseconds); start_s=$(date +%s)
@@ -25,22 +25,27 @@ print(json.dumps({"job":job,"host":"noroc2027","start":start,"dur_s":int(dur),
                   "exit":int(rc),"ok":rc=="0","tail":tail}))
 PY
 
-# 2) on failure -> GTD capture (deduped by job@date) + sk-alert
+# 2) on failure -> GTD capture through the ONE locked skos sink (whole-store
+#    dedupe by (source, source_ref), atomic save) + sk-alert. No inline JSON
+#    manipulation here: sk-cron-run is just another gtd-ingest adapter.
 if [ "$rc" -ne 0 ]; then
-  "$PY" - "$JOB" "$rc" "$tail" "$GTD_INBOX" <<'PY'
-import json,sys,uuid,datetime,os
-job,rc,tail,path=sys.argv[1:5]
-ref=f"cron:{job}@{datetime.date.today().isoformat()}"
-try: items=json.load(open(path)) if os.path.exists(path) else []
-except Exception: items=[]
-if not any(i.get("source_ref")==ref for i in items):
-    items.append({"id":uuid.uuid4().hex[:12],
-        "text":f"cron FAILED: {job} (exit {rc}) - {tail[:160]}",
-        "source":"cron","source_ref":ref,"privacy":"private","context":"@ops",
-        "priority":"high","energy":None,"status":"inbox",
-        "created_at":datetime.datetime.now(datetime.timezone.utc).isoformat()})
-    json.dump(items,open(path,"w"),indent=2,ensure_ascii=False)
+  ref="cron:${JOB}@$(date +%F)"
+  text="cron FAILED: ${JOB} (exit ${rc}) - $(printf '%s' "$tail" | cut -c1-160)"
+  if [ -x "$SKOS_BIN" ]; then
+    "$SKOS_BIN" gtd capture "$text" --source cron --source-ref "$ref" \
+      --context @ops --priority high >/dev/null \
+      || printf 'sk-cron-run: skos gtd capture failed for %s\n' "$ref" >&2
+  else
+    # fallback: same locked library path via python (no direct JSON writes)
+    SK_GTD_TEXT="$text" SK_GTD_REF="$ref" "$PY" - <<'PY' \
+      || printf 'sk-cron-run: library gtd capture failed for %s\n' "$ref" >&2
+import os
+from skos.gtd_ingest import GtdCapture, capture
+capture(GtdCapture(text=os.environ["SK_GTD_TEXT"], source="cron",
+                   source_ref=os.environ["SK_GTD_REF"],
+                   context="@ops", priority="high"))
 PY
+  fi
   if command -v sk-alert >/dev/null 2>&1; then
     printf 'cron FAILED: %s (exit %s)\n%s' "$JOB" "$rc" "$tail" | sk-alert -l crit -k "cron-$JOB" 2>/dev/null || true
   fi
