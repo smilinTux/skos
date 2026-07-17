@@ -20,12 +20,17 @@ changes.
 """
 from __future__ import annotations
 
+import fcntl
 import json
+import logging
 import os
+import tempfile
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from .adapter import Adapter, AdapterRegistry
 
@@ -81,17 +86,94 @@ class GtdCapture:
     meta: dict = field(default_factory=dict)   # source-specific fields (email_*, itil_*, ...)
 
 
+log = logging.getLogger("skos.gtd_ingest")
+
+# Optional alert hook fired when a corrupt store file is quarantined.
+# Signature: hook(original_path, quarantine_path, exception). Wire this to
+# sk-alert (or any notifier) at app startup; the default is log-only.
+corrupt_alert_hook: Callable[[Path, Path, Exception], None] | None = None
+
+
+@contextmanager
+def _store_lock():
+    """Advisory flock over the whole store, held across every
+    load-modify-save cycle so concurrent writers cannot lose updates.
+    Not reentrant: internal callers use the *_locked helpers."""
+    lock_path = gtd_dir() / ".gtd.lock"
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def _quarantine(p: Path, exc: Exception) -> None:
+    """Preserve a corrupt store file as <name>.corrupt-<utc-ts> and alert.
+    Never silently discards data: the bad bytes stay on disk for forensics."""
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    qpath = p.with_name(f"{p.name}.corrupt-{ts}")
+    n = 0
+    while qpath.exists():  # pragma: no cover (sub-microsecond collision)
+        n += 1
+        qpath = p.with_name(f"{p.name}.corrupt-{ts}.{n}")
+    os.replace(p, qpath)
+    log.error("gtd store: corrupt file %s quarantined to %s (%s)", p, qpath, exc)
+    hook = corrupt_alert_hook
+    if hook is not None:
+        try:
+            hook(p, qpath, exc)
+        except Exception:  # alert failure must not mask the quarantine
+            log.exception("gtd store: corrupt_alert_hook failed for %s", qpath)
+
+
 def _load(fname: str) -> list[dict]:
+    """Load a store list. A corrupt file (bad JSON, or JSON that is not a
+    list) is quarantined loudly, never silently treated as empty. I/O errors
+    other than a missing file propagate: failing loud beats losing data."""
     p = gtd_dir() / fname
     try:
-        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else []
-    except (json.JSONDecodeError, OSError):
+        raw = p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            raise ValueError(f"expected a JSON list, got {type(data).__name__}")
+        return data
+    except (json.JSONDecodeError, ValueError) as e:
+        _quarantine(p, e)
         return []
 
 
 def _save(fname: str, items: list[dict]) -> None:
-    (gtd_dir() / fname).write_text(json.dumps(items, indent=2, ensure_ascii=False, default=str),
-                                   encoding="utf-8")
+    """Atomic save: write to a temp file in the same directory, fsync,
+    os.replace over the target, then fsync the directory. The target is
+    never truncated in place; a crash leaves either the old or new file."""
+    d = gtd_dir()
+    target = d / fname
+    payload = json.dumps(items, indent=2, ensure_ascii=False, default=str)
+    fd, tmp = tempfile.mkstemp(prefix=f".{fname}.", suffix=".tmp", dir=str(d))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, str(target))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    dfd = os.open(str(d), os.O_RDONLY)
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
 
 
 def _seen_refs() -> set[tuple[str, str]]:
@@ -107,7 +189,14 @@ def _seen_refs() -> set[tuple[str, str]]:
 
 def capture(c: GtdCapture) -> str | None:
     """The single sink. Dedupe by (source, source_ref); normalize; append to the
-    unified store. Returns the new item id, or None if it was a duplicate."""
+    unified store. Returns the new item id, or None if it was a duplicate.
+    The whole load-modify-save cycle runs under the store lock."""
+    with _store_lock():
+        return _capture_locked(c)
+
+
+def _capture_locked(c: GtdCapture) -> str | None:
+    """capture() body; caller must hold the store lock."""
     if c.source_ref and (c.source, c.source_ref) in _seen_refs():
         return None
     item = {
@@ -156,13 +245,23 @@ def upsert(c: GtdCapture) -> tuple[str, str]:
     Returns ``(item_id, action)`` with ``action`` in
     ``{created, unchanged, updated, completed}``. On ``unchanged`` it performs **no
     write**, the property that keeps polling idempotent and notifications quiet.
+
+    The whole reconcile (find + patch + move) runs under the store lock, and a
+    cross-file move is ordered write-then-delete: the destination is written
+    first, so a crash in between duplicates rather than loses the item, and the
+    next move self-heals the duplicate.
     """
+    with _store_lock():
+        return _upsert_locked(c)
+
+
+def _upsert_locked(c: GtdCapture) -> tuple[str, str]:
     if not c.source_ref:
-        return (capture(c) or ""), "created"
+        return (_capture_locked(c) or ""), "created"
 
     fname, idx, existing, items = _find_item(c.source, c.source_ref)
     if existing is None:
-        return capture(c), "created"
+        return _capture_locked(c), "created"
 
     updated = dict(existing)
     changed = False
@@ -185,11 +284,19 @@ def upsert(c: GtdCapture) -> tuple[str, str]:
         updated["completed_at"] = updated["updated_at"]
     dest = "archive.json" if terminal else _LIST_FILE.get(updated.get("status", "inbox"), "inbox.json")
 
-    items.pop(idx)                                # remove from current file
-    _save(fname, items)
-    dest_items = items if dest == fname else _load(dest)
-    dest_items.append(updated)
-    _save(dest, dest_items)
+    if dest == fname:
+        items[idx] = updated                      # in-place update, one write
+        _save(fname, items)
+    else:
+        # write-then-delete: land the item in the destination first, so a
+        # crash between the two saves can only duplicate, never lose it.
+        # Drop any same-id copy already in the dest (self-heal after a
+        # previous crash) before appending the fresh state.
+        dest_items = [it for it in _load(dest) if it.get("id") != updated["id"]]
+        dest_items.append(updated)
+        _save(dest, dest_items)
+        items.pop(idx)                            # then remove from the source
+        _save(fname, items)
     return updated["id"], ("completed" if terminal else "updated")
 
 
