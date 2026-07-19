@@ -1,0 +1,13 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//triage//EN
+BEGIN:VEVENT
+UID:evt-abc123@example.com
+DTSTART;TZID=America/New_York:20260722T140000
+DTEND;TZID=America/New_York:20260722T150000
+SUMMARY:Quantum interview follow-up call with the
+ hiring manager
+LOCATION:Google Meet
+ORGANIZER:mailto:recruiter@example.com
+END:VEVENT
+END:VCALENDAR
