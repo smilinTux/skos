@@ -56,7 +56,7 @@ def _stub_index(namespace: str, description: str, today: str) -> str:
         f"updated: {today}",
         "---",
         "",
-        f"# {namespace} — entity index",
+        f"# {namespace} entity index",
         "",
         f"> {description}",
         ">",

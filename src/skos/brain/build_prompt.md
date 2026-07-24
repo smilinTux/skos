@@ -72,7 +72,7 @@ entity_count: N
 updated: <ISO-date>
 ---
 
-# <namespace> — entity index
+# <namespace> entity index
 
 | id | type | lifecycle | summary |
 |----|------|-----------|---------|
