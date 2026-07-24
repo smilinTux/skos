@@ -14,15 +14,17 @@ Intended to fold into `skos status` in Phase-1.
 from __future__ import annotations
 import json, os, subprocess, sys, datetime
 from pathlib import Path
+from skos import secret_env
 
 GOG = os.environ.get("GOG", "/home/linuxbrew/.linuxbrew/bin/gog")
-os.environ.setdefault("GOG_KEYRING_PASSWORD", "sk2026")
+# gog keyring password is resolved at runtime from the env or the gitignored
+# operator env file - never hardcoded here (public repo).
+secret_env.ensure("GOG_KEYRING_PASSWORD")
 HOME = Path(os.environ.get("SKCAPSTONE_HOME", str(Path.home() / ".skcapstone")))
 GTD_DIR = HOME / "coordination" / "gtd"
 LEDGER = HOME / "logs" / "cron-ledger.jsonl"
-HERMES_DM = os.environ.get("HERMES_DM", "telegram:1594678363")
-ACCOUNTS = ["chefboyrdave2.1@gmail.com", "david.knestrick@gmail.com",
-            "cbd2dot11@gmail.com", "jaimeanddavid2014@gmail.com", "dounoit@gmail.com"]
+HERMES_DM = secret_env.resolve("HERMES_DM", "")  # operator DM target, set in env file
+ACCOUNTS = secret_env.accounts()  # operator Gmail boxes, set GTD_MAIL_ACCOUNTS in env file
 
 def _count(account: str, query: str) -> int:
     try:
@@ -162,7 +164,8 @@ def corpus_status() -> dict:
         st["ingest"]["error"] = str(e)[:80]
     # --- skmem-pg corpus size ---
     try:
-        env = {**os.environ, "PGPASSWORD": "***REMOVED***"}
+        pgpw = secret_env.resolve("SKMEM_PG_PASSWORD")  # env file / env; no committed default
+        env = {**os.environ, **({"PGPASSWORD": pgpw} if pgpw else {})}
         c = subprocess.run(["psql", "-h", "localhost", "-U", "postgres", "-d", "skmemory",
                             "-tAc", "select count(*) from docs;"], capture_output=True, text=True,
                            timeout=30, env=env).stdout.strip()

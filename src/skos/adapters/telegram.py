@@ -17,8 +17,11 @@ import subprocess
 
 from ..gtd_ingest import GtdCapture, GtdSourceAdapter
 
+from ..secret_env import resolve as _resolve
+
 SKCAP = os.environ.get("SKCAPSTONE_BIN", "skcapstone")
-TG_CHAT = os.environ.get("GTD_TG_CHAT", "1594678363")   # Chef's DM
+# operator DM chat id, resolved from env / gitignored env file; not hardcoded here
+TG_CHAT = _resolve("GTD_TG_CHAT", "")
 TG_LIMIT = int(os.environ.get("GTD_TG_LIMIT", "25"))
 _TRIGGERS = ("todo", "task", "gtd", "capture", "remind", "action")
 _TRIG_RE = re.compile(r"^\s*(?:%s)\s*[:\-]\s*(.+)$" % "|".join(_TRIGGERS), re.IGNORECASE | re.DOTALL)

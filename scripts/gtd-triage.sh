@@ -13,10 +13,16 @@
 # Runs daily via cron on noroc2027 (.158). Goal: inbox = only real, un-triaged
 # primary mail; everything else filed under labels.
 set -uo pipefail
-export GOG_KEYRING_PASSWORD="${GOG_KEYRING_PASSWORD:-sk2026}"
+# Secrets and account list come from the gitignored operator env file (mode 600),
+# NOT from this public repo. Source it if present; env already set wins.
+SKOS_ENV_FILE="${SKOS_SCHEDULE_ENV:-$HOME/.skcapstone/skos-schedule.env}"
+[ -f "$SKOS_ENV_FILE" ] && set -a && . "$SKOS_ENV_FILE" && set +a
+: "${GOG_KEYRING_PASSWORD:?set GOG_KEYRING_PASSWORD in $SKOS_ENV_FILE or the environment}"
+export GOG_KEYRING_PASSWORD
 GOG="${GOG:-/home/linuxbrew/.linuxbrew/bin/gog}"
 
-DEFAULT_ACCTS=(chefboyrdave2.1@gmail.com david.knestrick@gmail.com cbd2dot11@gmail.com dounoit@gmail.com jaimeanddavid2014@gmail.com)
+# Operator Gmail boxes: GTD_MAIL_ACCOUNTS (comma-separated) from the env file.
+IFS=',' read -r -a DEFAULT_ACCTS <<< "${GTD_MAIL_ACCOUNTS:-}"
 LOGDIR="$HOME/.skcapstone/logs"; mkdir -p "$LOGDIR"
 LOG="$LOGDIR/gtd-triage.log"
 
