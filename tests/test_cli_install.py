@@ -1,7 +1,6 @@
 """Tests for CLI commands: skos init, skos plan, skos up."""
 from __future__ import annotations
 
-import pytest
 from typer.testing import CliRunner
 from skos.cli import app
 from skos import registry

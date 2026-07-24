@@ -1,8 +1,7 @@
 """Tests for skos.install.provisioner — apply an InstallPlan to the data-root."""
 from __future__ import annotations
 
-import pytest
-from skos.install.planner import InstallPlan, InstallStep, plan
+from skos.install.planner import InstallPlan, plan
 from skos.install.provisioner import apply, ProvisionResult, StepOutcome
 from skos.install.profiles import InstallProfile
 from skos import registry

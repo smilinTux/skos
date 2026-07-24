@@ -4,7 +4,7 @@ import pytest
 
 from skos.autopilot.adapters.claude_code import ClaudeCodeAdapter
 from skos.autopilot.claude_code import (
-    ForbiddenToolError, HarnessUnavailable, PathGuardError,
+    ForbiddenToolError, PathGuardError,
     DATA_BEGIN, DATA_END, frame, is_forbidden, assert_within_worktree,
 )
 

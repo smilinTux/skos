@@ -22,10 +22,10 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import Any, Union
+from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------

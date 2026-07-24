@@ -1,5 +1,22 @@
-import os
+import importlib.util
+
 import pytest
+
+
+_HAVE_SKCAPSTONE = importlib.util.find_spec("skcapstone") is not None
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip tests marked `needs_skcapstone` when the optional sibling
+    skcapstone package is not importable (e.g. in CI, which installs only skos).
+    skcapstone is not a declared skos dependency, so its absence must not turn
+    the suite red."""
+    if _HAVE_SKCAPSTONE:
+        return
+    skip = pytest.mark.skip(reason="optional sibling skcapstone not installed")
+    for item in items:
+        if "needs_skcapstone" in item.keywords:
+            item.add_marker(skip)
 
 
 @pytest.fixture

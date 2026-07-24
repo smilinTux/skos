@@ -2,7 +2,7 @@
 import pytest
 
 from skos.autopilot.executor import Executor, EXECUTORS, register, get
-from skos.autopilot.types import WorkItem, GateResult, DecisionItem
+from skos.autopilot.types import GateResult, DecisionItem
 
 
 class _FakeExec:

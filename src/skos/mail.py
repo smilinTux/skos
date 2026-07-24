@@ -28,7 +28,7 @@ docs/skos-email-gtd-architecture.md). It writes the SAME GTD store the ITIL
 tools and manual captures use: ~/.skcapstone/coordination/gtd/*.json.
 """
 from __future__ import annotations
-import json, os, subprocess, sys, uuid, datetime, textwrap
+import json, os, subprocess, sys, uuid, datetime
 from pathlib import Path
 
 GOG = os.environ.get("GOG", "/home/linuxbrew/.linuxbrew/bin/gog")
