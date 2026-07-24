@@ -105,6 +105,17 @@ def recent_docs(n: int = 10, days: int = 21) -> list[dict]:
 WIKI_DIR = Path(os.environ.get("WIKI_DIR", str(Path.home() / "clawd" / "wiki")))
 YT_LOG = Path(os.environ.get("YT_INGEST_LOG", str(Path.home() / "clawd" / "logs" / "youtube-ingest-cron.log")))
 
+def _py_interp() -> str:
+    """Interpreter used to shell out to wiki tooling. Derived, not hardcoded:
+    $SKOS_PY override -> the skenv python3 if present -> this process' interpreter."""
+    override = os.environ.get("SKOS_PY")
+    if override:
+        return override
+    skenv = Path.home() / ".skenv" / "bin" / "python3"
+    return str(skenv) if skenv.exists() else sys.executable
+
+PY_INTERP = _py_interp()
+
 def corpus_status() -> dict:
     """Health of the realmwiki + ingest pipeline + skmem-pg corpus. Surfaces
     whether triage is needed and whether maintenance/ingest jobs are running."""
@@ -112,7 +123,7 @@ def corpus_status() -> dict:
     st: dict = {"wiki": {}, "ingest": {}, "corpus": {}}
     # --- wiki scan (dangling/orphans/status mix = triage backlog) ---
     try:
-        r = subprocess.run(["/home/cbrd21/.skenv/bin/python3", str(WIKI_DIR / "tools" / "wiki_maintain.py"),
+        r = subprocess.run([PY_INTERP, str(WIKI_DIR / "tools" / "wiki_maintain.py"),
                             "scan", "--top", "1"], cwd=str(WIKI_DIR), capture_output=True, text=True, timeout=150)
         m = _re.search(r"pages\s+(\d+)\s*\|\s*dangling holes\s+(\d+)\s*\|\s*orphans\s+(\d+)", r.stdout)
         if m:
