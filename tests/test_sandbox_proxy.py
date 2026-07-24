@@ -67,7 +67,7 @@ def test_forward_restrips_chunked_framing_and_sets_content_length():
     upstream = ThreadingHTTPServer(("127.0.0.1", up_port), _ChunkedUpstream)
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
     threading.Thread(
-        target=serve, args=([f"127.0.0.1"], px_port), daemon=True).start()
+        target=serve, args=(["127.0.0.1"], px_port), daemon=True).start()
 
     import time
     time.sleep(0.3)                                   # let both servers bind

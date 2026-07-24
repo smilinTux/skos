@@ -114,7 +114,8 @@ def _changed_lines(diff: str) -> dict[str, set[int]]:
             newno = int(m.group(1)) if m else 0
         elif cur is not None:
             if line.startswith("+") and not line.startswith("+++"):
-                changed[cur].add(newno); newno += 1
+                changed[cur].add(newno)
+                newno += 1
             elif line.startswith("-") and not line.startswith("---"):
                 continue
             else:

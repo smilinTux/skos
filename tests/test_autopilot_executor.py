@@ -36,7 +36,8 @@ def test_get_unknown_kind_returns_none():
 
 def test_register_is_idempotent_last_wins():
     a, b = _FakeExec(), _FakeExec()
-    register(a); register(b)
+    register(a)
+    register(b)
     assert get("engineering") is b
 
 
