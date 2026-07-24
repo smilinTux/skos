@@ -1,10 +1,14 @@
 """Autopilot orchestrator: helpers, phases, run_once, dry-run, kill switch, caps, resume."""
+import json
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from skos.autopilot import orchestrator as orch
+from skos.autopilot.executor import EXECUTORS
 from skos.autopilot.orchestrator import Caps, CapLedger, kill_switch_active, stable_qid
+from skos.autopilot.types import Verdict, WorkItem, GateResult, DecisionItem
 
 
 def test_kill_switch_env(monkeypatch):
@@ -37,12 +41,6 @@ def test_stable_qid_deterministic():
     b = stable_qid("Merge PR #12 for task X?", "task-x")
     c = stable_qid("Merge PR #12 for task X?", "task-y")
     assert a == b and a != c and len(a) == 12
-
-
-import json
-from unittest.mock import MagicMock
-
-from skos.autopilot.types import Verdict
 
 
 def _write_task(d, tid, **fields):
@@ -120,13 +118,11 @@ def test_deepdive_spawn_dry_run_no_writes():
     board.create_task.assert_not_called()
 
 
-from skos.autopilot.executor import EXECUTORS
-from skos.autopilot.types import WorkItem, GateResult, DecisionItem
-
-
 class _Eng:
     kind = "engineering"
-    def __init__(self, sel): self._sel = sel; self.escalate = MagicMock()
+    def __init__(self, sel):
+        self._sel = sel
+        self.escalate = MagicMock()
     def selectable(self, item): return self._sel
     def run(self, item, harness): return GateResult(5, True, "", None)
     def finalize(self, item, result): pass
@@ -134,9 +130,11 @@ class _Eng:
 
 @pytest.fixture
 def clean_execs():
-    saved = dict(EXECUTORS); EXECUTORS.clear()
+    saved = dict(EXECUTORS)
+    EXECUTORS.clear()
     yield
-    EXECUTORS.clear(); EXECUTORS.update(saved)
+    EXECUTORS.clear()
+    EXECUTORS.update(saved)
 
 
 def _wi(ref, repo="skos", tags=None):
@@ -145,7 +143,8 @@ def _wi(ref, repo="skos", tags=None):
 
 
 def test_phase1_selects_only_selectable_in_scope(clean_execs):
-    ex = _Eng(sel=True); EXECUTORS["engineering"] = ex
+    ex = _Eng(sel=True)
+    EXECUTORS["engineering"] = ex
     decisions = []
     selected = orch.phase1_triage([_wi("t-1")], MagicMock(),
                                   repo_map={"skos": object()}, decisions=decisions)
@@ -153,7 +152,8 @@ def test_phase1_selects_only_selectable_in_scope(clean_execs):
 
 
 def test_phase1_untriaged_never_selected(clean_execs):
-    ex = _Eng(sel=True); EXECUTORS["engineering"] = ex
+    ex = _Eng(sel=True)
+    EXECUTORS["engineering"] = ex
     decisions = []
     item = _wi("t-u", tags=["repo:skos", "autopilot-untriaged"])
     selected = orch.phase1_triage([item], MagicMock(),
@@ -162,7 +162,8 @@ def test_phase1_untriaged_never_selected(clean_execs):
 
 
 def test_phase1_unselectable_queues_without_escalate(clean_execs):
-    ex = _Eng(sel=False); EXECUTORS["engineering"] = ex
+    ex = _Eng(sel=False)
+    EXECUTORS["engineering"] = ex
     decisions = []
     selected = orch.phase1_triage([_wi("t-2")], MagicMock(),
                                   repo_map={"skos": object()}, decisions=decisions)
@@ -171,7 +172,8 @@ def test_phase1_unselectable_queues_without_escalate(clean_execs):
 
 
 def test_phase1_unknown_repo_queues_decision(clean_execs):
-    ex = _Eng(sel=True); EXECUTORS["engineering"] = ex
+    ex = _Eng(sel=True)
+    EXECUTORS["engineering"] = ex
     decisions = []
     selected = orch.phase1_triage([_wi("t-3", repo="ghost")], MagicMock(),
                                   repo_map={"skos": object()}, decisions=decisions)
@@ -206,7 +208,8 @@ class _RunExec:
 
 def test_phase2_finalizes_and_scores_on_pass():
     ex = _RunExec(GateResult(score=5, passed=True, notes="ok", artifact="pr#1"))
-    board = MagicMock(); harness = SimpleNamespace(name="claude-code")
+    board = MagicMock()
+    harness = SimpleNamespace(name="claude-code")
     decisions = []
     state = orch.phase2_swarm([(_wi("t-1"), ex)], harness=harness, board=board,
                               caps=Caps(), ledger=CapLedger(Caps()), decisions=decisions,
@@ -219,7 +222,8 @@ def test_phase2_finalizes_and_scores_on_pass():
 
 def test_phase2_escalates_on_non_convergence():
     ex = _RunExec(GateResult(score=4, passed=False, notes="thin tests", artifact=None))
-    board = MagicMock(); decisions = []
+    board = MagicMock()
+    decisions = []
     state = orch.phase2_swarm([(_wi("t-2"), ex)], harness=SimpleNamespace(name="h"),
                               board=board, caps=Caps(), ledger=CapLedger(Caps()),
                               decisions=decisions, run_id="r1")
@@ -254,7 +258,8 @@ def test_write_decision_falls_back_to_upsert_on_dup(monkeypatch):
 
 
 def test_phase3_dry_run_no_gtd_writes(monkeypatch):
-    cap = MagicMock(); monkeypatch.setattr("skos.gtd_ingest.capture", cap)
+    cap = MagicMock()
+    monkeypatch.setattr("skos.gtd_ingest.capture", cap)
     out = orch.phase3_report([_decision("q3")], dry_run=True, digest_date="2026-07-12")
     cap.assert_not_called()
     assert out["dry_run"] is True and "digest_preview" in out
@@ -276,7 +281,8 @@ def _config(**kw):
 
 def test_run_once_full_pipeline(tmp_path, clean_execs):
     _write_task(tmp_path, "t-1", tags=["repo:skos"], acceptance_criteria=["works"])
-    ex = _RunExec(GateResult(5, True, "ok", "pr#1")); EXECUTORS["engineering"] = ex
+    ex = _RunExec(GateResult(5, True, "ok", "pr#1"))
+    EXECUTORS["engineering"] = ex
     board = _board(["t-1"])
     harness = SimpleNamespace(name="claude-code",
                               assess=lambda brief: Verdict(verdict="valid", reason=""))
@@ -290,12 +296,14 @@ def test_run_once_full_pipeline(tmp_path, clean_execs):
 
 def test_dry_run_is_read_only(tmp_path, monkeypatch, clean_execs, fake_journal):
     _write_task(tmp_path, "stale", tags=["repo:skos"], acceptance_criteria=["x"])
-    ex = _RunExec(GateResult(5, True, "ok", "pr#1")); EXECUTORS["engineering"] = ex
+    ex = _RunExec(GateResult(5, True, "ok", "pr#1"))
+    EXECUTORS["engineering"] = ex
     board = _board(["stale"])
     board.create_task = MagicMock()
     harness = SimpleNamespace(name="h",
         assess=lambda brief: Verdict(verdict="stale", reason="d", updated_description="n"))
-    cap = MagicMock(); monkeypatch.setattr("skos.gtd_ingest.capture", cap)
+    cap = MagicMock()
+    monkeypatch.setattr("skos.gtd_ingest.capture", cap)
 
     out = orch.run_once(board=board, harness=harness, config=_config(dry_run=True),
                         tasks_dir=tmp_path, run_id="rdry",
@@ -315,7 +323,8 @@ def test_dry_run_is_read_only(tmp_path, monkeypatch, clean_execs, fake_journal):
 def test_kill_switch_stops_before_swarm(tmp_path, monkeypatch, clean_execs, fake_journal):
     monkeypatch.setenv("SKOS_AUTOPILOT_OFF", "1")
     _write_task(tmp_path, "t-1", tags=["repo:skos"], acceptance_criteria=["x"])
-    ex = _RunExec(GateResult(5, True, "ok", "pr")); EXECUTORS["engineering"] = ex
+    ex = _RunExec(GateResult(5, True, "ok", "pr"))
+    EXECUTORS["engineering"] = ex
     board = _board(["t-1"])
     harness = SimpleNamespace(name="h", assess=lambda b: Verdict(verdict="valid", reason=""))
     out = orch.run_once(board=board, harness=harness, config=_config(),
@@ -325,9 +334,11 @@ def test_kill_switch_stops_before_swarm(tmp_path, monkeypatch, clean_execs, fake
 
 
 def test_caps_stop_and_escalate_between_items(clean_execs, fake_journal):
-    ex = _RunExec(GateResult(5, True, "ok", "pr")); EXECUTORS["engineering"] = ex
+    ex = _RunExec(GateResult(5, True, "ok", "pr"))
+    EXECUTORS["engineering"] = ex
     board = MagicMock()
-    ledger = CapLedger(Caps(max_tokens_per_run=100)); ledger.tokens = 200  # already over
+    ledger = CapLedger(Caps(max_tokens_per_run=100))
+    ledger.tokens = 200  # already over
     decisions = []
     state = orch.phase2_swarm([(_wi("t-1"), ex), (_wi("t-2"), ex)],
                               harness=SimpleNamespace(name="h"), board=board,
@@ -340,7 +351,8 @@ def test_caps_stop_and_escalate_between_items(clean_execs, fake_journal):
 def test_resume_skips_finalized(tmp_path, monkeypatch, clean_execs):
     _write_task(tmp_path, "t-A", tags=["repo:skos"], acceptance_criteria=["x"])
     _write_task(tmp_path, "t-B", tags=["repo:skos"], acceptance_criteria=["x"])
-    ex = _RunExec(GateResult(5, True, "ok", "pr")); EXECUTORS["engineering"] = ex
+    ex = _RunExec(GateResult(5, True, "ok", "pr"))
+    EXECUTORS["engineering"] = ex
     board = _board(["t-A", "t-B"])
     harness = SimpleNamespace(name="h", assess=lambda b: Verdict(verdict="valid", reason=""))
     prior = {"run_id": "rr", "items": {"t-A": {"state": "finalized", "round": 1, "score": 5}}}
@@ -395,7 +407,8 @@ def test_run_once_task_filter(tmp_path, clean_execs):
     import skos.autopilot.orchestrator as orch
     _write_task(tmp_path, "keep", tags=["repo:skos"], acceptance_criteria=["x"])
     _write_task(tmp_path, "drop", tags=["repo:skos"], acceptance_criteria=["x"])
-    ex = _RunExec(GateResult(5, True, "ok", "pr#1")); EXECUTORS["engineering"] = ex
+    ex = _RunExec(GateResult(5, True, "ok", "pr#1"))
+    EXECUTORS["engineering"] = ex
     board = _board(["keep", "drop"])
     harness = SimpleNamespace(name="h", assess=lambda b: Verdict(verdict="valid", reason=""))
     out = orch.run_once(board=board, harness=harness, config=_config(dry_run=False),

@@ -134,7 +134,7 @@ def _probe(b: Backend, timeout: int = 6) -> tuple[bool, str]:
     try:
         req = urllib.request.Request(probe, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read(4096).decode("utf-8", "replace")
+            resp.read(4096).decode("utf-8", "replace")
         return True, f"{probe} -> HTTP {resp.status}"
     except HTTPError as e:
         # a 4xx/5xx still means the host answered

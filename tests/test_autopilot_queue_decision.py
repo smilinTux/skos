@@ -22,5 +22,5 @@ def test_queue_decision_upsert_fallback(monkeypatch):
     monkeypatch.setattr(gi, "capture", lambda c: None)              # simulate dup
     called = {}
     monkeypatch.setattr(gi, "upsert", lambda c: called.setdefault("u", ("id", "unchanged")))
-    out = digest.queue_decision("P", {}, "t", "high", qid="q2")
+    digest.queue_decision("P", {}, "t", "high", qid="q2")
     assert called["u"][0] == "id"

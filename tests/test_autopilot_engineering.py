@@ -1,7 +1,7 @@
 import types as _t
 import pytest
-from skos.autopilot.engineering import EngineeringExecutor
-from skos.autopilot.types import WorkItem, RepoSpec
+from skos.autopilot.engineering import EngineeringExecutor, _revert_impl
+from skos.autopilot.types import WorkItem, RepoSpec, GateResult, HarnessResult
 
 
 def _spec(name):
@@ -151,9 +151,6 @@ def test_strip_promise_removes_tag_and_trims():
     assert strip_promise("great work <promise>COMPLETE</promise>") == "great work"
 
 
-from skos.autopilot.types import GateResult, HarnessResult
-
-
 def _run_ex(mocker, cfg, grades, ci_status="green", cov=0.95):
     ex = EngineeringExecutor(cfg, board=mocker.Mock(), journal=mocker.Mock())
     mocker.patch.object(ex, "make_worktree", return_value="/wt/t1")
@@ -253,7 +250,9 @@ def _final_ex(mocker, cfg, repo_name, ci_status="green"):
 
 
 def test_finalize_automerges_when_whitelisted_and_green(mocker):
-    spec = _spec("skrender"); spec.automerge = True; spec.ci = "github"
+    spec = _spec("skrender")
+    spec.automerge = True
+    spec.ci = "github"
     cfg = _t.SimpleNamespace(repo_map={"skrender": spec}, automerge_repos=["skrender"])
     ex, item = _final_ex(mocker, cfg, "skrender", ci_status="green")
     ex.finalize(item, GateResult(score=5, passed=True, notes="", artifact="pr"))
@@ -264,7 +263,9 @@ def test_finalize_automerges_when_whitelisted_and_green(mocker):
 
 
 def test_finalize_pr_only_when_not_whitelisted(mocker):
-    spec = _spec("skrender"); spec.automerge = True; spec.ci = "github"
+    spec = _spec("skrender")
+    spec.automerge = True
+    spec.ci = "github"
     cfg = _t.SimpleNamespace(repo_map={"skrender": spec}, automerge_repos=[])  # not whitelisted
     ex, item = _final_ex(mocker, cfg, "skrender", ci_status="green")
     ex.finalize(item, GateResult(score=5, passed=True, notes="", artifact="pr"))
@@ -276,15 +277,14 @@ def test_finalize_pr_only_when_not_whitelisted(mocker):
 
 
 def test_finalize_pr_only_when_ci_red(mocker):
-    spec = _spec("skrender"); spec.automerge = True; spec.ci = "github"
+    spec = _spec("skrender")
+    spec.automerge = True
+    spec.ci = "github"
     cfg = _t.SimpleNamespace(repo_map={"skrender": spec}, automerge_repos=["skrender"])
     ex, item = _final_ex(mocker, cfg, "skrender", ci_status="red")
     ex.finalize(item, GateResult(score=5, passed=True, notes="", artifact="pr"))
     ex._merge.assert_not_called()
     ex._open_pr.assert_called_once()
-
-
-from skos.autopilot.engineering import _revert_impl
 
 
 def test_revert_reverts_sha_and_reopens(mocker):
@@ -311,7 +311,8 @@ def test_revert_reverts_sha_and_reopens(mocker):
 
 def test_revert_raises_without_recorded_merge(mocker):
     task = _t.SimpleNamespace(id="t1", tags=["repo:skrender"], meta={"autopilot": {}})
-    board = mocker.Mock(); board.load_tasks.return_value = [task]
+    board = mocker.Mock()
+    board.load_tasks.return_value = [task]
     cfg = _t.SimpleNamespace(repo_map={"skrender": _spec("skrender")}, automerge_repos=[])
     with pytest.raises(ValueError):
         _revert_impl(board, cfg, "t1")
@@ -331,7 +332,8 @@ def test_diff_includes_untracked_new_files_and_excludes_coverage_byproducts(tmp_
     _git(tmp_path, "config", "user.email", "a@b.c")
     _git(tmp_path, "config", "user.name", "t")
     (tmp_path / "src.py").write_text("x = 1\n", encoding="utf-8")
-    _git(tmp_path, "add", "-A"); _git(tmp_path, "commit", "-qm", "base")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base")
     # harness edits: modify a tracked file + write a NEW untracked test + a byproduct
     (tmp_path / "src.py").write_text("x = 1\ny = 2\n", encoding="utf-8")
     (tmp_path / "test_new.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")

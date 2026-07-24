@@ -59,7 +59,7 @@ class TestApply:
     def test_apply_records_in_registry(self, data_root):
         """Capabilities whose adapter is a known packaging target get recorded."""
         p = _make_plan("capauth")
-        result = apply(p, data_root=data_root)
+        apply(p, data_root=data_root)
         # capauth has adapter=capauth; it's a "planned" adapter (no OCI materialization)
         # but should still be recorded in registry with status planned/recorded
         installed = registry.list_installed()

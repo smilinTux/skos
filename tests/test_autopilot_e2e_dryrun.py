@@ -38,7 +38,9 @@ def test_e2e_dry_run_selects_and_writes_nothing(tmp_path, monkeypatch, board):
     _write_task(tmp_path, "t-norepo", tags=[], acceptance_criteria=["x"])
 
     # spy on every write surface
-    cap = MagicMock(); up = MagicMock(); send = MagicMock()
+    cap = MagicMock()
+    up = MagicMock()
+    send = MagicMock()
     monkeypatch.setattr("skos.gtd_ingest.capture", cap)
     monkeypatch.setattr("skos.gtd_ingest.upsert", up)
     monkeypatch.setattr(digest_mod, "send_digest", send)

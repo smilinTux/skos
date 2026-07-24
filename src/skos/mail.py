@@ -28,7 +28,12 @@ docs/skos-email-gtd-architecture.md). It writes the SAME GTD store the ITIL
 tools and manual captures use: ~/.skcapstone/coordination/gtd/*.json.
 """
 from __future__ import annotations
-import json, os, subprocess, sys, uuid, datetime
+import json
+import os
+import subprocess
+import sys
+import uuid
+import datetime
 from pathlib import Path
 from skos import secret_env
 
@@ -373,9 +378,11 @@ def _sender_addr(frm: str) -> str:
     return m.group(1) if m else frm.strip()
 
 def cmd_reply(ref: str, body: str, send: bool = False, account: str | None = None, to: str | None = None) -> None:
-    r = _resolve(ref, account); acct, tid = r["account"], r["thread_id"]
+    r = _resolve(ref, account)
+    acct, tid = r["account"], r["thread_id"]
     if not acct or not tid:
-        print("reply: could not resolve account/thread", file=sys.stderr); return
+        print("reply: could not resolve account/thread", file=sys.stderr)
+        return
     th = _thread(acct, tid)
     subj = th["subject"] or "(no subject)"
     if not subj.lower().startswith("re:"):
@@ -417,11 +424,13 @@ def cmd_done(gtd_id: str) -> None:
         items = _load(name)
         for idx, it in enumerate(items):
             if it.get("id") == gtd_id:
-                hit = (name, idx, it, items); break
+                hit = (name, idx, it, items)
+                break
         if hit:
             break
     if not hit:
-        print(f"done: no GTD item {gtd_id}", file=sys.stderr); return
+        print(f"done: no GTD item {gtd_id}", file=sys.stderr)
+        return
     name, idx, it, items = hit
     # archive + mark-read the email thread if this is an email item
     if it.get("email_thread_id") and it.get("email_account"):
@@ -431,10 +440,14 @@ def cmd_done(gtd_id: str) -> None:
         subprocess.run([GOG, "gmail", "mark-read", "-a", acct, *mids], capture_output=True)
         print(f"  archived+read email thread {tid} ({len(mids)} msgs)")
     # move GTD item -> archive.json with completed_at
-    items.pop(idx); _save(name, items)
+    items.pop(idx)
+    _save(name, items)
     from datetime import datetime, timezone
-    it["status"] = "done"; it["completed_at"] = datetime.now(timezone.utc).isoformat()
-    arch = _load("archive"); arch.append(it); _save("archive", arch)
+    it["status"] = "done"
+    it["completed_at"] = datetime.now(timezone.utc).isoformat()
+    arch = _load("archive")
+    arch.append(it)
+    _save("archive", arch)
     print(f"done: {gtd_id} ({it.get('text','')[:50]}) -> archived")
 
 def _tg_token() -> str | None:
@@ -461,12 +474,15 @@ def _tg_send_file(path: Path, caption: str = "") -> bool:
 
 def cmd_attachments(ref: str, save: bool = False, to_dir: str | None = None,
                     account: str | None = None, telegram: bool = False) -> None:
-    r = _resolve(ref, account); acct, tid = r["account"], r["thread_id"]
+    r = _resolve(ref, account)
+    acct, tid = r["account"], r["thread_id"]
     th = _thread(acct, tid)
     found = [(m["id"], a) for m in th["messages"] for a in m["attachments"]]
     if not found:
-        print("attachments: none on this thread"); return
-    outdir = Path(to_dir or f"/tmp/gtd-attach/{tid}"); outdir.mkdir(parents=True, exist_ok=True)
+        print("attachments: none on this thread")
+        return
+    outdir = Path(to_dir or f"/tmp/gtd-attach/{tid}")
+    outdir.mkdir(parents=True, exist_ok=True)
     seen_files = set()
     for mid, a in found:
         line = f"  {a['filename']}  ({a['mime']}, {a['size']}B)"
@@ -505,7 +521,8 @@ def main():
     elif cmd == "digest":
         print(cmd_digest(send="--no-send" not in sys.argv))
     else:
-        print(f"unknown command: {cmd}", file=sys.stderr); sys.exit(2)
+        print(f"unknown command: {cmd}", file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":
