@@ -1,0 +1,34 @@
+# skos-backup.service — point-in-time backup of the durable skos state
+# (GTD store + cron ledger + model registry). Card 17660fbe / deploy-plan 3c.
+#
+# systemd USER unit. NOT applied live by this repo. Install with:
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/systemd/skos-backup.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now skos-backup.timer
+#
+# Off-box target (redundancy mantra: a backup on .158 is not a backup) is set
+# via the environment. Point it at a second host or a mounted external target:
+#   systemctl --user edit skos-backup.service   # add:
+#     [Service]
+#     Environment=SK_BACKUP_OFFBOX=cbrd21@100.x.x.x:/srv/backups/skos
+#
+# Runs through sk-cron-run.sh so a failure lands in the cron ledger, captures a
+# GTD item (source=cron), and fires sk-alert — same observability as every job.
+
+[Unit]
+Description=skos point-in-time backup (GTD store, cron ledger, model registry)
+Documentation=file:%h/clawd/skos/docs/runbooks/skbackup-restore.md
+
+[Service]
+Type=oneshot
+# --keep 7: 7 daily snapshots retained locally. Off-box copy is the durable tier.
+# SK_BACKUP_OFFBOX is optional; when unset the --offbox arg expands empty and the
+# backup stays local-only (still better than none, but set it for real durability).
+Environment=SK_BACKUP_KEEP=7
+ExecStart=%h/clawd/skos/scripts/skos-backup.sh
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target

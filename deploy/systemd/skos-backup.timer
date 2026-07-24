@@ -1,0 +1,14 @@
+# skos-backup.timer — daily point-in-time backup. Card 17660fbe / deploy-plan 3c.
+# systemd USER unit. NOT applied live by this repo (see the .service header for
+# the install step). Daily at 03:17 with catch-up if the host was asleep.
+
+[Unit]
+Description=Daily skos backup (GTD store, cron ledger, model registry)
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
