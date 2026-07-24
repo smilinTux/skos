@@ -148,15 +148,22 @@ cutover procedure: [`docs/runbooks/skos-scheduler.md`](./runbooks/skos-scheduler
 
 Env vars (secrets sourced from existing stores, never inlined):
 
+Secrets and operator identifiers (keyring password, Gmail accounts, DM ids) are
+resolved at runtime from the gitignored env file `~/.skcapstone/skos-schedule.env`
+(mode 600), never from a committed default. Template:
+`deploy/schedule/skos-schedule.env.example`.
+
 | Var | Default | Used by |
 |---|---|---|
-| `GOG_KEYRING_PASSWORD` | `sk2026` | all gog calls |
+| `GOG_KEYRING_PASSWORD` | (from env file, no committed default) | all gog calls |
+| `GTD_MAIL_ACCOUNTS` | (from env file; empty until set) | mail / status / triage |
 | `SK_GTD_DIR` | (skcapstone `_gtd_dir()`) | sink store override |
-| `HERMES_DM` | `telegram:1594678363` | digest delivery |
+| `HERMES_DM` | (from env file; empty until set) | digest delivery |
+| `SKMEM_PG_PASSWORD` | (from env file, no committed default) | skmem-pg corpus count |
 | `GTD_LLM_URL` / `GTD_LLM_MODEL` | `.100:8082/v1/...` / qwen3.6-27b-abliterated | email triage |
 | `WIKI_RESEARCH_THRESHOLD` / `WIKI_DANGLING_THRESHOLD` | 650 / 5000 | corpus-check |
-| `GTD_CAL_ACCOUNTS` / `GTD_CAL_DAYS` | primary / 2 | calendar adapter |
-| `GTD_TG_CHAT` / `GTD_TG_LIMIT` | Chef's DM / 25 | telegram adapter |
+| `GTD_CAL_ACCOUNTS` / `GTD_CAL_DAYS` | (falls back to `GTD_MAIL_ACCOUNTS`) / 2 | calendar adapter |
+| `GTD_TG_CHAT` / `GTD_TG_LIMIT` | (from env file; empty until set) / 25 | telegram adapter |
 | `GTD_DOC_ACCOUNTS` / `GTD_DOC_DIRS` | all 5 / - | recent-docs (Nextcloud roots) |
 
 **Telegram capture convention:** DM a message prefixed `todo:` / `task:` / `gtd:` /

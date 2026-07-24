@@ -10,14 +10,14 @@ def test_send_digest_live_sends_numbered_text(mocker):
     mocker.patch.object(digest, "build_digest_text",
                         return_value="Morning decisions (reply with the number):\n1. A\n2. B")
     run = mocker.patch.object(digest.subprocess, "run")
-    cfg = SimpleNamespace(digest_chat="1594678363", dry_run_summary=False)
+    cfg = SimpleNamespace(digest_chat="999000111", dry_run_summary=False)
 
     out = digest.send_digest(cfg, dry_run=False)
 
     assert out["sent"] is True and out["mode"] == "live" and out["items"] == 2
     run.assert_called_once()
     argv = run.call_args.args[0]
-    assert argv[0] == "sk-alert" and "1594678363" in argv
+    assert argv[0] == "sk-alert" and "999000111" in argv
     assert argv[-1] == "Morning decisions (reply with the number):\n1. A\n2. B"
 
 
@@ -25,7 +25,7 @@ def test_dry_run_without_optin_sends_nothing(mocker):
     mocker.patch.object(digest, "rebuild_manifest", return_value={"items": [{"n": 1}]})
     mocker.patch.object(digest, "build_digest_text", return_value="1. A")
     run = mocker.patch.object(digest.subprocess, "run")
-    cfg = SimpleNamespace(digest_chat="1594678363", dry_run_summary=False)
+    cfg = SimpleNamespace(digest_chat="999000111", dry_run_summary=False)
 
     out = digest.send_digest(cfg, dry_run=True)
 
