@@ -3,7 +3,21 @@ name = "skos"
 version = "0.2.2"
 description = "skos: sovereign agent OS, filesystem & packaging foundation"
 requires-python = ">=3.12"
-dependencies = ["typer>=0.12", "pydantic>=2.7", "pyyaml>=6.0", "cryptography>=42"]
+# typer pinned <0.13: newer typer drops click 8.1 compat and breaks the whole CLI
+# ("Choice is not subscriptable"). click pinned <8.2: click 8.2+ removes the
+# secondary-flag behavior typer 0.12.x relies on ("Secondary flag is not valid
+# for non-boolean flag"), so BOTH must be pinned for a from-scratch install to
+# yield a working CLI. See docs/gtd-ingest-SOP.md troubleshooting.
+# ruamel.yaml preserves registry comments on `skmodels set` / `/model` toggle
+# write-back (models/__init__.py); plain-yaml fallback would silently strip them.
+dependencies = [
+    "typer>=0.12,<0.13",
+    "click>=8.1,<8.2",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "cryptography>=42",
+    "ruamel.yaml>=0.18",
+]
 
 [project.scripts]
 skos = "skos.cli:app"
