@@ -13,10 +13,14 @@ import subprocess
 
 from ..gtd_ingest import GtdCapture, GtdSourceAdapter
 
+from ..secret_env import accounts as _mail_accounts
+
 GOG = os.environ.get("GOG", "/home/linuxbrew/.linuxbrew/bin/gog")
-# accounts whose calendars hold Chef's actionable commitments (primary by default;
-# david.knestrick excluded from default because it carries the nootropic-dose noise)
-CAL_ACCOUNTS = os.environ.get("GTD_CAL_ACCOUNTS", "chefboyrdave2.1@gmail.com").split(",")
+# accounts whose calendars hold the operator's actionable commitments. Resolved
+# from GTD_CAL_ACCOUNTS, falling back to the shared mail-account list; no personal
+# address is hardcoded in this public repo.
+_cal_raw = os.environ.get("GTD_CAL_ACCOUNTS", "")
+CAL_ACCOUNTS = [a.strip() for a in _cal_raw.split(",") if a.strip()] or _mail_accounts()
 DAYS = int(os.environ.get("GTD_CAL_DAYS", "2"))
 _NOISE = ("dose", "affirmation", "wind-down", "phenylpiracetam", "neurogenesis",
           "moon", "flag day", "birthday", "lipsync", "🚫", "💊", "🌙", "⚡",

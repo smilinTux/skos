@@ -30,18 +30,15 @@ tools and manual captures use: ~/.skcapstone/coordination/gtd/*.json.
 from __future__ import annotations
 import json, os, subprocess, sys, uuid, datetime
 from pathlib import Path
+from skos import secret_env
 
 GOG = os.environ.get("GOG", "/home/linuxbrew/.linuxbrew/bin/gog")
-os.environ.setdefault("GOG_KEYRING_PASSWORD", "sk2026")
+# gog keyring password is resolved at runtime from the env or the gitignored
+# operator env file - never hardcoded here (public repo).
+secret_env.ensure("GOG_KEYRING_PASSWORD")
 GTD_DIR = Path(os.environ.get("SKCAPSTONE_HOME", str(Path.home() / ".skcapstone"))) / "coordination" / "gtd"
-HERMES_DM = os.environ.get("HERMES_DM", "telegram:1594678363")  # chefboyrdave2.1 aka daveK
-ACCOUNTS = [
-    "chefboyrdave2.1@gmail.com",
-    "david.knestrick@gmail.com",
-    "cbd2dot11@gmail.com",
-    "jaimeanddavid2014@gmail.com",
-    "dounoit@gmail.com",
-]
+HERMES_DM = secret_env.resolve("HERMES_DM", "")  # operator DM target, set in env file
+ACCOUNTS = secret_env.accounts()  # operator Gmail boxes, set GTD_MAIL_ACCOUNTS in env file
 SHORT2ACCT = {a.split("@")[0]: a for a in ACCOUNTS}
 
 def _now() -> str:
