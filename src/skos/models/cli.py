@@ -22,7 +22,6 @@ from urllib.error import URLError, HTTPError
 from skos.models import (
     Backend,
     load_registry,
-    registry_path,
     resolve,
     set_context,
     unset_context,

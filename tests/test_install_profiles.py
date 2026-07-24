@@ -1,7 +1,6 @@
 """Tests for skos.install.profiles — PERSONAL-FIRST capability recommendations."""
 from __future__ import annotations
 
-import pytest
 from skos.install.profiles import InstallProfile, recommended, PROFILE_CAPS
 
 

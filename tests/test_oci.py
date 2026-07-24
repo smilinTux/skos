@@ -1,5 +1,4 @@
 import subprocess
-import pytest
 from skos.descriptor import AppDescriptor
 from skos.packaging.oci import OciAdapter
 

@@ -263,7 +263,6 @@ def test_phase3_dry_run_no_gtd_writes(monkeypatch):
 def test_phase3_writes_and_builds_manifest(monkeypatch, tmp_path):
     monkeypatch.setenv("SK_GTD_DIR", str(tmp_path / "gtd"))
     out = orch.phase3_report([_decision("q4")], dry_run=False, digest_date="2026-07-12")
-    from skos.autopilot import digest
     from skos.gtd_ingest import gtd_dir
     assert (gtd_dir() / "autopilot-digest.json").exists()
     assert out["manifest"]["items"][0]["qid"] == "q4"
@@ -356,6 +355,7 @@ def test_resume_skips_finalized(tmp_path, monkeypatch, clean_execs):
     assert ran == ["t-B"]
 
 
+@pytest.mark.needs_skcapstone
 def test_run_cli_dry_run_uses_stub(monkeypatch):
     import skos.autopilot.orchestrator as o
     seen = {}
@@ -367,6 +367,7 @@ def test_run_cli_dry_run_uses_stub(monkeypatch):
     assert seen["harness"].name == "stub" and seen["dry_run"] is True
 
 
+@pytest.mark.needs_skcapstone
 def test_run_cli_canary_disabled_when_live_execution_off(monkeypatch):
     import skos.autopilot.orchestrator as o
     monkeypatch.setattr(o.Config, "load", classmethod(lambda cls, *a, **k: _config(live_execution=False)))
@@ -376,6 +377,7 @@ def test_run_cli_canary_disabled_when_live_execution_off(monkeypatch):
     assert "disabled" in out                     # live_execution off -> no spawn
 
 
+@pytest.mark.needs_skcapstone
 def test_run_cli_live_builds_real_harness(monkeypatch):
     import skos.autopilot.orchestrator as o
     from types import SimpleNamespace

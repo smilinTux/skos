@@ -1,7 +1,7 @@
 """Tests for the obsidian surface — a markdown-vault read/write adapter."""
 import pytest
 
-from skos.brain.entity import EntityNode, EntityType, parse, render
+from skos.brain.entity import EntityNode, EntityType, parse
 from skos.interface.base import SurfaceError, SurfaceCapabilities
 from skos.interface.obsidian import ObsidianSurface
 from skos.interface.conformance import assert_surface_conforms

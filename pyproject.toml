@@ -26,7 +26,7 @@ gtd-mail = "skos.mail:main"
 skmodels = "skos.models.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-mock>=3.14"]
+dev = ["pytest>=8", "pytest-mock>=3.14", "pytest-cov>=5"]
 
 [build-system]
 requires = ["hatchling"]
@@ -35,3 +35,10 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    # Tests that exercise skos's optional integration with the sibling
+    # skcapstone package (autopilot orchestrator -> coordination.Board).
+    # skcapstone is NOT a declared dependency of skos and is absent in CI, so
+    # conftest auto-skips these when it cannot be imported. See tests/conftest.py.
+    "needs_skcapstone: requires the optional sibling skcapstone package (auto-skipped when absent)",
+]
