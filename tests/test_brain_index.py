@@ -1,7 +1,7 @@
 """Tests for skos.brain.index — build_index + read_index."""
 import pytest
 from pathlib import Path
-from skos.brain.index import build_index, read_index, IndexEntry
+from skos.brain.index import build_index, read_index
 
 
 # ---------------------------------------------------------------------------

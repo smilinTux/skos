@@ -1,6 +1,5 @@
 """Tests for the skos gtd-ingest port + capture() sink."""
 import json
-import os
 
 import pytest
 

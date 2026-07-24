@@ -1,5 +1,4 @@
 """Tests for the `skos surface` CLI command family."""
-import pytest
 from typer.testing import CliRunner
 
 from skos.cli import app

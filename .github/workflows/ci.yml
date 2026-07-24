@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel superseded runs for the same ref (branch / PR) so only the latest
+# push's checks keep spending minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -16,31 +22,40 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # requires-python = ">=3.12"
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install package + dev deps
         run: python -m pip install --upgrade pip && pip install -e ".[dev]"
 
-      - name: Run tests
-        run: pytest -q
+      # Tests marked `needs_skcapstone` self-skip when the optional sibling
+      # skcapstone package is absent (it is not a skos dependency and is not
+      # installed here); see tests/conftest.py. Coverage summary prints to the
+      # job log via --cov-report=term-missing.
+      - name: Run tests (with coverage)
+        run: pytest -q --cov=skos --cov-report=term-missing --cov-report=xml
 
   lint:
     name: lint (ruff)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install ruff
         run: python -m pip install --upgrade pip && pip install ruff
@@ -53,3 +68,34 @@ jobs:
       - name: Ruff (full, advisory)
         run: ruff check src tests
         continue-on-error: true
+
+      # Advisory: the tree has not been through a wholesale `ruff format` pass
+      # yet, so this surfaces the diff without blocking. Making it blocking is a
+      # separate reformat change, out of scope for this CI-quality pass.
+      - name: Ruff format (advisory)
+        run: ruff format --check src tests
+        continue-on-error: true
+
+  build:
+    name: build (wheel + sdist)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+          python -m build
+
+      - name: Check dist
+        run: |
+          pip install twine
+          twine check dist/*

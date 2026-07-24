@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .types import WorkItem, AssessBrief, Verdict, GateResult, DecisionItem
+from .types import WorkItem, AssessBrief, DecisionItem
 from .executor import EXECUTORS
 from .config import Caps, Config
 from .harness import build_harness

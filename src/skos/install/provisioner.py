@@ -16,11 +16,10 @@ install that records intent is the correct initial state.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 
 from skos.install.planner import InstallPlan
 from skos import paths as _paths
