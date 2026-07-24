@@ -116,10 +116,31 @@ Telegram DM (Hermes bot). No public port.
 | 06:35 | `ingest-email` | `skos ingest email`: `1 Action`/`2 Waiting` labels → GTD (sink) |
 | 06:45 | `email-brief` | `gtd-mail digest`: 📬 Email Brief → Telegram DM |
 | 07:45 | `ops-report` | `sk-status report`: 📊 Ops Report → DM |
+| :22/3h | `ingest-order` | `skos ingest order`: drive tracked order state (every 3h) |
+| every 30m | `drchiro-ingest` | `drchiro-mail-ingest.py`: Dr Rich clinic mail → GTD |
 
 Every command runs under `skos/scripts/sk-cron-run.sh <job> …`.
 
-Deploy/rollback = edit `crontab -e` (jobs are idempotent + deduped; safe to re-run).
+**Scheduler-as-code (not `crontab -e`).** The pipeline is declared in
+[`deploy/schedule/jobs.yaml`](../deploy/schedule/jobs.yaml) and installed into the
+user crontab by the `skos schedule` CLI. The manifest is portable (`$HOME` /
+`$SKOS_REPO`, no machine-specific absolute paths) and carries no secret value; the
+gog keyring password is injected at install time from `~/.skcapstone/skos-schedule.env`
+(mode 600, not committed). Deploy/rollback + cutover flow:
+
+```bash
+cd ~/clawd/skos
+skos schedule list            # validate manifest, show the 12 jobs
+skos schedule diff            # compare manifest vs the live crontab (exit 1 = drift)
+skos schedule install         # DRY RUN: print the resulting crontab
+skos schedule install --apply # write the managed block into the crontab
+```
+
+`install` only touches its own marked block (`# >>> skos schedule (managed) >>>` …
+`# <<< skos schedule (managed) <<<`); every other personal cron line is left intact,
+and re-running is idempotent (replace-in-place, never duplicate). Rollback = remove
+the block (or `crontab -` an earlier saved copy). Full deploy/rollback + one-time
+cutover procedure: [`docs/runbooks/skos-scheduler.md`](./runbooks/skos-scheduler.md).
 
 ---
 

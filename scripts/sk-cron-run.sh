@@ -8,7 +8,13 @@
 set -uo pipefail
 JOB="${1:?usage: sk-cron-run <job-name> <command...>}"; shift
 LEDGER="$HOME/.skcapstone/logs/cron-ledger.jsonl"
-PY="${PY:-/home/cbrd21/.skenv/bin/python3}"
+# Interpreter + host derive from the environment (no machine-specific literals):
+#   PY            -> $HOME/.skenv/bin/python3 if present, else PATH python3
+#   SK_CRON_HOST  -> hostname (override for tests / alt nodes)
+if [ -z "${PY:-}" ]; then
+  if [ -x "$HOME/.skenv/bin/python3" ]; then PY="$HOME/.skenv/bin/python3"; else PY="$(command -v python3)"; fi
+fi
+SK_CRON_HOST="${SK_CRON_HOST:-$(hostname)}"
 SKOS_BIN="${SKOS_BIN:-$HOME/.skenv/bin/skos}"
 mkdir -p "$(dirname "$LEDGER")"
 
@@ -18,10 +24,10 @@ dur=$(( $(date +%s) - start_s ))
 tail=$(printf '%s' "$out" | tail -6 | tr '\n' ' ' | cut -c1-500)
 
 # 1) ledger record
-"$PY" - "$JOB" "$start_iso" "$dur" "$rc" "$tail" >> "$LEDGER" <<'PY'
+"$PY" - "$JOB" "$start_iso" "$dur" "$rc" "$tail" "$SK_CRON_HOST" >> "$LEDGER" <<'PY'
 import json,sys
-job,start,dur,rc,tail=sys.argv[1:6]
-print(json.dumps({"job":job,"host":"noroc2027","start":start,"dur_s":int(dur),
+job,start,dur,rc,tail,host=sys.argv[1:7]
+print(json.dumps({"job":job,"host":host,"start":start,"dur_s":int(dur),
                   "exit":int(rc),"ok":rc=="0","tail":tail}))
 PY
 

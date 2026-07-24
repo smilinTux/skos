@@ -652,3 +652,96 @@ def backup_restore(
     restored = _backup.restore(snapshot, target)
     typer.echo(f"restored {len(restored)} file(s) to {target}")
     typer.echo("Staged only. Diff against live, then copy back per docs/runbooks/skbackup-restore.md")
+
+
+schedule_app = typer.Typer(
+    help="Scheduler-as-code: the gtd-ingest / observability cron pipeline, declared "
+    "in deploy/schedule/jobs.yaml and installed into the user crontab"
+)
+app.add_typer(schedule_app, name="schedule")
+
+
+def _load_schedule(manifest: str):
+    from skos import schedule as _sched
+    try:
+        s = _sched.load(manifest or None)
+        _sched.check_runner_exists(s)
+        return s
+    except _sched.ScheduleError as e:
+        typer.echo(f"schedule error: {e}", err=True)
+        raise typer.Exit(2)
+
+
+@schedule_app.command("list")
+def schedule_list(
+    manifest: str = typer.Option("", "--manifest", help="Path to jobs.yaml (default: repo deploy/schedule/jobs.yaml)"),
+):
+    """List the declared jobs (name, schedule) after validating the manifest."""
+    s = _load_schedule(manifest)
+    for job in s.jobs:
+        typer.echo(f"{job.schedule:<12}  {job.name}")
+    typer.echo(f"({len(s.jobs)} jobs)")
+
+
+@schedule_app.command("render")
+def schedule_render(
+    manifest: str = typer.Option("", "--manifest", help="Path to jobs.yaml"),
+    expand: bool = typer.Option(False, "--expand", help="Host-concrete paths (still no secret values)"),
+    block: bool = typer.Option(False, "--block", help="Wrap in the managed BEGIN/END markers"),
+):
+    """Print the rendered crontab lines. Secrets stay as $NAME references; no secret
+    value is ever emitted by render."""
+    from skos import schedule as _sched
+    s = _load_schedule(manifest)
+    if block:
+        typer.echo(_sched.render_block(s, expand=expand))
+    else:
+        for ln in _sched.render_lines(s, expand=expand):
+            typer.echo(ln)
+
+
+@schedule_app.command("diff")
+def schedule_diff(
+    manifest: str = typer.Option("", "--manifest", help="Path to jobs.yaml"),
+):
+    """Diff the manifest against the live user crontab (keyed by job name; secret
+    values ignored). Exit 0 = clean, exit 1 = drift."""
+    from skos import schedule as _sched
+    s = _load_schedule(manifest)
+    d = _sched.diff(s, _sched.read_crontab())
+    if d.ok and not d.extra:
+        typer.echo("clean: live crontab matches the manifest")
+        return
+    for name in d.missing:
+        typer.echo(f"  missing (declared, not live): {name}")
+    for name in d.changed:
+        typer.echo(f"  changed (schedule/command differs): {name}")
+    for name in d.extra:
+        typer.echo(f"  extra   (managed live, not declared): {name}")
+    if not d.ok:
+        raise typer.Exit(1)
+
+
+@schedule_app.command("install")
+def schedule_install(
+    manifest: str = typer.Option("", "--manifest", help="Path to jobs.yaml"),
+    env_file: str = typer.Option("", "--env-file", help=f"Secret env file (default: {'~/.skcapstone/skos-schedule.env'})"),
+    apply: bool = typer.Option(False, "--apply", help="Actually write the crontab (default: dry-run preview)"),
+):
+    """Render the managed block (secrets injected from the env file) and splice it
+    into the user crontab. Default is a DRY RUN that prints the resulting crontab;
+    pass --apply to write it."""
+    from skos import schedule as _sched
+    s = _load_schedule(manifest)
+    try:
+        new_text = _sched.install(s, env_file=env_file or None, dry_run=not apply)
+    except _sched.ScheduleError as e:
+        typer.echo(f"install error: {e}", err=True)
+        raise typer.Exit(2)
+    if apply:
+        typer.echo(f"installed: {len(s.jobs)} managed job(s) written to the user crontab")
+        d = _sched.diff(s, _sched.read_crontab())
+        typer.echo("post-install diff: " + ("clean" if d.ok else "DRIFT (see `skos schedule diff`)"))
+    else:
+        typer.echo("# DRY RUN - resulting crontab (pass --apply to write):")
+        typer.echo(new_text)
