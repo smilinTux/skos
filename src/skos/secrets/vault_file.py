@@ -43,10 +43,13 @@ class VaultFileBackend(SecretBackend):
         p.chmod(0o600)
 
     def set(self, scope: str, key: str, value: str) -> None:
-        data = self._load(); data[f"{scope}/{key}"] = value; self._save(data)
+        data = self._load()
+        data[f"{scope}/{key}"] = value
+        self._save(data)
 
     def get(self, scope: str, key: str) -> str:
-        data = self._load(); k = f"{scope}/{key}"
+        data = self._load()
+        k = f"{scope}/{key}"
         if k not in data:
             raise SecretError(f"No secret {k!r} in vault-file.")
         return data[k]
@@ -56,4 +59,6 @@ class VaultFileBackend(SecretBackend):
         return sorted(k for k in keys if scope is None or k.startswith(f"{scope}/"))
 
     def delete(self, scope: str, key: str) -> None:
-        data = self._load(); data.pop(f"{scope}/{key}", None); self._save(data)
+        data = self._load()
+        data.pop(f"{scope}/{key}", None)
+        self._save(data)
