@@ -76,7 +76,12 @@ cd ~/clawd/skos && pip install -e .        # provides `skos`, importable `skos.*
 Runtime deps used by adapters (already present): `gog` (Gmail/Calendar/Drive),
 `skcapstone telegram` (Telethon), the local LLM at `.100:8082` (triage) / mxbai
 (embeds), `hermes` + Telegram bot token (`~/.hermes/.env`) for delivery.
-**Pin:** `typer==0.12.5` (click 8.1 compat, newer typer breaks the whole CLI).
+**Pin:** typer is constrained to `>=0.12,<0.13` AND click to `>=8.1,<8.2` in
+`pyproject.toml`. Both are required: newer typer breaks the CLI, and click 8.2+
+breaks typer 0.12.x ("Secondary flag is not valid for non-boolean flag"). A
+from-scratch `pip install -e .` now resolves a working CLI automatically.
+`ruamel.yaml>=0.18` is also a core dep so `skmodels set` / the `/model` toggle
+preserve registry comments.
 
 ---
 
@@ -174,7 +179,9 @@ capture(GtdCapture(text="…", source="<src>", source_ref="<stable-key>",
 | Symptom | Check |
 |---|---|
 | Item captured twice | `source_ref` not stable/unique for that source; the sink dedupes on `(source, source_ref)`. |
-| `skos` CLI: `Choice is not subscriptable` | typer too new for click 8.1 → `pip install typer==0.12.5`. |
+| `skos` CLI: `Choice is not subscriptable` | typer too new for click 8.1. `pyproject.toml` pins `typer>=0.12,<0.13`; if seen, an out-of-tree install pulled typer ≥0.13 → reinstall (`pip install -e .`) or `pip install 'typer<0.13'`. |
+| `skos` CLI: `Secondary flag is not valid for non-boolean flag` | click too new (≥8.2) for typer 0.12.x. `pyproject.toml` pins `click>=8.1,<8.2` → reinstall (`pip install -e .`) or `pip install 'click<8.2'`. |
+| `skmodels set` strips registry comments | `ruamel.yaml` missing (falls back to plain yaml dump). It is a core dep now → `pip install -e .` to restore. |
 | Sink writes to wrong dir | `SK_GTD_DIR` set unexpectedly, or skcapstone not importable → falls back to `SKCAPSTONE_HOME`. |
 | Email triage does nothing | local LLM `.100:8082` down (cold/GPU) → falls back to `read`; check `curl :8082/v1/models`. |
 | Report/brief not delivered | `hermes send` creds / Telegram bot token in `~/.hermes/.env`; run `sk-status report` by hand. |
