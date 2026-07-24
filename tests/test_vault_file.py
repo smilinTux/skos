@@ -18,7 +18,9 @@ def test_encrypted_at_rest(data_root, vault_key):
 
 def test_list_scoped(data_root, vault_key):
     b = VaultFileBackend()
-    b.set("cloud", "a", "1"); b.set("cloud", "b", "2"); b.set("core", "c", "3")
+    b.set("cloud", "a", "1")
+    b.set("cloud", "b", "2")
+    b.set("core", "c", "3")
     assert sorted(b.list("cloud")) == ["cloud/a", "cloud/b"]
     assert "core/c" in b.list()
 
@@ -29,6 +31,8 @@ def test_get_missing_raises(data_root, vault_key):
 
 
 def test_delete(data_root, vault_key):
-    b = VaultFileBackend(); b.set("x", "y", "z"); b.delete("x", "y")
+    b = VaultFileBackend()
+    b.set("x", "y", "z")
+    b.delete("x", "y")
     with pytest.raises(SecretError):
         b.get("x", "y")

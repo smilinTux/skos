@@ -305,11 +305,10 @@ def brain_init_cmd(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1)
 
-    typer.echo(f"skos brain init: entity-graph skeleton scaffolded")
+    typer.echo("skos brain init: entity-graph skeleton scaffolded")
     typer.echo(f"  wiki root  : {(wiki_root or Path('~/clawd/wiki').expanduser().resolve())}")
     typer.echo(f"  namespaces : {len(result)}")
     for ns, idx_path in result.items():
-        status = "created" if idx_path.exists() else "exists"
         typer.echo(f"    {ns:<16} {idx_path}")
     typer.echo("")
     typer.echo("Next: run the self-build prompt to flesh out the entity graph.")
@@ -563,14 +562,16 @@ def autopilot_send(preview: bool = typer.Option(False, "--preview")):
 @secret_app.command("set")
 def secret_set(ref: str, value: str):
     from skos import secrets
-    s, k = _split(ref); secrets.get_backend().set(s, k, value)
+    s, k = _split(ref)
+    secrets.get_backend().set(s, k, value)
     typer.echo(f"stored {ref}")
 
 
 @secret_app.command("get")
 def secret_get(ref: str):
     from skos import secrets
-    s, k = _split(ref); typer.echo(secrets.get_backend().get(s, k))
+    s, k = _split(ref)
+    typer.echo(secrets.get_backend().get(s, k))
 
 
 @secret_app.command("list")
@@ -583,7 +584,9 @@ def secret_list(scope: str = ""):
 @secret_app.command("rm")
 def secret_rm(ref: str):
     from skos import secrets
-    s, k = _split(ref); secrets.get_backend().delete(s, k); typer.echo(f"deleted {ref}")
+    s, k = _split(ref)
+    secrets.get_backend().delete(s, k)
+    typer.echo(f"deleted {ref}")
 
 
 # ── skbackup: point-in-time backups of the durable skos state ────────────────

@@ -1,4 +1,5 @@
-import shutil, pytest
+import shutil
+import pytest
 from skos.packaging import runtime
 
 pytestmark = pytest.mark.skipif(

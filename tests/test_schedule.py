@@ -118,7 +118,6 @@ def test_diff_detects_missing_and_changed():
     s = sched.load()
     live_lines = _render_live(s).splitlines()
     # drop one job, mutate another's schedule
-    dropped = live_lines[0].split()[5:]  # not important; just remove first line
     kept = live_lines[1:]
     kept[0] = kept[0].replace(kept[0].split()[0], "59", 1)  # change first field of 2nd job
     d = sched.diff(s, "\n".join(kept), home="/home/tester", repo="/home/tester/clawd/skos")

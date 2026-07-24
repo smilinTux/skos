@@ -12,7 +12,11 @@ Phase-0 of the skos gtd-ingest framework (docs/gtd-ingest-architecture.md).
 Intended to fold into `skos status` in Phase-1.
 """
 from __future__ import annotations
-import json, os, subprocess, sys, datetime
+import json
+import os
+import subprocess
+import sys
+import datetime
 from pathlib import Path
 from skos import secret_env
 
@@ -30,7 +34,8 @@ def _count(account: str, query: str) -> int:
     try:
         out = subprocess.run([GOG, "gmail", "list", "-a", account, query, "--max", "100", "-j"],
                              capture_output=True, text=True, timeout=60).stdout
-        d = json.loads(out); n = len(d.get("threads", []))
+        d = json.loads(out)
+        n = len(d.get("threads", []))
         return n if not d.get("nextPageToken") else n  # 100 => "100(+)"
     except Exception:
         return -1
@@ -101,7 +106,8 @@ def recent_docs(n: int = 10, days: int = 21) -> list[dict]:
     for d in docs:
         if d["name"] in seen:
             continue
-        seen.add(d["name"]); out2.append(d)
+        seen.add(d["name"])
+        out2.append(d)
     return out2[:n]
 
 WIKI_DIR = Path(os.environ.get("WIKI_DIR", str(Path.home() / "clawd" / "wiki")))
@@ -185,8 +191,10 @@ def corpus_check() -> None:
     try:
         from skos.gtd_ingest import GtdCapture, capture as sink
     except Exception as e:
-        print(f"corpus-check: skos sink unavailable ({e})"); return
-    st = corpus_status(); w = st.get("wiki", {})
+        print(f"corpus-check: skos sink unavailable ({e})")
+        return
+    st = corpus_status()
+    w = st.get("wiki", {})
     y, wk, _ = datetime.date.today().isocalendar()
     bucket = f"{y}W{wk:02d}"
     fired = []
@@ -254,14 +262,16 @@ def _fmt_n(n):  # -1 => err, 100 => "100+"
 def render(sections: set[str]) -> str:
     L = []
     if "email" in sections:
-        es = email_status(); L.append("📬 EMAIL")
+        es = email_status()
+        L.append("📬 EMAIL")
         L.append(f"  {'box':22s} {'inbox':>6s} {'action':>7s} {'wait':>5s} {'new':>4s}")
         for b, v in es.items():
             L.append(f"  {b:22s} {_fmt_n(v['inbox']):>6s} {_fmt_n(v['action']):>7s} "
                      f"{_fmt_n(v['waiting']):>5s} {_fmt_n(v['new_today']):>4s}")
         L.append("")
     if "cron" in sections:
-        cs = cron_status(); L.append("⏱  CRON / SCHEDULED (last 24h)")
+        cs = cron_status()
+        L.append("⏱  CRON / SCHEDULED (last 24h)")
         if not cs:
             L.append("  (no runs recorded: wrap jobs with sk-cron-run)")
         for job, v in sorted(cs.items()):
@@ -272,14 +282,18 @@ def render(sections: set[str]) -> str:
                 L.append(f"       ↳ {v['last_tail'][:120]}")
         L.append("")
     if "docs" in sections:
-        rd = recent_docs(); L.append("📄 RECENT DOCS (worked on)")
+        rd = recent_docs()
+        L.append("📄 RECENT DOCS (worked on)")
         if not rd:
             L.append("  (none in window: Drive scanned; Nextcloud offline until ~Aug)")
         for d in rd:
             L.append(f"  {d['when']}  {d['name'][:52]:52s}  {d['where']}")
         L.append("")
     if "corpus" in sections:
-        cs = corpus_status(); w = cs["wiki"]; ing = cs["ingest"]; co = cs["corpus"]
+        cs = corpus_status()
+        w = cs["wiki"]
+        ing = cs["ingest"]
+        co = cs["corpus"]
         L.append("🧠 CORPUS / WIKI")
         if w.get("pages"):
             triage = "⚠️ triage" if (w.get("unverified", 0) > 400 or w.get("dangling", 0) > 5000) else "ok"
@@ -295,7 +309,8 @@ def render(sections: set[str]) -> str:
             L.append(f"  corpus: {co['docs']} docs in skmem-pg")
         L.append("")
     if "gtd" in sections:
-        gs = gtd_status(); L.append("✅ GTD (unified store)")
+        gs = gtd_status()
+        L.append("✅ GTD (unified store)")
         L.append(f"  inbox={gs.get('inbox')} next={gs.get('next-actions')} "
                  f"projects={gs.get('projects')} waiting={gs.get('waiting-for')} "
                  f"someday={gs.get('someday-maybe')}")
@@ -329,11 +344,16 @@ def run(argv=None):
     sections = {"email", "cron", "docs", "corpus", "gtd"} if cmd in ("all", "") else {cmd}
     if as_json:
         data = {}
-        if "email" in sections: data["email"] = email_status()
-        if "cron" in sections: data["cron"] = cron_status()
-        if "docs" in sections: data["docs"] = recent_docs()
-        if "corpus" in sections: data["corpus"] = corpus_status()
-        if "gtd" in sections: data["gtd"] = gtd_status()
+        if "email" in sections:
+            data["email"] = email_status()
+        if "cron" in sections:
+            data["cron"] = cron_status()
+        if "docs" in sections:
+            data["docs"] = recent_docs()
+        if "corpus" in sections:
+            data["corpus"] = corpus_status()
+        if "gtd" in sections:
+            data["gtd"] = gtd_status()
         print(json.dumps(data, indent=2))
     else:
         print(render(sections))
