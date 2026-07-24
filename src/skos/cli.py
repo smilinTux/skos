@@ -584,3 +584,71 @@ def secret_list(scope: str = ""):
 def secret_rm(ref: str):
     from skos import secrets
     s, k = _split(ref); secrets.get_backend().delete(s, k); typer.echo(f"deleted {ref}")
+
+
+# ── skbackup: point-in-time backups of the durable skos state ────────────────
+backup_app = typer.Typer(
+    help="skbackup: point-in-time snapshots of the GTD store, cron ledger, and model registry"
+)
+app.add_typer(backup_app, name="backup")
+
+
+@backup_app.command("run")
+def backup_run(
+    dest: str = typer.Option("", "--dest", help="Local retention dir (default: $SK_BACKUP_DIR or ~/.skcapstone/backups/skos)"),
+    keep: int = typer.Option(7, "--keep", help="Retain the N newest snapshots; older are pruned"),
+    offbox: str = typer.Option("", "--offbox", help="Off-box target: host:path (rsync) or a local/mounted dir (copy)"),
+):
+    """Take a consistent snapshot (under the GTD store lock), self-verify, rotate
+    to --keep, and optionally copy off-box. This is what the scheduled unit runs."""
+    from skos import backup as _backup
+    res = _backup.run_backup(dest or None, keep=keep, offbox=offbox or None)
+    typer.echo(f"snapshot {res.snapshot}")
+    typer.echo(f"verify   {'OK' if res.verify.get('ok') else 'FAILED'} ({res.verify.get('checked', 0)} files)")
+    if res.offbox:
+        typer.echo(f"offbox   {'OK' if res.offbox_ok else 'FAILED'} -> {res.offbox}")
+    if res.rotated:
+        typer.echo(f"rotated  pruned {len(res.rotated)} old snapshot(s)")
+    if not res.verify.get("ok"):
+        for err in res.verify.get("errors", []):
+            typer.echo(f"  ! {err}", err=True)
+        raise typer.Exit(1)
+
+
+@backup_app.command("list")
+def backup_list(
+    dest: str = typer.Option("", "--dest", help="Retention dir to list"),
+):
+    """List retained snapshots (oldest first)."""
+    from skos import backup as _backup
+    snaps = _backup.list_snapshots(dest or None)
+    if not snaps:
+        typer.echo("(no snapshots)")
+        return
+    for p in snaps:
+        typer.echo(f"{p.stat().st_size:>10}  {p.name}")
+
+
+@backup_app.command("verify")
+def backup_verify(snapshot: str = typer.Argument(..., help="Path to a snapshot .tar.gz")):
+    """Verify a snapshot's tar + every manifested sha256."""
+    from skos import backup as _backup
+    res = _backup.verify(snapshot)
+    typer.echo(f"{'OK' if res['ok'] else 'FAILED'}: {res['checked']} files checked")
+    for err in res["errors"]:
+        typer.echo(f"  ! {err}", err=True)
+    if not res["ok"]:
+        raise typer.Exit(1)
+
+
+@backup_app.command("restore")
+def backup_restore(
+    snapshot: str = typer.Argument(..., help="Path to a snapshot .tar.gz"),
+    target: str = typer.Argument(..., help="STAGING dir to extract into (never the live paths)"),
+):
+    """Extract a snapshot's payload into a staging dir for a restore drill.
+    Diff the staged tree against live before copying anything back (see runbook)."""
+    from skos import backup as _backup
+    restored = _backup.restore(snapshot, target)
+    typer.echo(f"restored {len(restored)} file(s) to {target}")
+    typer.echo("Staged only. Diff against live, then copy back per docs/runbooks/skbackup-restore.md")
