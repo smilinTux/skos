@@ -1,0 +1,98 @@
+# skos scheduler - desired state (scheduler-as-code).
+#
+# This file is the single source of truth for the skos gtd-ingest / observability
+# pipeline that runs on the primary node (noroc2027 / .158). It is rendered into
+# the user crontab by `skos schedule install`; nothing here is applied by importing
+# the repo. See docs/runbooks/skos-scheduler.md for the deploy/rollback flow.
+#
+# WHY CRONTAB (not systemd user timers):
+#   The live pipeline already runs as a user crontab, and this whole subsystem is
+#   the reference implementation of OBSERVABILITY_AND_SCHEDULING_STANDARD where every
+#   job is wrapped in scripts/sk-cron-run.sh (run-ledger + failure->GTD + sk-alert).
+#   Rendering one ordered crontab block keeps the tight 04:45->07:45 daily sequence
+#   legible in one place and lets `skos schedule install` reproduce the live schedule
+#   byte-for-byte (clean diff / exact cutover) instead of 24 systemd unit files.
+#   deploy/systemd/ still ships the skos-backup timer for the one job that benefits
+#   from OnCalendar catch-up; the pipeline jobs stay on cron.
+#
+# PORTABILITY: every path is written with $HOME (and the repo via $SKOS_REPO) so the
+#   file is machine-independent. `skos schedule install` expands them for the host it
+#   runs on. No machine-specific absolute path (/home/<user>/...) is committed here.
+#
+# SECRETS: no secret value is committed. `secret_env` lists env var NAMES that are
+#   prepended to each job line; their VALUES are resolved at install time from the
+#   scheduler env file (default: ~/.skcapstone/skos-schedule.env, mode 600, NOT in
+#   git). See skos-schedule.env.example. `skos schedule render` prints the var name
+#   ($GOG_KEYRING_PASSWORD), never the value.
+version: 1
+
+defaults:
+  # sk-cron-run.sh wrapper (relative to the repo root; $SKOS_REPO defaults to
+  # $HOME/clawd/skos). Every job runs as: <runner> <job-name> <command>.
+  runner: "$SKOS_REPO/scripts/sk-cron-run.sh"
+  # PATH prepended to each line so cron finds the skenv console scripts + brew tools.
+  path: "$HOME/.skenv/bin:$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin"
+  # Env var NAMES (not values) to prepend to each line. Values come from the env file.
+  secret_env:
+    - GOG_KEYRING_PASSWORD
+
+jobs:
+  - name: youtube-ingest
+    schedule: "30 5 * * *"
+    command: "$HOME/clawd/scripts/youtube-ingest/daily_run.sh"
+    log: "$HOME/clawd/logs/youtube-ingest-cron.log"
+
+  - name: wiki-maintain
+    schedule: "45 4 * * *"
+    command: "$HOME/.skenv/bin/python3 $HOME/clawd/wiki/tools/wiki_maintain.py fill --top 15"
+    log: "$HOME/.skcapstone/logs/wiki-maintain.log"
+
+  - name: gtd-noise-sweep
+    schedule: "0 6 * * *"
+    command: "$HOME/clawd/skos/scripts/gtd-triage.sh"
+    log: "$HOME/.skcapstone/logs/gtd-triage.cron.log"
+
+  - name: corpus-check
+    schedule: "5 6 * * *"
+    command: "$HOME/.skenv/bin/sk-status corpus-check"
+    log: "$HOME/.skcapstone/logs/sk-status.log"
+
+  - name: email-triage
+    schedule: "10 6 * * *"
+    command: "$HOME/.skenv/bin/gtd-mail triage"
+    log: "$HOME/.skcapstone/logs/gtd-mail.log"
+
+  - name: ingest-calendar
+    schedule: "15 6 * * *"
+    command: "$HOME/.skenv/bin/skos ingest calendar"
+    log: "$HOME/.skcapstone/logs/sk-ingest.log"
+
+  - name: ingest-telegram
+    schedule: "16 6 * * *"
+    command: "$HOME/.skenv/bin/skos ingest telegram"
+    log: "$HOME/.skcapstone/logs/sk-ingest.log"
+
+  - name: ingest-email
+    schedule: "35 6 * * *"
+    command: "$HOME/.skenv/bin/skos ingest email"
+    log: "$HOME/.skcapstone/logs/sk-ingest.log"
+
+  - name: email-brief
+    schedule: "45 6 * * *"
+    command: "$HOME/.skenv/bin/gtd-mail digest"
+    log: "$HOME/.skcapstone/logs/gtd-mail.log"
+
+  - name: ops-report
+    schedule: "45 7 * * *"
+    command: "$HOME/.skenv/bin/sk-status report"
+    log: "$HOME/.skcapstone/logs/sk-status.log"
+
+  - name: drchiro-ingest
+    schedule: "*/30 * * * *"
+    command: "/usr/bin/python3 $HOME/clawd/scripts/drchiro-mail-ingest.py"
+    log: "$HOME/.skcapstone/logs/drchiro-ingest.log"
+
+  - name: ingest-order
+    schedule: "22 */3 * * *"
+    command: "$HOME/.skenv/bin/skos ingest order"
+    log: "$HOME/.skcapstone/logs/sk-ingest.log"
