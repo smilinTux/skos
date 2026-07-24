@@ -213,8 +213,6 @@ def init_cmd(
 ):
     """Set up the data-root tree and show the PERSONAL-FIRST recommended capability set."""
     from skos.install.profiles import recommended
-    from skos.install.provisioner import apply as _apply
-    from skos.install.planner import plan as _plan
 
     prof = _parse_install_profile(profile)
     paths.ensure_tree()
@@ -297,7 +295,7 @@ def brain_init_cmd(
     wiki: str = typer.Option("", "--wiki", help="Override wiki root path"),
 ):
     """Scaffold the entity-graph skeleton + self-build prompt under the wiki."""
-    from skos.brain.brain_init import scaffold, CORE_NAMESPACES
+    from skos.brain.brain_init import scaffold
     from pathlib import Path
 
     wiki_root = Path(wiki).expanduser().resolve() if wiki else None

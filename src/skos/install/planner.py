@@ -12,7 +12,7 @@ resolver (skos.resolver.resolve) applies the standard precedence chain:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 from pydantic import BaseModel
 

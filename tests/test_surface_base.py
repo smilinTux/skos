@@ -2,7 +2,6 @@
 import pytest
 
 from skos.adapter import Adapter
-from skos.brain.entity import EntityNode
 from skos.interface.base import (
     Surface,
     SurfaceError,

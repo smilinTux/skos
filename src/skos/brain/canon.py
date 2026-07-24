@@ -22,7 +22,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from skos.brain.entity import EntityNode, LifecycleState, ParseError, parse, render
+from skos.brain.entity import EntityNode, LifecycleState, parse, render
 
 # ---------------------------------------------------------------------------
 # Default wiki root: $SKOS_WIKI_ROOT → ~/clawd/wiki

@@ -1,5 +1,4 @@
 """Smoke tests for `skos brain` CLI commands."""
-import pytest
 from pathlib import Path
 from typer.testing import CliRunner
 from skos.cli import app
