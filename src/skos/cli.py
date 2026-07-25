@@ -657,6 +657,38 @@ def backup_restore(
     typer.echo("Staged only. Diff against live, then copy back per docs/runbooks/skbackup-restore.md")
 
 
+# ── revert drill: prove an applied change can be rolled back ──────────────────
+revert_drill_app = typer.Typer(
+    help="revert-drill: prove a change applied to durable skos state can be rolled back to baseline"
+)
+app.add_typer(revert_drill_app, name="revert-drill")
+
+
+@revert_drill_app.command("run")
+def revert_drill_run(
+    scratch: str = typer.Option("", "--scratch", help="Scratch dir for the drill (default: a temp dir; never live state)"),
+):
+    """Run a self-contained revert drill: seed a scratch target, snapshot it
+    (baseline), apply a change, revert, and assert a byte-for-byte return to
+    baseline. Touches ONLY the scratch dir, never live state. Exits non-zero if
+    the target did not return to baseline."""
+    import tempfile
+
+    from skos import revert_drill as _drill
+    scratch_dir = scratch or tempfile.mkdtemp(prefix="skos-revert-drill-")
+    res = _drill.run_drill(scratch_dir)
+    typer.echo(f"scratch  {scratch_dir}")
+    typer.echo(f"baseline {res.baseline_files} file(s)")
+    typer.echo(f"revert   restored {len(res.reverted['restored'])}, removed {len(res.reverted['removed'])}")
+    typer.echo(f"result   {'OK: target returned to baseline' if res.ok else 'FAILED'}")
+    if not res.ok:
+        for m in res.mismatches:
+            typer.echo(f"  ! changed not restored: {m}", err=True)
+        for u in res.unexpected:
+            typer.echo(f"  ! addition not removed: {u}", err=True)
+        raise typer.Exit(1)
+
+
 schedule_app = typer.Typer(
     help="Scheduler-as-code: the gtd-ingest / observability cron pipeline, declared "
     "in deploy/schedule/jobs.yaml and installed into the user crontab"
