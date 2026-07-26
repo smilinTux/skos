@@ -4,3 +4,4 @@ src/skos/__pycache__/
 .pytest_cache/
 __pycache__/
 *.bak-pre-*
+.autocode-phaseB-report.md
