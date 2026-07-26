@@ -191,7 +191,10 @@ def test_phase1_no_executor_queues_decision(clean_execs):
 def fake_journal(monkeypatch):
     writes = []
     ns = SimpleNamespace(read_run=lambda rid: {}, write_run=lambda rid, d: writes.append((rid, d)))
-    monkeypatch.setattr(orch, "journal", ns)
+    # run_once() (defined in skharness.autocode.orchestrator) resolves `journal`
+    # against its OWN module globals (`from . import journal`), so the patch
+    # must target that implementation module, not the skos.autopilot shim.
+    monkeypatch.setattr("skharness.autocode.orchestrator.journal", ns)
     return writes
 
 
@@ -356,7 +359,8 @@ def test_resume_skips_finalized(tmp_path, monkeypatch, clean_execs):
     board = _board(["t-A", "t-B"])
     harness = SimpleNamespace(name="h", assess=lambda b: Verdict(verdict="valid", reason=""))
     prior = {"run_id": "rr", "items": {"t-A": {"state": "finalized", "round": 1, "score": 5}}}
-    monkeypatch.setattr(orch, "journal", SimpleNamespace(
+    # See the fake_journal fixture above: patch the implementation module.
+    monkeypatch.setattr("skharness.autocode.orchestrator.journal", SimpleNamespace(
         read_run=lambda rid: prior, write_run=lambda rid, d: None))
 
     orch.run_once(board=board, harness=harness, config=_config(),
@@ -371,8 +375,14 @@ def test_resume_skips_finalized(tmp_path, monkeypatch, clean_execs):
 def test_run_cli_dry_run_uses_stub(monkeypatch):
     import skos.autopilot.orchestrator as o
     seen = {}
+    # o.Config is the same class object as skharness.autocode.orchestrator.Config
+    # (import * copies the name binding, not the object), so patching a
+    # classmethod on it works everywhere. run_once is a plain function though:
+    # run_cli() calls it against its OWN module globals, so that patch must
+    # target the implementation module, not the skos.autopilot shim.
     monkeypatch.setattr(o.Config, "load", classmethod(lambda cls, *a, **k: _config(live_execution=False)))
-    monkeypatch.setattr(o, "run_once", lambda **kw: seen.update(kw) or {"ok": True})
+    monkeypatch.setattr("skharness.autocode.orchestrator.run_once",
+                        lambda **kw: seen.update(kw) or {"ok": True})
     monkeypatch.setattr("skcapstone.coordination.Board", lambda *a, **k: object())
     monkeypatch.setattr("skcapstone.mcp_tools._helpers._shared_root", lambda: "/tmp")
     o.run_cli(dry_run=True)
@@ -394,9 +404,14 @@ def test_run_cli_live_builds_real_harness(monkeypatch):
     import skos.autopilot.orchestrator as o
     from types import SimpleNamespace
     seen = {}
+    # See test_run_cli_dry_run_uses_stub above: build_harness/run_once are plain
+    # functions called from run_cli() against its OWN module globals, so those
+    # patches must target the implementation module, not the skos.autopilot shim.
     monkeypatch.setattr(o.Config, "load", classmethod(lambda cls, *a, **k: _config(live_execution=True)))
-    monkeypatch.setattr(o, "build_harness", lambda config, name=None: SimpleNamespace(name=name or "pi"))
-    monkeypatch.setattr(o, "run_once", lambda **kw: seen.update(kw) or {"ok": True})
+    monkeypatch.setattr("skharness.autocode.orchestrator.build_harness",
+                        lambda config, name=None: SimpleNamespace(name=name or "pi"))
+    monkeypatch.setattr("skharness.autocode.orchestrator.run_once",
+                        lambda **kw: seen.update(kw) or {"ok": True})
     monkeypatch.setattr("skcapstone.coordination.Board", lambda *a, **k: object())
     monkeypatch.setattr("skcapstone.mcp_tools._helpers._shared_root", lambda: "/tmp")
     o.run_cli(dry_run=False, canary=True, task="t-1", harness="pi")

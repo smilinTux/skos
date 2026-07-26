@@ -157,8 +157,12 @@ def _run_ex(mocker, cfg, grades, ci_status="green", cov=0.95):
     mocker.patch.object(ex, "prune_worktree")
     mocker.patch.object(ex, "_diff", return_value="DIFF")
     mocker.patch.object(ex, "_head_sha", return_value="sha1")
-    mocker.patch("skos.autopilot.engineering.external_ci_verdict", return_value=ci_status)
-    mocker.patch("skos.autopilot.engineering.diff_coverage", return_value=cov)
+    # Patched at the implementation module (skharness.autocode.engineering), not
+    # the skos.autopilot shim: EngineeringExecutor.run() resolves these names
+    # against its OWN module globals (it does `from .ci import ...`), so a patch
+    # on the shim's re-exported copy would not be seen by the internal call.
+    mocker.patch("skharness.autocode.engineering.external_ci_verdict", return_value=ci_status)
+    mocker.patch("skharness.autocode.engineering.diff_coverage", return_value=cov)
     harness = mocker.Mock(name="harness")
     harness.name = "claude-code"
     harness.run_task.return_value = HarnessResult(ok=True, artifact=None, tokens=1,
@@ -243,7 +247,8 @@ def _final_ex(mocker, cfg, repo_name, ci_status="green"):
     mocker.patch.object(ex, "prune_worktree")
     mocker.patch.object(ex, "_merge", return_value="mergesha")
     mocker.patch.object(ex, "_open_pr", return_value="https://gh/pr/1")
-    mocker.patch("skos.autopilot.engineering.external_ci_verdict", return_value=ci_status)
+    # See the note in _run_ex above: patch the implementation module, not the shim.
+    mocker.patch("skharness.autocode.engineering.external_ci_verdict", return_value=ci_status)
     item = WorkItem(kind="engineering", ref="t1", source="coord", repo=None,
                     payload={"tags": [f"repo:{repo_name}"], "title": "t"})
     return ex, item
