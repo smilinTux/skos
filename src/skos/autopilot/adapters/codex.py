@@ -1,28 +1,10 @@
-"""CodexStubAdapter: fail-closed placeholder. codex is not installed on this node
-(only a stub is on PATH). Registered so the harness registry surface is complete
-and swap is proven; replace with a real adapter when codex is present."""
-from __future__ import annotations
+"""Shim: re-exports skharness.autocode.adapters.codex (Wave 2, Phase B of the autocode extraction).
 
-from ..claude_code import HarnessUnavailable
-
-_MSG = "codex is not installed on this node; register a real codex adapter to use it"
-
-
-class CodexStubAdapter:
-    name = "codex"
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def capabilities(self):
-        return {"session_resume": False, "structured_output": "none",
-                "sandbox": False, "tool_restrictions": False}
-
-    def assess(self, brief):
-        raise HarnessUnavailable(_MSG)
-
-    def run_task(self, brief):
-        raise HarnessUnavailable(_MSG)
-
-    def grade(self, brief):
-        raise HarnessUnavailable(_MSG)
+skos.autopilot.codex now delegates to the shared engine in skharness.autocode;
+this module is kept so every existing import path (skos.cli, skos tests,
+out-of-tree callers) keeps resolving unchanged. See
+docs/superpowers/specs/2026-07-25-autocode-engine-extraction-architecture.md
+section 5 (Phase B) for the migration plan. Do not add new code here; add it
+to skharness.autocode.codex instead.
+"""
+from skharness.autocode.adapters.codex import *  # noqa: F401,F403

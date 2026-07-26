@@ -10,6 +10,10 @@ requires-python = ">=3.12"
 # yield a working CLI. See docs/gtd-ingest-SOP.md troubleshooting.
 # ruamel.yaml preserves registry comments on `skmodels set` / `/model` toggle
 # write-back (models/__init__.py); plain-yaml fallback would silently strip them.
+# skharness: skos.autopilot is a re-export shim over skharness.autocode (the
+# shared autocode engine, extracted per
+# docs/superpowers/specs/2026-07-25-autocode-engine-extraction-architecture.md
+# Phase B); skos is Layer 1 consuming the Layer 0 EXECUTION module.
 dependencies = [
     "typer>=0.12,<0.13",
     "click>=8.1,<8.2",
@@ -17,6 +21,7 @@ dependencies = [
     "pyyaml>=6.0",
     "cryptography>=42",
     "ruamel.yaml>=0.18",
+    "skharness>=0.3.0",
 ]
 
 [project.scripts]
