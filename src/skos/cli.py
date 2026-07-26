@@ -602,6 +602,20 @@ def autopilot_list(decisions: bool = typer.Option(False, "--decisions"),
         typer.echo(line)
 
 
+@autopilot_app.command("doctor")
+def autopilot_doctor():
+    """Self-check the harness: shim delegation, auth, sandbox image, decline rate.
+
+    Catches the failure modes that silently stall live runs (a node still on
+    pre-extraction code, a sandbox image built before the current module path, an
+    expired token) so they surface in seconds instead of a wasted coding round."""
+    from skharness.autocode import doctor
+    results = doctor.preflight()
+    typer.echo(doctor.format_report(results))
+    if any(r.status == "fail" for r in results):
+        raise typer.Exit(1)
+
+
 @autopilot_app.command("status")
 def autopilot_status():
     """Render the latest run from the journal."""
