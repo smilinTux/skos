@@ -41,14 +41,19 @@ def test_build_executors_does_not_mutate_global():
 def test_run_once_builds_and_threads_executors(monkeypatch, tmp_path):
     sentinel = {"engineering": object()}
     seen = {}
-    monkeypatch.setattr(orch, "build_executors",
+    # run_once() (defined in skharness.autocode.orchestrator) resolves
+    # build_executors/phase0_assess/phase1_triage/journal against ITS OWN module
+    # globals, so the patches must target that implementation module, not the
+    # skos.autopilot shim (which only holds re-exported copies of the names).
+    _IMPL = "skharness.autocode.orchestrator"
+    monkeypatch.setattr(f"{_IMPL}.build_executors",
                         lambda config, board, run_id: seen.setdefault("run_id", run_id) and None or sentinel)
     def triage_spy(candidates, harness, *, repo_map, decisions, executors=None):
         seen["executors"] = executors
         return []
-    monkeypatch.setattr(orch, "phase0_assess", lambda **kw: ([], []))
-    monkeypatch.setattr(orch, "phase1_triage", triage_spy)
-    monkeypatch.setattr(orch, "journal",
+    monkeypatch.setattr(f"{_IMPL}.phase0_assess", lambda **kw: ([], []))
+    monkeypatch.setattr(f"{_IMPL}.phase1_triage", triage_spy)
+    monkeypatch.setattr(f"{_IMPL}.journal",
                         SimpleNamespace(read_run=lambda r: {}, write_run=lambda *a, **k: None))
     orch.run_once(board=object(), harness=object(), config=_cfg(dry_run=True),
                   tasks_dir=tmp_path, run_id="rZ")
