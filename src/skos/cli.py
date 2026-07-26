@@ -139,6 +139,82 @@ def gtd_upsert(
     typer.echo(f"{action} {iid}")
 
 
+placement_app = typer.Typer(help="Storage-placement policy engine + blob catalog")
+app.add_typer(placement_app, name="placement")
+
+
+def _parse_attrs(attrs_json: str) -> dict:
+    import json as _json
+    try:
+        a = _json.loads(attrs_json) if attrs_json else {}
+        if not isinstance(a, dict):
+            raise ValueError("attrs must be a JSON object")
+        return a
+    except ValueError as e:
+        raise typer.BadParameter(f"--attrs: {e}") from e
+
+
+@placement_app.command("resolve")
+def placement_resolve(
+    attrs: str = typer.Argument(..., help="JSON object of blob attrs (mimetype,size,tags,source,ext)"),
+    policy: str = typer.Option("", "--policy", help="placement.yaml path (default: config/placement.yaml)"),
+):
+    """Resolve (pure, no record) which store/tier/node a blob would land on."""
+    from skos import placement as _pl
+    pol = _pl.load_policy(policy or None)
+    p = _pl.resolve_placement(_parse_attrs(attrs), pol)
+    typer.echo(f"{p.store}\t{p.node}\t{p.tier}\t{p.annex or '-'}\trule={p.rule}")
+
+
+@placement_app.command("wanted")
+def placement_wanted(
+    store: str = typer.Argument(..., help="Store name to render a git-annex preferred-content expr for"),
+    policy: str = typer.Option("", "--policy", help="placement.yaml path"),
+):
+    """Render the git-annex `wanted` (preferred-content) expression for a store.
+
+    Wiring it via `git annex wanted <remote> <expr>` is deferred; this prints it."""
+    from skos import placement as _pl
+    pol = _pl.load_policy(policy or None)
+    typer.echo(_pl.preferred_content_expr(pol, store))
+
+
+@placement_app.command("show")
+def placement_show(
+    blob_id: str = typer.Argument(..., help="Blob id to look up in the catalog"),
+):
+    """Print the catalog row for a blob id (exit 1 if absent)."""
+    import json as _json
+    from skos import placement as _pl
+    row = _pl.get_placement(blob_id)
+    if row is None:
+        typer.echo(f"no catalog entry for {blob_id!r}")
+        raise typer.Exit(1)
+    typer.echo(_json.dumps(row, indent=2, ensure_ascii=False))
+
+
+@placement_app.command("list")
+def placement_list():
+    """List all blob-catalog rows (blob_id, store, node, tier)."""
+    from skos import placement as _pl
+    for row in _pl.list_placements():
+        typer.echo(f"{row.get('blob_id')}\t{row.get('store')}\t{row.get('node')}\t{row.get('tier')}")
+
+
+@app.command()
+def store(
+    blob_id: str = typer.Argument(..., help="Blob id (content hash or stable key)"),
+    attrs: str = typer.Option("", "--attrs", help="JSON object of blob attrs (mimetype,size,tags,source,ext)"),
+    policy: str = typer.Option("", "--policy", help="placement.yaml path"),
+):
+    """`skos store`: resolve a blob's placement from policy and record it in the
+    blob catalog (record_ingest_location). Upsert-by-blob-id; prints the target."""
+    from skos import placement as _pl
+    pol = _pl.load_policy(policy or None)
+    row = _pl.store_blob(blob_id, _parse_attrs(attrs), pol)
+    typer.echo(f"stored {blob_id} -> {row['store']} ({row['node']}/{row['tier']}) rule={row['rule']}")
+
+
 @app.command()
 def install(app_yaml: str):
     """Materialize an app via its packaging adapter and record it."""
