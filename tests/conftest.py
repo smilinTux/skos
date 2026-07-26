@@ -19,6 +19,21 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_coldstart_state(tmp_path, monkeypatch):
+    """Point the cold-start node sentinel at a throwaway, per-test state dir.
+
+    The marker (skos.coldstart) is a real, local, per-node file under
+    ``~/.local/state/skos`` by default. Isolating it keeps the suite from
+    reading a genuine marker on the dev box (which would trip the empty-store
+    guard) and from writing one during tests. Tests that exercise the guard set
+    their own marker/env explicitly."""
+    monkeypatch.setenv("SKOS_STATE_DIR", str(tmp_path / "skos-state"))
+    monkeypatch.delenv("SKOS_COLDSTART_MARKER", raising=False)
+    monkeypatch.delenv("SKOS_ALLOW_EMPTY_STORE", raising=False)
+    yield
+
+
 @pytest.fixture
 def data_root(tmp_path, monkeypatch):
     """Point SK_DATA_ROOT at a throwaway dir for every test."""
