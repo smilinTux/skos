@@ -780,3 +780,53 @@ def schedule_install(
     else:
         typer.echo("# DRY RUN - resulting crontab (pass --apply to write):")
         typer.echo(new_text)
+
+
+# ── cold-start bootstrap: empty-store guard + node sentinel ───────────────────
+coldstart_app = typer.Typer(
+    help="Cold-start bootstrap: empty-store guard + node-initialized sentinel (restore before first run)"
+)
+app.add_typer(coldstart_app, name="coldstart")
+
+
+@coldstart_app.command("check")
+def coldstart_check(
+    json_out: bool = typer.Option(False, "--json", help="Machine-readable output"),
+):
+    """Report the cold-start decision for this node WITHOUT emitting anything.
+    Exits non-zero when the empty-store guard would trip (initialized node,
+    empty store) so a preflight step can gate services before they run."""
+    from skos import coldstart as _cs
+    r = _cs.evaluate()
+    if json_out:
+        import json as _json
+        typer.echo(_json.dumps(r.__dict__, indent=2))
+    else:
+        typer.echo(f"initialized  {r.initialized}")
+        typer.echo(f"store_empty  {r.store_empty} ({r.item_count} item(s))")
+        typer.echo(f"override     {r.override}")
+        typer.echo(f"store_dir    {r.store_dir}")
+        typer.echo(f"marker       {r.marker}")
+        typer.echo(f"verdict      {'GUARD WOULD TRIP' if r.would_trip else 'ok to emit'}")
+        typer.echo(f"reason       {r.reason}")
+    if r.would_trip:
+        raise typer.Exit(1)
+
+
+@coldstart_app.command("init")
+def coldstart_init(
+    force: bool = typer.Option(False, "--force", help="Stamp even if the store is currently empty"),
+):
+    """Stamp this node as initialized (run AFTER the store is restored/synced).
+    Refuses on an empty store unless --force, so you do not mark a node as
+    initialized before its data is in place (which would then trip the guard)."""
+    from skos import coldstart as _cs
+    if _cs.store_is_empty() and not force:
+        typer.echo(
+            "refusing: store is EMPTY. Restore/sync the GTD store first, then "
+            "`skos coldstart init` (or pass --force for a deliberately empty node).",
+            err=True,
+        )
+        raise typer.Exit(1)
+    p = _cs.mark_initialized()
+    typer.echo(f"node-initialized: {p}")
