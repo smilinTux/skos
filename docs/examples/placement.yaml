@@ -1,0 +1,52 @@
+# skos storage-placement policy (example)
+#
+# Decides WHERE an ingested blob lands: which store (-> node + tier + git-annex
+# remote). Loaded by skos.placement.load_policy(); the live default path is
+# <data-root>/config/placement.yaml (override with $SKOS_PLACEMENT_POLICY).
+#
+# Semantics: rules are evaluated top-to-bottom, FIRST match wins; if none match,
+# the `default` store is used. Each store maps 1:1 onto a git-annex remote, so a
+# store's preferred-content ("wanted") expression is derivable from the rules
+# targeting it (see `skos placement wanted <store>`). Live `git annex wanted`
+# wiring is a deferred follow-up; this policy + the catalog are the core.
+version: 1
+
+stores:
+  hot:
+    node: dot158          # .158 primary/dev, SSD
+    tier: ssd
+    annex: skdata-hot
+    description: low-latency working set
+  cold:
+    node: dot41           # .41 heavy-build mirror, HDD
+    tier: hdd
+    annex: skdata-cold
+    description: bulk / infrequently accessed
+  archive:
+    node: chiap08
+    tier: archive
+    annex: skdata-archive
+    description: write-once long-term retention
+
+rules:
+  # secrets + legal/medical corpus stay on the hot node (fast, close)
+  - name: sensitive-hot
+    match:
+      any_tags: [secret, legal, medical]
+    target: hot
+
+  # large video/media offloads to the cold bulk store
+  - name: large-media-cold
+    match:
+      mimetype: "video/*"
+      min_size: 104857600   # >= 100 MiB
+    target: cold
+
+  # anything explicitly tagged archive goes to long-term retention
+  - name: archive-tagged
+    match:
+      all_tags: [archive]
+    target: archive
+
+# fallthrough when no rule matches
+default: hot
