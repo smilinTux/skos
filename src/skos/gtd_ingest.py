@@ -190,8 +190,15 @@ def _seen_refs() -> set[tuple[str, str]]:
 def capture(c: GtdCapture) -> str | None:
     """The single sink. Dedupe by (source, source_ref); normalize; append to the
     unified store. Returns the new item id, or None if it was a duplicate.
-    The whole load-modify-save cycle runs under the store lock."""
+    The whole load-modify-save cycle runs under the store lock.
+
+    Before emitting, the cold-start guard refuses to write when this node is
+    initialized but the store is empty (cold-start-before-restore), so an
+    un-restored node cannot replicate empty state fleet-wide. See skos.coldstart.
+    """
+    from .coldstart import guard_store  # local import avoids an import cycle
     with _store_lock():
+        guard_store("capture")
         return _capture_locked(c)
 
 
@@ -250,8 +257,14 @@ def upsert(c: GtdCapture) -> tuple[str, str]:
     cross-file move is ordered write-then-delete: the destination is written
     first, so a crash in between duplicates rather than loses the item, and the
     next move self-heals the duplicate.
+
+    Like :func:`capture`, this passes through the cold-start guard first so an
+    un-restored node (initialized marker present, store empty) cannot emit and
+    replicate empty state. See skos.coldstart.
     """
+    from .coldstart import guard_store  # local import avoids an import cycle
     with _store_lock():
+        guard_store("upsert")
         return _upsert_locked(c)
 
 
