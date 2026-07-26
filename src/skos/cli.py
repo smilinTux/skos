@@ -830,3 +830,63 @@ def coldstart_init(
         raise typer.Exit(1)
     p = _cs.mark_initialized()
     typer.echo(f"node-initialized: {p}")
+
+
+# ── skos secrets: blank-machine secret provisioning + recovery (card d65ff0ca) ─
+secrets_app = typer.Typer(
+    help="Secret PLANE provisioning/recovery: read-only status + operator env scaffold "
+    "(the credentials the guarded services need on a blank machine)"
+)
+app.add_typer(secrets_app, name="secrets")
+
+
+@secrets_app.command("check")
+def secrets_check(
+    json_out: bool = typer.Option(False, "--json", help="Machine-readable output"),
+):
+    """Report which secrets are present vs missing on THIS machine, read-only.
+    Never prints a secret value. Exits non-zero when a REQUIRED plane credential
+    (vault master key, operator env file, gog keyring password) is missing, so a
+    blank-machine preflight can gate services. Recovery order is in
+    docs/runbooks/skos-secret-provisioning.md."""
+    from skos import secrets_check as _sc
+    report = _sc.check()
+    if json_out:
+        import json as _json
+        typer.echo(_json.dumps(report.as_dict(), indent=2))
+    else:
+        for s in report.statuses:
+            mark = "ok  " if s.present else ("MISS" if s.required else "opt ")
+            tag = "required" if s.required else "optional"
+            typer.echo(f"[{mark}] {s.name:<20} ({tag}, {s.kind})")
+            typer.echo(f"        where : {s.where}")
+            typer.echo(f"        source: {s.source}")
+            typer.echo(f"        status: {s.detail}")
+        typer.echo("")
+        if report.ok:
+            typer.echo("verdict  all required secrets present")
+        else:
+            miss = ", ".join(s.name for s in report.missing_required)
+            typer.echo(f"verdict  MISSING required: {miss}")
+    if not report.ok:
+        raise typer.Exit(1)
+
+
+@secrets_app.command("bootstrap")
+def secrets_bootstrap(
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing env file"),
+):
+    """Scaffold the operator env file with placeholder keys (mode 600), then print
+    the ordered recovery checklist. Writes ONLY placeholders, never a real secret,
+    and never clobbers an existing file unless --force."""
+    from skos import secrets_check as _sc
+    res = _sc.bootstrap(force=force)
+    typer.echo(f"env file  {res.path} ({'created' if res.created else 'unchanged'})")
+    typer.echo(f"          {res.detail}")
+    typer.echo("")
+    typer.echo("recovery order (see docs/runbooks/skos-secret-provisioning.md):")
+    typer.echo("  1. master.key  <- restore from escrow/skvault to $SK_DATA_ROOT/secrets/ (mode 600)")
+    typer.echo("  2. env file    <- fill placeholders above from skvault/escrow, then chmod 600")
+    typer.echo("  3. gog tokens  <- re-auth via the gmail-oauth skill (GOG_KEYRING_PASSWORD unlocks them)")
+    typer.echo("  4. capauth     <- provision identity via the capauth agent / skvault (optional)")
+    typer.echo("  5. verify      <- `skos secrets check` should exit 0")
