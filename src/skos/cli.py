@@ -571,12 +571,39 @@ def autopilot_run(
                                  help="Read-only: no coord/GTD writes, no merges, no DM"),
     canary: bool = typer.Option(False, "--canary"),
     task: str = typer.Option(None, "--task"),
+    tasks: str = typer.Option(None, "--tasks",
+                              help="Comma-separated card ids: build exactly this BATCH, "
+                                   "concurrently on the autoscaled pool"),
+    tag: str = typer.Option(None, "--tag",
+                            help="Build only unblocked cards carrying this tag "
+                                 "(e.g. autopilot, or a per-node assignment tag)"),
     harness: str = typer.Option("stub", "--harness"),
 ):
     """Execute one autopilot pass (v1: dry-run only, posture C)."""
     from skos.autopilot import orchestrator
-    out = orchestrator.run_cli(dry_run=dry_run, canary=canary, task=task, harness=harness)
+    batch = [t.strip() for t in tasks.split(",") if t.strip()] if tasks else None
+    out = orchestrator.run_cli(dry_run=dry_run, canary=canary, task=task,
+                               tasks=batch, tag=tag, harness=harness)
     typer.echo(out.get("disabled") or f"run {out.get('run_id', '?')} dry_run={dry_run}")
+
+
+@autopilot_app.command("cleanup")
+def autopilot_cleanup(
+    teardown: bool = typer.Option(False, "--teardown",
+                                  help="also remove the sandbox images (full reclaim; "
+                                       "next run rebuilds them). Default keeps them "
+                                       "(cold harness, ready to go)."),
+):
+    """Spin down: reclaim transient build artifacts (exited sandbox containers +
+    networks, dead worktree registrations). --teardown also deletes the sandbox
+    images. Running builds are never touched."""
+    from skharness.autocode import cleanup
+    from skharness.autocode.config import Config
+
+    cfg = Config.load()
+    repo_paths = [r.path for r in cfg.repo_map.values()]
+    out = cleanup.reclaim("teardown" if teardown else "cold", repo_paths=repo_paths)
+    typer.echo(out)
 
 
 @autopilot_app.command("answer")
