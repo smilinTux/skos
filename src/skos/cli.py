@@ -139,6 +139,22 @@ def gtd_upsert(
     typer.echo(f"{action} {iid}")
 
 
+@gtd_app.command("replay-errors")
+def gtd_replay_errors():
+    """Replay the sink's error-recovery queue: move each quarantined
+    ``*.corrupt-*`` store file into the ``.replay`` staging subdir for
+    reprocessing/forensics. Reversible (files are relocated, never deleted) and
+    low blast. This is what `skos operator act replay_errors` actuates."""
+    from skos.gtd_ingest import replay_quarantine
+    moved = replay_quarantine()
+    if not moved:
+        typer.echo("clean: no quarantined items to replay")
+        return
+    for name in moved:
+        typer.echo(f"  replayed: {name}")
+    typer.echo(f"({len(moved)} quarantined file(s) staged for reprocessing)")
+
+
 placement_app = typer.Typer(help="Storage-placement policy engine + blob catalog")
 app.add_typer(placement_app, name="placement")
 
@@ -1007,3 +1023,49 @@ def secrets_bootstrap(
     typer.echo("  3. gog tokens  <- re-auth via the gmail-oauth skill (GOG_KEYRING_PASSWORD unlocks them)")
     typer.echo("  4. capauth     <- provision identity via the capauth agent / skvault (optional)")
     typer.echo("  5. verify      <- `skos secrets check` should exit 0")
+
+
+operator_app = typer.Typer(
+    help="skos operator facet: the explain / observe / act contract (R2.12-style). "
+    "The canonical CLI that Atlas's skos adapter mirrors."
+)
+app.add_typer(operator_app, name="operator")
+
+
+@operator_app.command("explain")
+def operator_explain():
+    """Print the operator-facet contract (kinds/conditions/actions) as JSON."""
+    import json as _json
+    from skos.operator_probe import explain as _explain
+    typer.echo(_json.dumps(_explain(), indent=2))
+
+
+@operator_app.command("observe")
+def operator_observe():
+    """Print live operator conditions as JSON from real probes (each fails safe =
+    healthy when skos is unreachable). SchedulerAlive reads the cron run-ledger;
+    GtdSinkDraining reads the GTD sink's quarantine backlog."""
+    import json as _json
+    from skos.operator_probe import observe as _observe
+    typer.echo(_json.dumps(_observe(), indent=2))
+
+
+@operator_app.command("act")
+def operator_act(
+    action: str = typer.Argument(..., help="restart_service | replay_errors"),
+    unit: str = typer.Option("", "--unit", help="Override the systemd unit for restart_service."),
+):
+    """Perform a reversible standard action, or refuse.
+
+    ACTION is one of restart_service (systemctl --user restart the skscheduler
+    unit) or replay_errors (skos gtd replay-errors, draining the error-recovery
+    queue). Both are standard, reversible, low blast. An unknown action is
+    refused; any non-standard action escalates as MAJOR and never actuates."""
+    import json as _json
+    from skos.operator_probe import act as _act
+    try:
+        result = _act(action, unit=unit or None)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1)
+    typer.echo(_json.dumps(result, indent=2))

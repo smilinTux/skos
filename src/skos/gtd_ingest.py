@@ -130,6 +130,48 @@ def _quarantine(p: Path, exc: Exception) -> None:
             log.exception("gtd store: corrupt_alert_hook failed for %s", qpath)
 
 
+#: Subdir under the GTD store where a replay stages the quarantine backlog.
+REPLAY_DIRNAME = ".replay"
+
+
+def quarantine_backlog() -> list[Path]:
+    """The sink's error-recovery queue: the ``*.corrupt-*`` files preserved by
+    ``_quarantine`` when a store file failed to parse. Empty when the sink is
+    draining normally. Never raises: an unresolvable store reads as empty."""
+    try:
+        d = gtd_dir()
+    except Exception:
+        return []
+    try:
+        return sorted(p for p in d.iterdir() if p.is_file() and ".corrupt-" in p.name)
+    except OSError:
+        return []
+
+
+def replay_quarantine() -> list[str]:
+    """Replay the error-recovery queue: move each quarantined ``*.corrupt-*`` file
+    into the ``.replay`` staging subdir for reprocessing/forensics. Reversible
+    (files are relocated, never deleted) and low blast: it only clears the
+    backlog location, flipping GtdSinkDraining back green. Returns the moved
+    file names."""
+    backlog = quarantine_backlog()
+    if not backlog:
+        return []
+    dest = gtd_dir() / REPLAY_DIRNAME
+    dest.mkdir(parents=True, exist_ok=True)
+    moved: list[str] = []
+    for src in backlog:
+        target = dest / src.name
+        n = 0
+        while target.exists():  # pragma: no cover (sub-microsecond collision)
+            n += 1
+            target = dest / f"{src.name}.{n}"
+        os.replace(src, target)
+        moved.append(src.name)
+    log.info("gtd store: replayed %d quarantined file(s) to %s", len(moved), dest)
+    return moved
+
+
 def _load(fname: str) -> list[dict]:
     """Load a store list. A corrupt file (bad JSON, or JSON that is not a
     list) is quarantined loudly, never silently treated as empty. I/O errors
