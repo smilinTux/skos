@@ -44,7 +44,32 @@ def status(
     section: str = typer.Argument("all", help="email|cron|gtd|docs|corpus|calendar|all|report|corpus-check"),
     json_out: bool = typer.Option(False, "--json", help="Machine-readable output"),
 ):
-    """Realtime skos status across email, cron/scheduled work, docs, corpus, and GTD."""
+    """Realtime skos status across email, cron/scheduled work, docs, corpus, GTD.
+
+    When the section names a capability pack (e.g. `skos status skbrain`), report
+    that pack's per-step install health instead. A partial install reads as
+    unhealthy (the coupling rule: a pack is all-or-nothing).
+    """
+    from skos import packs as _packs
+
+    if _packs.is_pack(section):
+        st = _packs.status(section)
+        if json_out:
+            import json as _json
+
+            typer.echo(_json.dumps(st, indent=2, sort_keys=True))
+            return
+        health = "healthy" if st["healthy"] else "UNHEALTHY"
+        typer.echo(f"pack {st['id']}: {st['status']} ({health})")
+        for step in st.get("steps", []):
+            marker = {"done": "+", "pending": "~", "failed": "x", "skipped": "."}.get(
+                step.get("status"), "?"
+            )
+            typer.echo(f"  {marker} [{step.get('kind')}] {step.get('status')}: {step.get('note')}")
+        if not st["healthy"]:
+            raise typer.Exit(1)
+        return
+
     from skos import status as _status
     _status.run([section] + (["--json"] if json_out else []))
 
@@ -233,13 +258,116 @@ def store(
 
 
 @app.command()
-def install(app_yaml: str):
-    """Materialize an app via its packaging adapter and record it."""
-    d = load_descriptor(app_yaml)
+def install(
+    target: str = typer.Argument(
+        ..., help="A capability-pack name (e.g. skbrain) OR a path to an app.yaml descriptor."
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan without executing it."),
+    force: bool = typer.Option(
+        False, "--force", help="Install a pack even if its requires gate is unsatisfied."
+    ),
+    cap: list[str] = typer.Option(
+        [], "--cap", help="Assert a node capability is present for the pack requires gate (repeatable)."
+    ),
+):
+    """Install a capability pack (`skos install skbrain`) or materialize an app.yaml.
+
+    Packs are all-or-nothing: there is no step selection. A pack whose requires
+    gate is unsatisfied is refused (override with --force).
+    """
+    from skos import packs as _packs
+
+    if _packs.is_pack(target):
+        _install_pack(target, dry_run=dry_run, force=force, extra_caps=list(cap))
+        return
+
+    d = load_descriptor(target)
     adapter = OciAdapter()  # resolver picks adapter per profile in a later sub-project
     res = adapter.materialize(d)
     registry.record(d.name, adapter=res.adapter, ref=res.ref)
     typer.echo(f"installed {d.name} via {res.adapter} ({res.ref}) running={res.running}")
+
+
+@app.command()
+def remove(
+    pack: str = typer.Argument(..., help="Capability-pack name to remove (e.g. skbrain)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be removed."),
+    purge_db: bool = typer.Option(
+        False, "--purge-db", help="Also run the documented DROP SCHEMA ops rollback (destructive)."
+    ),
+):
+    """Reverse a capability pack's activation (`skos remove skbrain`).
+
+    Deletes the pack's fleet objects and signed manifest and marks it removed.
+    The ops schema/data, ITIL/CMDB file stores, content checkout, and skvault
+    entries are preserved unless --purge-db is given.
+    """
+    from skos import packs as _packs
+
+    if not _packs.is_pack(pack):
+        typer.echo(f"error: no built-in pack {pack!r}; known: {_packs.available()}", err=True)
+        raise typer.Exit(2)
+    report = _packs.remove_pack(pack, dry_run=dry_run, purge_db=purge_db)
+    typer.echo(report.summary())
+    for step in report.steps:
+        marker = "x" if step.status == "failed" else "-"
+        typer.echo(f"  {marker} [{step.kind}] {step.status}: {step.note}")
+    if not report.ok:
+        raise typer.Exit(1)
+
+
+def _pack_node_facts(extra_caps: list[str]):
+    """Gather NodeFacts for a pack requires gate from the local environment.
+
+    Package versions come from importlib.metadata; capabilities come from the
+    topology registry plus any asserted via --cap.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    from skos.packs.planner import NodeFacts
+
+    packages: dict[str, str] = {}
+    for pkg in ("skos", "skcapstone", "skmemory"):
+        try:
+            packages[pkg] = version(pkg)
+        except PackageNotFoundError:
+            continue
+    caps = set(registry.list_installed().keys()) | set(extra_caps)
+    return NodeFacts(capabilities=frozenset(caps), packages=packages)
+
+
+def _install_pack(pack: str, *, dry_run: bool, force: bool, extra_caps: list[str]):
+    """Plan + install a built-in pack, honoring --dry-run and --force."""
+    from skos import packs as _packs
+    from skos.packs.planner import NodeFacts, plan_pack
+
+    manifest, pack_dir = _packs.load_pack(pack)
+
+    if force:
+        # A synthetic facts set that satisfies the whole requires gate.
+        facts = NodeFacts(
+            capabilities=frozenset(manifest.requires.capabilities) | set(extra_caps),
+            packages={pkg: "9999" for pkg in manifest.requires.packages},
+        )
+    else:
+        facts = _pack_node_facts(extra_caps)
+
+    if dry_run:
+        typer.echo(plan_pack(manifest, facts).dry_run())
+        return
+
+    report = _packs.install(manifest, pack_dir, facts=facts)
+    typer.echo(report.summary())
+    if report.blocked:
+        typer.echo("  BLOCKED - requires not satisfied:")
+        for reason in report.gate_reasons:
+            typer.echo(f"    - {reason}")
+        typer.echo("  (re-run with --force, or --cap <name> to assert a capability)")
+    for step in report.steps:
+        marker = {"done": "+", "pending": "~", "failed": "x", "skipped": "."}.get(step.status, "?")
+        typer.echo(f"  {marker} [{step.kind}] {step.status}: {step.note}")
+    if not report.ok:
+        raise typer.Exit(1)
 
 
 @app.command()
