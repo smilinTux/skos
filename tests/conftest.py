@@ -34,6 +34,35 @@ def _isolate_coldstart_state(tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_fleet(monkeypatch, tmp_path):
+    """Point the fleet dispatch gate at an empty tree so orchestrator tests
+    never consult the live ``~/.skcapstone/fleet``.
+
+    ``skharness.autocode.orchestrator.run_once`` partitions selected tasks
+    local-vs-off-node through ``fleet_dispatch`` (which reads the skcapstone
+    fleet store when skcapstone is importable). Without isolation the suite
+    reads the real fleet on the dev box, so tasks get partitioned off-node (or
+    the placement write trips skcapstone's name validation) and never run,
+    turning valid orchestrator tests red. An empty root keeps the gate inert
+    (no admitted nodes) so every selected task runs locally, matching CI where
+    skcapstone is absent. Mirrors skharness's own conftest."""
+    monkeypatch.setenv("SKFLEET_ROOT", str(tmp_path / "fleet-hermetic"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_health(tmp_path_factory, monkeypatch):
+    """Point harness health telemetry at a throwaway file for EVERY test.
+
+    Adapter/engineering tests exercise ``_run``/``assess`` which record health
+    events; without isolation those fake events land in the real
+    ``~/.skcapstone`` health log and skew the adaptive retry budget (which reads
+    that log) in production. Isolation keeps telemetry a pure observation of
+    real runs. Mirrors skharness's own conftest."""
+    hp = tmp_path_factory.mktemp("health") / "health.jsonl"
+    monkeypatch.setenv("SKHARNESS_HEALTH_PATH", str(hp))
+
+
 @pytest.fixture
 def data_root(tmp_path, monkeypatch):
     """Point SK_DATA_ROOT at a throwaway dir for every test."""

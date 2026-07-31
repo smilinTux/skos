@@ -94,7 +94,10 @@ def test_claim_calls_board_then_journal(mocker, cfg):
     manager = mocker.Mock()
     manager.attach_mock(board.claim_task, "claim")
     manager.attach_mock(journal.record_claim, "record")
-    ex = EngineeringExecutor(cfg, board=board, journal=journal)
+    # Pin the agent identity: EngineeringExecutor otherwise claims under this
+    # node's scoped worker name (autopilot-node-<host>), which is non-deterministic
+    # across hosts/CI. The claim contract itself is unchanged.
+    ex = EngineeringExecutor(cfg, board=board, journal=journal, agent_name="autopilot")
     item = WorkItem(kind="engineering", ref="t1", source="coord", repo=None,
                     payload={"tags": ["repo:skrender"]})
     ex.claim(item)
@@ -111,7 +114,12 @@ def test_make_worktree_git_argv(mocker, cfg):
     item = WorkItem(kind="engineering", ref="t1", source="coord", repo=None, payload={})
     spec = cfg.repo_map["skrender"]
     wt = ex.make_worktree(item, spec)
-    argv = run.call_args_list[0].args[0]
+    # make_worktree now self-heals first (worktree remove --force / prune / branch -D
+    # to clear stale local state so retries are idempotent), so the `worktree add`
+    # is no longer the FIRST subprocess call. Find it among all calls.
+    adds = [c.args[0] for c in run.call_args_list
+            if c.args[0][3:5] == ["worktree", "add"]]
+    argv = adds[0]
     assert argv[:6] == ["git", "-C", "/repos/skrender", "worktree", "add", "-b"]
     assert argv[6] == "autopilot/t1"          # new branch name
     assert argv[7] == wt                       # worktree path
@@ -152,7 +160,8 @@ def test_strip_promise_removes_tag_and_trims():
 
 
 def _run_ex(mocker, cfg, grades, ci_status="green", cov=0.95):
-    ex = EngineeringExecutor(cfg, board=mocker.Mock(), journal=mocker.Mock())
+    ex = EngineeringExecutor(cfg, board=mocker.Mock(), journal=mocker.Mock(),
+                             agent_name="autopilot")
     mocker.patch.object(ex, "make_worktree", return_value="/wt/t1")
     mocker.patch.object(ex, "prune_worktree")
     mocker.patch.object(ex, "_diff", return_value="DIFF")
@@ -240,15 +249,17 @@ def test_twin_gate_blocks_when_coverage_under_min(mocker, cfg):
 
 def _final_ex(mocker, cfg, repo_name, ci_status="green"):
     ex = EngineeringExecutor(cfg, board=mocker.Mock(), journal=mocker.Mock(),
-                             digest=mocker.Mock())
+                             digest=mocker.Mock(), agent_name="autopilot")
     ex.journal.worktree_for.return_value = "/wt/t1"
     mocker.patch.object(ex, "_head_sha", return_value="sha1")
     mocker.patch.object(ex, "_commit_and_push")     # git commit+push of harness edits
     mocker.patch.object(ex, "prune_worktree")
-    mocker.patch.object(ex, "_merge", return_value="mergesha")
+    # GitHub-safe auto-merge: finalize now polls the PR's real GitHub checks
+    # (_github_checks_verdict) and merges ON GitHub (_gh_merge, i.e.
+    # `gh pr merge`), replacing the old local _merge/external_ci_verdict path.
+    mocker.patch.object(ex, "_gh_merge", return_value=True)
+    mocker.patch.object(ex, "_github_checks_verdict", return_value=ci_status)
     mocker.patch.object(ex, "_open_pr", return_value="https://gh/pr/1")
-    # See the note in _run_ex above: patch the implementation module, not the shim.
-    mocker.patch("skharness.autocode.engineering.external_ci_verdict", return_value=ci_status)
     item = WorkItem(kind="engineering", ref="t1", source="coord", repo=None,
                     payload={"tags": [f"repo:{repo_name}"], "title": "t"})
     return ex, item
@@ -261,7 +272,7 @@ def test_finalize_automerges_when_whitelisted_and_green(mocker):
     cfg = _t.SimpleNamespace(repo_map={"skrender": spec}, automerge_repos=["skrender"])
     ex, item = _final_ex(mocker, cfg, "skrender", ci_status="green")
     ex.finalize(item, GateResult(score=5, passed=True, notes="", artifact="pr"))
-    ex._merge.assert_called_once()
+    ex._gh_merge.assert_called_once()               # merged ON GitHub, not locally
     ex.board.complete_task.assert_called_once_with("autopilot", "t1")
     ex.board._write_task_raw.assert_called_once()   # records meta.autopilot.merge
     ex.digest.queue_decision.assert_not_called()
@@ -274,7 +285,8 @@ def test_finalize_pr_only_when_not_whitelisted(mocker):
     cfg = _t.SimpleNamespace(repo_map={"skrender": spec}, automerge_repos=[])  # not whitelisted
     ex, item = _final_ex(mocker, cfg, "skrender", ci_status="green")
     ex.finalize(item, GateResult(score=5, passed=True, notes="", artifact="pr"))
-    ex._merge.assert_not_called()
+    ex._gh_merge.assert_not_called()
+    ex._github_checks_verdict.assert_not_called()   # no CI poll when not whitelisted
     ex.board.complete_task.assert_not_called()      # left claimed
     ex._commit_and_push.assert_called_once()        # harness edits committed + pushed
     ex._open_pr.assert_called_once()
@@ -288,7 +300,7 @@ def test_finalize_pr_only_when_ci_red(mocker):
     cfg = _t.SimpleNamespace(repo_map={"skrender": spec}, automerge_repos=["skrender"])
     ex, item = _final_ex(mocker, cfg, "skrender", ci_status="red")
     ex.finalize(item, GateResult(score=5, passed=True, notes="", artifact="pr"))
-    ex._merge.assert_not_called()
+    ex._gh_merge.assert_not_called()                # never merge a red PR
     ex._open_pr.assert_called_once()
 
 

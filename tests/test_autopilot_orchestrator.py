@@ -65,7 +65,11 @@ def test_phase0_reclaims_then_computes_unblocked(tmp_path):
     harness.assess.return_value = Verdict(verdict="valid", reason="")
     cands, decisions = orch.phase0_assess(board=board, harness=harness, tasks_dir=tmp_path,
                                           caps=Caps(), run_id="r1")
-    board.release_stale_claims.assert_called_once_with("autopilot", 3600)
+    # phase0 now reclaims stale claims under BOTH the legacy "autopilot" agent
+    # and this node's scoped worker identity (autopilot-node-<host>), so a task
+    # claimed under either name is released. The legacy name must still be swept.
+    calls = [c.args for c in board.release_stale_claims.call_args_list]
+    assert ("autopilot", 3600) in calls          # legacy name still reclaimed
     assert [c.ref for c in cands] == ["t-1"]          # only unblocked assessed
     assert decisions == []
 
