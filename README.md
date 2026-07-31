@@ -67,6 +67,30 @@ flowchart TD
 | **Brain** | self-building entity-graph knowledge ontology (`skos brain init`, EntityNode schema) |
 | **Surfaces** | runtime adapters (obsidian / claude-code / codex / n8n) that expose the brain (`skos surface …`) |
 | **Unified GTD (`gtd-ingest`)** | one GTD, every input an adapter: email/ITIL/cron/calendar/telegram → one `capture()` sink; daily digests + `skos status`/`skos ingest` |
+| **Capability packs (`skos install <pack>`)** | pluggable bolt-ons: one signed `skworld.module.json` (schema v1.2 `install` facet) activates a whole capability in one command, reversibly. First pack: **skbrain** (ITIL + CMDB + runbooks, all-or-nothing) |
+
+## Capability packs (`skos install skbrain`)
+
+A capability pack is a signed module manifest whose `install` facet declares an
+ordered, typed, all-or-nothing install (schema v1.2). The skos planner
+(`skos.packs.planner`, PURE) resolves the manifest into a validated, gated plan of
+typed steps (sql_migration, db_roles, content_repo, seed, fleet_objects, doctor);
+the provisioner (`skos.packs.provisioner`) executes it idempotently and fail-safe
+through an injected side-effect boundary, records per-step state in
+`registry/packs.json`, and emits the signed manifest into the shell/Atlas modules
+dir.
+
+```sh
+skos install skbrain            # plan (gate on requires) + execute, all-or-nothing
+skos install skbrain --dry-run  # show the ordered plan, touch nothing
+skos status skbrain             # per-step health (a partial install reads UNHEALTHY)
+skos remove skbrain             # reverse activation (fleet objects + manifest); --purge-db for the schema rollback
+```
+
+Coupling is by construction: there is no `--only` and no sub-selection. The
+`sql_migration` and `db_roles` steps delegate to the shipped skmemory runners
+(`skmemory pg migrate` / `skmemory pg roles`), so the ops DDL and the role SQL
+live in exactly one place.
 
 ## Documentation
 

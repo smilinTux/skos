@@ -1,0 +1,9 @@
+{
+  "kind": "CronJob",
+  "name": "skbrain-cmdb-reconcile",
+  "schedule": "17 */3 * * *",
+  "command": ["sk-cron-run", "skcapstone", "cmdb", "reconcile"],
+  "freezeAware": true,
+  "writer": "operator",
+  "note": "Reconciles the CMDB inventory baseline against live fleet state. Installed by `skos install skbrain`."
+}
