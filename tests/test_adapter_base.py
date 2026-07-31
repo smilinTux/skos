@@ -5,7 +5,7 @@ from skos.autopilot.types import AssessBrief, RepoSpec, TaskBrief
 
 class _Fake(BaseCliAdapter):
     name = "fake"
-    def _argv(self, prompt): return ["fake", prompt]
+    def _argv(self, prompt, light=False): return ["fake", prompt]
     def _image(self): return "sandbox-fake:1"
     def _auth_mounts(self): return [AuthMount("/h/.cred", "/c/.cred")]
     def _auth_env(self): return {"BASE_URL": "http://gw.local"}

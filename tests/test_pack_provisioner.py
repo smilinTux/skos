@@ -14,7 +14,7 @@ import pytest
 from skos.packs import state as _state
 from skos.packs.effects import DONE, FAILED, PENDING, SKIPPED, StepResult
 from skos.packs.loader import load_pack
-from skos.packs.model import PackManifest, PackStep, Requires
+from skos.packs.model import PackManifest
 from skos.packs.planner import NodeFacts
 from skos.packs.provisioner import install, remove, status
 

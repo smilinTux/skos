@@ -1,9 +1,31 @@
 import importlib.util
+from pathlib import Path
 
 import pytest
 
 
 _HAVE_SKCAPSTONE = importlib.util.find_spec("skcapstone") is not None
+_HAVE_SKHARNESS = importlib.util.find_spec("skharness") is not None
+
+
+# skos.autopilot is a thin re-export shim over the OPTIONAL `skharness` package
+# (the shared autocode engine, installed via the `autopilot` extra). skharness is
+# a private sibling monorepo package that is NOT on PyPI, so a base install (and
+# CI) does not have it. Every module that imports skos.autopilot / skharness
+# therefore fails at IMPORT time when skharness is absent, which is a COLLECTION
+# error pytest cannot turn into a clean skip after the fact. So when skharness is
+# missing we ignore exactly those test modules at collection: identify them by
+# scanning their source for the import (precise -- no over-catch of the unrelated
+# test_adapter.py / test_adapters.py, and self-maintaining as new autopilot tests
+# land). When skharness IS present (dev boxes, and the CI `test (autopilot extra)`
+# job), nothing is ignored and the full suite runs.
+if not _HAVE_SKHARNESS:
+    _needs_skharness = ("skos.autopilot", "import skharness", "from skharness")
+    collect_ignore = sorted(
+        p.name
+        for p in Path(__file__).parent.glob("test_*.py")
+        if any(tok in p.read_text(encoding="utf-8") for tok in _needs_skharness)
+    )
 
 
 def pytest_collection_modifyitems(config, items):
@@ -32,6 +54,35 @@ def _isolate_coldstart_state(tmp_path, monkeypatch):
     monkeypatch.delenv("SKOS_COLDSTART_MARKER", raising=False)
     monkeypatch.delenv("SKOS_ALLOW_EMPTY_STORE", raising=False)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_fleet(monkeypatch, tmp_path):
+    """Point the fleet dispatch gate at an empty tree so orchestrator tests
+    never consult the live ``~/.skcapstone/fleet``.
+
+    ``skharness.autocode.orchestrator.run_once`` partitions selected tasks
+    local-vs-off-node through ``fleet_dispatch`` (which reads the skcapstone
+    fleet store when skcapstone is importable). Without isolation the suite
+    reads the real fleet on the dev box, so tasks get partitioned off-node (or
+    the placement write trips skcapstone's name validation) and never run,
+    turning valid orchestrator tests red. An empty root keeps the gate inert
+    (no admitted nodes) so every selected task runs locally, matching CI where
+    skcapstone is absent. Mirrors skharness's own conftest."""
+    monkeypatch.setenv("SKFLEET_ROOT", str(tmp_path / "fleet-hermetic"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_health(tmp_path_factory, monkeypatch):
+    """Point harness health telemetry at a throwaway file for EVERY test.
+
+    Adapter/engineering tests exercise ``_run``/``assess`` which record health
+    events; without isolation those fake events land in the real
+    ``~/.skcapstone`` health log and skew the adaptive retry budget (which reads
+    that log) in production. Isolation keeps telemetry a pure observation of
+    real runs. Mirrors skharness's own conftest."""
+    hp = tmp_path_factory.mktemp("health") / "health.jsonl"
+    monkeypatch.setenv("SKHARNESS_HEALTH_PATH", str(hp))
 
 
 @pytest.fixture
