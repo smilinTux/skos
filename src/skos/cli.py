@@ -4,6 +4,7 @@ from __future__ import annotations
 import typer
 
 from skos import paths, profile as _profile_module, registry
+from skos import skworld_manifest as _skworld_manifest
 from skos.capability import Catalog
 from skos.descriptor import load_descriptor
 from skos.packaging.oci import OciAdapter
@@ -1069,3 +1070,64 @@ def operator_act(
         typer.echo(str(exc), err=True)
         raise typer.Exit(1)
     typer.echo(_json.dumps(result, indent=2))
+
+
+manifest_app = typer.Typer(
+    help="skos SKWorld module manifest: emit the static file the umbrella shell "
+    "registry reads (spec 5.3 local-file location)."
+)
+app.add_typer(manifest_app, name="manifest")
+
+
+@manifest_app.command("emit")
+def manifest_emit(
+    base_url: str = typer.Option(
+        _skworld_manifest.DEFAULT_BASE_URL,
+        "--base-url",
+        help="Serving origin baked into the manifest's origin-relative URLs. "
+        "skos has no web server yet, so the shell interim-routes this entry to the "
+        "native skos screens (spec 4.4); pass the real origin once skos' web UI lands.",
+    ),
+    out: str = typer.Option(
+        "", "--out", help="Output path (default: the shell well-known location)."
+    ),
+    show: bool = typer.Option(
+        False, "--print", help="Print the manifest JSON to stdout; write nothing."
+    ),
+):
+    """Emit skos' skworld.module.json as a deterministic static file for the umbrella
+    shell registry.
+
+    skos is a CLI + scheduler with no HTTP surface, so it publishes its manifest as a
+    signed LOCAL FILE (umbrella spec 5.3 "local file" location) rather than serving
+    /.well-known/skworld-module.json from a daemon. The emitted bytes are deterministic
+    (sorted keys) so re-emitting an unchanged manifest is a no-op diff and its capauth
+    signature is reproducible.
+
+    After emit: attach a detached capauth signature and register the file path in
+    ~/.skcapstone/shell/modules.json. The shell refuses any manifest whose signature
+    does not verify (spec 5.3). See docs/runbooks/skos-manifest.md.
+    """
+    if show:
+        typer.echo(_skworld_manifest.render_manifest_json(base_url), nl=False)
+        return
+    path = _skworld_manifest.emit_manifest_file(base_url, out or None)
+    typer.echo(f"manifest  {path}")
+    typer.echo(
+        f"          schemaVersion {_skworld_manifest.SCHEMA_VERSION}, id=skos, "
+        f"base_url={base_url}"
+    )
+    typer.echo("")
+    typer.echo("next (shell registration, see docs/runbooks/skos-manifest.md):")
+    typer.echo(
+        f"  1. sign     <- attach a detached capauth signature ({path.name}.sig) "
+        "with the operator key"
+    )
+    typer.echo(
+        "  2. register <- add this file path to ~/.skcapstone/shell/modules.json "
+        "(local-file entry) + the enable set"
+    )
+    typer.echo(
+        "  3. verify   <- the shell refuses any manifest whose signature does not "
+        "verify (spec 5.3)"
+    )
