@@ -1,9 +1,31 @@
 import importlib.util
+from pathlib import Path
 
 import pytest
 
 
 _HAVE_SKCAPSTONE = importlib.util.find_spec("skcapstone") is not None
+_HAVE_SKHARNESS = importlib.util.find_spec("skharness") is not None
+
+
+# skos.autopilot is a thin re-export shim over the OPTIONAL `skharness` package
+# (the shared autocode engine, installed via the `autopilot` extra). skharness is
+# a private sibling monorepo package that is NOT on PyPI, so a base install (and
+# CI) does not have it. Every module that imports skos.autopilot / skharness
+# therefore fails at IMPORT time when skharness is absent, which is a COLLECTION
+# error pytest cannot turn into a clean skip after the fact. So when skharness is
+# missing we ignore exactly those test modules at collection: identify them by
+# scanning their source for the import (precise -- no over-catch of the unrelated
+# test_adapter.py / test_adapters.py, and self-maintaining as new autopilot tests
+# land). When skharness IS present (dev boxes, and the CI `test (autopilot extra)`
+# job), nothing is ignored and the full suite runs.
+if not _HAVE_SKHARNESS:
+    _needs_skharness = ("skos.autopilot", "import skharness", "from skharness")
+    collect_ignore = sorted(
+        p.name
+        for p in Path(__file__).parent.glob("test_*.py")
+        if any(tok in p.read_text(encoding="utf-8") for tok in _needs_skharness)
+    )
 
 
 def pytest_collection_modifyitems(config, items):

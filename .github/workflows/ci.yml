@@ -37,12 +37,66 @@ jobs:
       - name: Install package + dev deps
         run: python -m pip install --upgrade pip && pip install -e ".[dev]"
 
-      # Tests marked `needs_skcapstone` self-skip when the optional sibling
-      # skcapstone package is absent (it is not a skos dependency and is not
-      # installed here); see tests/conftest.py. Coverage summary prints to the
-      # job log via --cov-report=term-missing.
+      # Two optional siblings are intentionally NOT installed here, so this base
+      # job proves the OOTB story: `pip install skos[dev]` resolves with only
+      # PyPI packages.
+      #   - skcapstone: tests marked `needs_skcapstone` self-skip when absent.
+      #   - skharness (autopilot/autocode engine, private sibling, not on PyPI):
+      #     the autopilot extra is not installed, so every skos.autopilot test
+      #     module is ignored at collection (see tests/conftest.py). Those tests
+      #     run in the `test (autopilot extra)` job below when skharness is
+      #     available. Coverage summary prints via --cov-report=term-missing.
       - name: Run tests (with coverage)
         run: pytest -q --cov=skos --cov-report=term-missing --cov-report=xml
+
+  test-autopilot:
+    name: test (autopilot extra)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # skharness is a PRIVATE sibling repo (not on PyPI), so it can only be
+      # installed with a token that can read smilinTux/skharness. When the
+      # SKHARNESS_TOKEN secret is configured we install it + the autopilot extra
+      # and run the FULL suite (skharness present -> nothing is collection-ignored,
+      # so every autopilot/adapter/sandbox test actually runs). When the secret is
+      # absent (e.g. forks, or before it is provisioned) this job no-ops GREEN:
+      # the autopilot tests are already exercised locally and covered as skips by
+      # the base `test` job, so a missing secret must not turn CI red.
+      - name: Gate on skharness access
+        id: gate
+        env:
+          SKHARNESS_TOKEN: ${{ secrets.SKHARNESS_TOKEN }}
+        run: |
+          if [ -n "$SKHARNESS_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=autopilot tests skipped::SKHARNESS_TOKEN not set; skharness is a private sibling not on PyPI. The autopilot suite runs here only when the secret is provisioned; the base 'test' job already covers skos with those tests skipped."
+          fi
+
+      # The autopilot extra pulls skharness from its private git URL. Rewrite the
+      # github.com https origin to carry the token so pip's git clone can read the
+      # private repo, then install the extra normally.
+      - name: Install skos + autopilot extra (skharness from private git)
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          SKHARNESS_TOKEN: ${{ secrets.SKHARNESS_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${SKHARNESS_TOKEN}@github.com/".insteadOf "https://github.com/"
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,autopilot]"
+
+      - name: Run full suite (autopilot tests included)
+        if: steps.gate.outputs.enabled == 'true'
+        run: pytest -q --cov=skos --cov-report=term-missing
 
   lint:
     name: lint (ruff)
