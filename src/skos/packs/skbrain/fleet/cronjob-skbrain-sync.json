@@ -1,0 +1,9 @@
+{
+  "kind": "CronJob",
+  "name": "skbrain-sync",
+  "schedule": "*/30 * * * *",
+  "command": ["sk-cron-run", "skbrain", "sync"],
+  "freezeAware": true,
+  "writer": "operator",
+  "note": "Projects skbrain-ops canon content into ops.wiki_chunks + the ops_brain graph. Installed by `skos install skbrain`."
+}
