@@ -1131,3 +1131,46 @@ def manifest_emit(
         "  3. verify   <- the shell refuses any manifest whose signature does not "
         "verify (spec 5.3)"
     )
+
+
+@app.command()
+def serve(
+    port: int = typer.Option(
+        None,
+        "--port",
+        help="TCP port to bind (default: $SKOS_WEB_PORT or 7781).",
+    ),
+    host: str = typer.Option(
+        None,
+        "--host",
+        help="Bind address (default: $SKOS_WEB_HOST or 127.0.0.1, loopback only).",
+    ),
+    open_browser: bool = typer.Option(
+        False, "--open", help="Open the status page in a browser on start."
+    ),
+):
+    """Run skos' OPTIONAL, READ-ONLY web surface.
+
+    Serves the SKWorld module manifest live at ``/.well-known/skworld-module.json``
+    (origin-relative, no host/port drift) and a read-only Grade B status pane at
+    ``/`` (aka ``/app``) that the umbrella shell embeds: scheduler + GTD-sink
+    health, unified-GTD counts, and recent scheduled-job runs. There are no
+    actions and no writes.
+
+    Binds loopback (127.0.0.1) by default; never a public wildcard. Requires the
+    optional ``web`` extra (``pip install 'skos[web]'``). The CLI and scheduler
+    never need it.
+    """
+    try:
+        from skos import webui
+    except Exception as exc:  # pragma: no cover - import-guard message
+        raise typer.BadParameter(
+            f"skos web surface unavailable ({exc}). Install the optional extra: "
+            "pip install 'skos[web]'"
+        )
+    bind_host = host or webui.DEFAULT_HOST
+    bind_port = port if port is not None else webui.DEFAULT_PORT
+    typer.echo(f"skos web surface (read-only) on http://{bind_host}:{bind_port}")
+    typer.echo(f"  manifest  http://{bind_host}:{bind_port}/.well-known/skworld-module.json")
+    typer.echo(f"  status    http://{bind_host}:{bind_port}/")
+    webui.run(host=bind_host, port=bind_port, open_browser=open_browser)
