@@ -1,5 +1,8 @@
 [project]
-name = "skos"
+# PyPI distribution name is `skos-sovereign` (the bare name `skos` is on PyPI's
+# prohibited-names list). The import package is still `skos` (unchanged), so
+# `pip install skos-sovereign` then `import skos`. Mirrors `skchat-sovereign`.
+name = "skos-sovereign"
 version = "0.2.2"
 description = "skos: sovereign agent OS, filesystem & packaging foundation"
 requires-python = ">=3.12"
@@ -30,16 +33,13 @@ dev = ["pytest>=8", "pytest-mock>=3.14", "pytest-cov>=5", "fastapi>=0.110", "htt
 # Autopilot / autocode engine. skos.autopilot is a thin re-export shim over
 # skharness.autocode (the shared execution engine, extracted per
 # docs/superpowers/specs/2026-07-25-autocode-engine-extraction-architecture.md
-# Phase B). skharness is a SIBLING repo that is NOT published to PyPI, so it must
-# stay OPTIONAL: a base `pip install skos` (and the whole non-autopilot CLI) must
-# resolve with PyPI packages only. This extra pulls it straight from git so
-# `pip install skos[autopilot]` is self-contained. The repo is private, so the
-# install environment must be able to read github.com/smilinTux/skharness (a git
-# credential / token; CI does this in the `test (autopilot extra)` job). Its
-# default branch is `master` (no released tag yet). A dev box typically installs
-# an editable sibling checkout instead. The skharness-dependent tests self-skip
-# at collection when skharness is absent (see tests/conftest.py).
-autopilot = ["skharness @ git+https://github.com/smilinTux/skharness.git@master"]
+# Phase B). skharness is a SIBLING library, now PUBLISHED to PyPI, so it stays
+# OPTIONAL: a base `pip install skos` (and the whole non-autopilot CLI) resolves
+# with core deps only, while `pip install skos[autopilot]` pulls skharness from
+# PyPI like any other dependency (no git credential, no direct reference). The
+# skharness-dependent tests self-skip at collection when skharness is absent
+# (see tests/conftest.py).
+autopilot = ["skharness>=0.3.0"]
 # Optional READ-ONLY web surface (`skos serve`): serves the live SKWorld module
 # manifest + a Grade B status pane the umbrella shell embeds. Kept optional so
 # the CLI/scheduler never depend on a web stack.
@@ -48,13 +48,6 @@ web = ["fastapi>=0.110", "uvicorn>=0.27"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-# The `autopilot` optional extra pulls skharness straight from git (it is not on
-# PyPI), which is a PEP 508 direct reference. hatchling refuses to build metadata
-# containing a direct reference unless this is explicitly allowed. skos is not
-# published to PyPI, so a direct-ref extra is acceptable here.
-allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 # Explicit so the built-in capability-pack assets (skos/packs/*/skworld.module.json
