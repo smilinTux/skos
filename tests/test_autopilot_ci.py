@@ -44,10 +44,20 @@ def test_gha_unknown_conclusion_never_green(mocker):
     assert ci.external_ci_verdict(_gha_repo(), "b", "abc123") == "red"
 
 
-def test_gha_poll_timeout_is_red_not_green(mocker):
+def test_gha_no_run_ever_appears_returns_pending_not_deadlock(mocker):
+    # finalize-stall fix: pre-push the branch has no runs, so return `pending` fast
+    # (first-appearance grace) instead of polling to timeout (the deadlock).
     mocker.patch("skos.autopilot.ci.time.sleep")
-    # sha never appears -> stays pending; monotonic jumps past the deadline
     mocker.patch("skos.autopilot.ci.subprocess.run", return_value=_runs_json())
+    mocker.patch("skos.autopilot.ci.time.monotonic", side_effect=[0.0, 0.0, 100.0])
+    assert ci.external_ci_verdict(_gha_repo(ci_poll_timeout=1200), "b", "abc123") == "pending"
+
+
+def test_gha_run_exists_but_never_completes_is_red(mocker):
+    # a run DID appear but never completes -> fail-safe red (not the fast pending).
+    mocker.patch("skos.autopilot.ci.time.sleep")
+    mocker.patch("skos.autopilot.ci.subprocess.run", return_value=_runs_json(
+        {"headSha": "abc123", "status": "in_progress", "conclusion": None}))
     mocker.patch("skos.autopilot.ci.time.monotonic", side_effect=[0.0, 0.0, 9999.0])
     assert ci.external_ci_verdict(_gha_repo(ci_poll_timeout=1), "b", "abc123") == "red"
 
