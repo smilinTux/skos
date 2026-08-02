@@ -732,6 +732,27 @@ def autopilot_run(
     typer.echo(out.get("disabled") or f"run {out.get('run_id', '?')} dry_run={dry_run}")
 
 
+@autopilot_app.command("triage")
+def autopilot_triage(
+    tag: str = typer.Option(None, "--tag", help="Triage only cards carrying this tag"),
+    tasks: str = typer.Option(None, "--tasks", help="Triage exactly this BATCH of card ids"),
+    dry_run: bool = typer.Option(False, "--dry-run/--no-dry-run",
+                                 help="Preview only: assess but write no refine/close/split"),
+    harness: str = typer.Option("stub", "--harness"),
+):
+    """Board-hygiene sweep: assess -> refine stale / close obsolete / DECOMPOSE
+    vague cards into buildable subtasks / queue human decisions, then STOP before
+    building anything. Cheap; schedule it ahead of the daily build run so the build
+    only ever sees well-scoped, buildable cards. Never spends a build sandbox."""
+    from skos.autopilot import orchestrator
+    batch = [t.strip() for t in tasks.split(",") if t.strip()] if tasks else None
+    out = orchestrator.run_cli(dry_run=dry_run, tasks=batch, tag=tag, harness=harness,
+                               triage_only=True)
+    typer.echo(out.get("disabled")
+               or f"triage {out.get('run_id', '?')}: {out.get('candidates', 0)} buildable, "
+                  f"{out.get('decisions', 0)} decisions queued (dry_run={dry_run})")
+
+
 @autopilot_app.command("cleanup")
 def autopilot_cleanup(
     teardown: bool = typer.Option(False, "--teardown",

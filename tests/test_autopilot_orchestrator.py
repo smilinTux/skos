@@ -108,12 +108,15 @@ def test_phase0_dry_run_writes_nothing(tmp_path):
 
 def test_deepdive_spawn_caps_and_tags(tmp_path):
     board = MagicMock()
-    board.create_task.side_effect = ["n1", "n2"]
     props = [{"title": "a"}, {"title": "b"}, {"title": "c"}]
     made = orch.deepdive_spawn(board, props, caps=Caps(new_tasks_per_run=2), run_id="r1")
-    assert made == ["n1", "n2"]                        # capped at 2
-    for call in board.create_task.call_args_list:
-        assert "autopilot-untriaged" in call.kwargs["tags"]
+    assert len(made) == 2                               # capped at 2
+    calls = board.create_task.call_args_list
+    assert len(calls) == 2
+    for call in calls:
+        task = call.args[0]                            # create_task(Task), not kwargs
+        assert "autopilot-untriaged" in task.tags
+        assert task.id in made
 
 
 def test_deepdive_spawn_dry_run_no_writes():

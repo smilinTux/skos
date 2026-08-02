@@ -251,6 +251,9 @@ def _final_ex(mocker, cfg, repo_name, ci_status="green"):
     ex = EngineeringExecutor(cfg, board=mocker.Mock(), journal=mocker.Mock(),
                              digest=mocker.Mock(), agent_name="autopilot")
     ex.journal.worktree_for.return_value = "/wt/t1"
+    # finalize guards that the worktree exists on disk; these use a fake path, so
+    # treat it as present (the real code runs in skharness.autocode.engineering).
+    mocker.patch("skharness.autocode.engineering.os.path.isdir", return_value=True)
     mocker.patch.object(ex, "_head_sha", return_value="sha1")
     mocker.patch.object(ex, "_commit_and_push")     # git commit+push of harness edits
     mocker.patch.object(ex, "prune_worktree")
