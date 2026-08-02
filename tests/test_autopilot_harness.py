@@ -16,6 +16,9 @@ class DummyAdapter:
     def assess(self, brief):
         return Verdict(verdict="valid", reason="ok")
 
+    def decompose(self, brief):
+        return []
+
     def run_task(self, brief):
         return HarnessResult(ok=True, artifact=None, tokens=0, cost_usd=0.0, raw={})
 
