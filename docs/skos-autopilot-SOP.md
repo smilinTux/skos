@@ -4,6 +4,48 @@ Companion to the design spec `skos-autopilot-architecture.md`. This is the
 build / test / run / config / promotion / troubleshoot reference for operating
 Autopilot v1.
 
+## 0. Quick reference: kick off an autocode build
+
+Front door is the **`skos autopilot`** CLI (it delegates to `skharness.autocode`).
+`skcode-hostd` is the sandbox session-host daemon, NOT the kickoff.
+
+**Happy path (two steps):**
+1. `skos autopilot triage [--tag <tag>]` decomposes big/vague cards into buildable
+   children and STOPS before building (no sandbox spent). Run this FIRST for any
+   phase-sized or vague card; a big card sent straight to `run` just escalates or
+   decomposes anyway.
+2. `skos autopilot run --no-dry-run --harness claude-code [selector]` builds the
+   well-scoped cards.
+
+**Hard precondition:** every card MUST carry exactly ONE `repo:<name>` tag whose
+name is a key in `repo_map` (e.g. `repo:skcapstone`). No repo tag means the run
+files a "no known repo:<name>" decision and builds NOTHING. Add it when creating
+the card (`coord create ... --tag repo:skcapstone`) or on an existing card.
+
+**`run` selector scope:**
+- `--canary --task <id>` : build exactly one card.
+- `--tasks id1,id2,...` : build an explicit batch concurrently.
+- `--tag <tag>` : build all unblocked cards carrying that tag.
+- (no selector) : board-wide pass over unblocked, buildable cards.
+- omit `--no-dry-run` to preview against the StubHarness (no model, no writes).
+
+**Fleet placement:** the scheduler routes each build to the least-loaded node
+(e.g. node-41), so a build kicked from a small box runs on the capable node and
+reports back as a PR. Set `fleet_dispatch: false` in `autopilot.yaml` to pin
+builds to the local node.
+
+**Inspect / drive:**
+- `skos autopilot status` latest run (items, scores, PRs)
+- `skos autopilot list` decision queue / runs / claims
+- `skos autopilot show <run_id>` one run's per-item trajectory
+- `skos autopilot answer <n> [response]` resolve a numbered decision
+- `skos autopilot revert <task_id>` undo a merge and reopen the card
+- `skos autopilot doctor` sandbox health (auth, image, decline rate)
+
+**Merge posture:** a repo auto-merges only when it is in `automerge_repos` AND
+`repo_map[name].automerge: true` AND CI is green; otherwise the run opens a PR
+"HELD for review". Nothing merges on red CI or an inconclusive grade.
+
 ## 1. What it is
 
 A scheduled autonomy plane that reads work off the SKOS inputs (coord board
