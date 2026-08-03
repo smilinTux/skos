@@ -6,8 +6,16 @@ Autopilot v1.
 
 ## 0. Quick reference: kick off an autocode build
 
-Front door is the **`skos autopilot`** CLI (it delegates to `skharness.autocode`).
-`skcode-hostd` is the sandbox session-host daemon, NOT the kickoff.
+Two front doors feed the SAME `skharness` harness; they differ only in context:
+- **`skos autopilot`** (this SOP) is the context-rich door: board/GTD-driven
+  autonomy with triage, decomposition, grading, digest, and fleet placement.
+  Use it when you want the board to drive the work.
+- **skcode** (`skcode-hostd` = `skharness.serve:main`, the "sovereign Code +
+  Dispatch" remote agent-session control, iOS-app style) is the leaner door
+  WITHOUT the skos board/GTD context; it dispatches sessions into the same
+  `skharness` sandbox + executors.
+
+Everything below is the `skos autopilot` path.
 
 **Happy path (two steps):**
 1. `skos autopilot triage [--tag <tag>]` decomposes big/vague cards into buildable
