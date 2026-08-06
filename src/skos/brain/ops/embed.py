@@ -89,7 +89,13 @@ class MxbaiEmbedder:
                 raise EmbedError(
                     "requests not installed; inject a transport or install requests"
                 ) from exc
-            transport = requests.post
+            # Map the (url, json_body, timeout) transport contract onto
+            # requests.post's (url, data=, json=, timeout=) signature. Passing
+            # positionally binds body->data= (form-encoded) and timeout->json=,
+            # which sends a malformed request (Ollama returns 400). Bind by keyword.
+            def transport(u: str, b: dict[str, Any], t: float) -> Any:
+                return requests.post(u, json=b, timeout=t)
+
         return transport(url, body, self.timeout)
 
     def embed(self, texts: list[str]) -> list[list[float]]:

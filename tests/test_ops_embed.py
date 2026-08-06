@@ -147,3 +147,39 @@ def test_mxbai_empty_input_no_call():
     emb = MxbaiEmbedder(transport=transport)
     assert emb.embed([]) == []
     assert called is False
+
+
+def test_default_transport_uses_requests_post_json_not_positional(monkeypatch):
+    """Regression: the default transport must call requests.post with json=body +
+    timeout=, not positionally (positional binds body->data=, timeout->json=,
+    which Ollama 400s). CR-8.1 found the real-network path was broken this way.
+    """
+    import types
+
+    from skos.brain.ops import embed as embed_mod
+
+    calls = {}
+
+    class _Resp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"embeddings": [[0.1] * 1024]}
+
+    def fake_post(url, *args, **kwargs):
+        calls["url"] = url
+        calls["args"] = args
+        calls["kwargs"] = kwargs
+        return _Resp()
+
+    fake_requests = types.SimpleNamespace(post=fake_post)
+    monkeypatch.setitem(__import__("sys").modules, "requests", fake_requests)
+
+    emb = embed_mod.MxbaiEmbedder(base_url="http://x")
+    emb.embed(["hello"])
+
+    # body must ride json=, never a positional data arg
+    assert calls["args"] == (), f"body/timeout must be keyword, got positional {calls['args']}"
+    assert "json" in calls["kwargs"], "must pass json=body"
+    assert "timeout" in calls["kwargs"], "must pass timeout="
