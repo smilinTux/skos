@@ -1233,9 +1233,10 @@ def manifest_emit(
     base_url: str = typer.Option(
         _skworld_manifest.DEFAULT_BASE_URL,
         "--base-url",
-        help="Serving origin baked into the manifest's origin-relative URLs. "
-        "skos has no web server yet, so the shell interim-routes this entry to the "
-        "native skos screens (spec 4.4); pass the real origin once skos' web UI lands.",
+        help="Serving origin baked into the manifest's origin-relative URLs "
+        "(default: skos' read-only web surface on 127.0.0.1:7781). This value only "
+        "fixes the OFFLINE static-registry copy; served live, the URLs are rebuilt "
+        "origin-relative. Pass a real origin (e.g. the tailnet host) as needed.",
     ),
     out: str = typer.Option(
         "", "--out", help="Output path (default: the shell well-known location)."
@@ -1247,11 +1248,12 @@ def manifest_emit(
     """Emit skos' skworld.module.json as a deterministic static file for the umbrella
     shell registry.
 
-    skos is a CLI + scheduler with no HTTP surface, so it publishes its manifest as a
-    signed LOCAL FILE (umbrella spec 5.3 "local file" location) rather than serving
-    /.well-known/skworld-module.json from a daemon. The emitted bytes are deterministic
-    (sorted keys) so re-emitting an unchanged manifest is a no-op diff and its capauth
-    signature is reproducible.
+    skos serves this manifest live at /.well-known/skworld-module.json from its
+    optional read-only web surface (``skos serve``); this command additionally
+    publishes it as a signed LOCAL FILE (umbrella spec 5.3 "local file" location)
+    for the OFFLINE discovery path the shell registry reads when that surface is
+    not running. The emitted bytes are deterministic (sorted keys) so re-emitting
+    an unchanged manifest is a no-op diff and its capauth signature is reproducible.
 
     After emit: attach a detached capauth signature and register the file path in
     ~/.skcapstone/shell/modules.json. The shell refuses any manifest whose signature

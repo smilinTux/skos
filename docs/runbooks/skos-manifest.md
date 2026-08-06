@@ -5,16 +5,23 @@ skos is a first-class SKWorld subapp and sits at the TOP of the subapp list
 capauth-signed `skworld.module.json` (two facets: UI + operator) that the umbrella
 shell reads to mount its pane and let Atlas watch/steer it.
 
-## Why a static file, not a `/.well-known/` HTTP endpoint
+## Two discovery paths: live `/.well-known/` AND a static file
 
-skchat and skcode serve their manifest from a live daemon at
-`/.well-known/skworld-module.json` because they already run an HTTP server. **skos
-does not**: it is a CLI plus a cron scheduler, with no web surface. The umbrella
-shell's v1 registry (spec 5.3) references each module's manifest by **"local file
-OR `/.well-known/` URL"**, so skos publishes the **local-file** form. This is the
-same recipe skdashboard uses (spec 8.2, "Serve `skworld.module.json` ... (static
-file)") and the one skos' web UI will inherit when it lands, unchanged, because the
-manifest URLs are origin-relative.
+skos ships BOTH forms the umbrella shell registry accepts (spec 5.3, "local file
+OR `/.well-known/` URL"):
+
+- **Live**: skos' optional read-only web surface (`skos serve`, see `webui.py`)
+  serves the manifest unauthenticated and origin-relative at
+  `GET /.well-known/skworld-module.json` on `127.0.0.1:7781`, exactly like skchat
+  and skcode serve theirs from their daemons.
+- **Static**: `skos manifest emit` writes a deterministic, capauth-signed
+  local-file copy for the OFFLINE discovery path the shell reads when skos' web
+  surface is not running. This is the same recipe skdashboard uses (spec 8.2,
+  "Serve `skworld.module.json` ... (static file)").
+
+Both come from the one builder in `skworld_manifest.py`, so they never diverge;
+the manifest URLs are origin-relative, so a re-point (e.g. to the tailnet host) is
+a re-emit, never a contract change.
 
 ## Artifacts
 
@@ -30,16 +37,16 @@ manifest URLs are origin-relative.
 ```
 skos manifest emit                       # write the well-known local file
 skos manifest emit --print               # print JSON to stdout, write nothing
-skos manifest emit --base-url http://<origin>:7780/   # once skos' web UI lands
+skos manifest emit --base-url http://<origin>:7781/   # point at a real origin
 skos manifest emit --out /path/to/file.json           # custom location
 ```
 
 The bytes are deterministic (sorted keys, trailing newline), so re-emitting an
 unchanged manifest is a no-op diff and its capauth signature is reproducible.
-Because skos has no web server yet, `--base-url` defaults to a localhost
-placeholder and the shell interim-routes this entry to the native skos screens
-(spec 4.4); a Grade B -> A promotion is a re-emit with the real origin, never a
-contract change.
+`--base-url` defaults to skos' read-only web surface origin
+(`http://127.0.0.1:7781/`). Served live the URLs are rebuilt origin-relative from
+the request, so this default only fixes the static-registry copy; a Grade B -> A
+promotion is a re-emit, never a contract change.
 
 ## Sign + register (how the shell consumes it)
 

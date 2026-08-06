@@ -10,11 +10,11 @@ watch and steer skos.
 This module builds the manifest as a pure dict from the serving origin, so the
 served URLs are origin-relative (they resolve against wherever the host actually
 answers, avoiding host/port drift). The manifest is public discovery metadata
-(no secrets) and is meant to be served unauthenticated at
-/.well-known/skworld-module.json once skos grows a web surface; today skos has no
-HTTP server, so the builder stands ready for that route (mirroring skchat's
-webui.py and skcode's daemon.py) or for generating a static signed file for the
-shell's modules.json registry.
+(no secrets). skos' optional read-only web surface (``skos serve``, see
+``webui.py``) serves it unauthenticated and origin-relative at
+``GET /.well-known/skworld-module.json`` on ``127.0.0.1:7781``; the same builder
+also emits a static signed file for the shell's modules.json registry (the
+offline discovery path when skos' web surface is not running).
 
 UI facet: Grade B, the same web-embed path the umbrella spec assigns skos
 ("same Grade B path as skdashboard for its web UI when one exists", spec 4.4).
@@ -39,11 +39,13 @@ from pathlib import Path
 SCHEMA_VERSION = "1.1"
 #: The audience skos tokens are minted for.
 AUDIENCE = "skos"
-#: Placeholder serving origin baked into the emitted static manifest. skos has no
-#: HTTP server, so the shell interim-routes this entry to the native skos screens
-#: (umbrella spec 4.4). Override with a real origin once skos' web UI lands; the
-#: URLs are origin-relative, so a promotion is a re-emit, never a contract change.
-DEFAULT_BASE_URL = "http://127.0.0.1:7780/"
+#: Default serving origin baked into the emitted static manifest: the loopback
+#: origin skos' read-only web surface binds by default (``webui.DEFAULT_PORT``,
+#: 7781). When served live the URLs are rebuilt origin-relative from the request,
+#: so this value only fixes the OFFLINE static-registry copy the shell reads when
+#: skos' web surface is not running. Override with a real origin (e.g. the tailnet
+#: host) as needed; the URLs are origin-relative, so a re-point is a re-emit.
+DEFAULT_BASE_URL = "http://127.0.0.1:7781/"
 
 
 def skos_module_manifest(base_url: str) -> dict:
