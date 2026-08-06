@@ -3,9 +3,12 @@
 and send a daily digest to Chef's Hermes DM.
 
 Subcommands:
-  capture   Pull each account's "1 Action" / "2 Waiting" labelled threads and
-            upsert them into the unified GTD store (next-actions / waiting-for)
-            with source="email" (idempotent, deduped by Gmail thread id).
+  capture   Pull each account's FULL 4-C cadence labels ("1 Action" / "2 Waiting"
+            / "3 Read" / "4 Someday") and drain them into the unified GTD store
+            (next-actions / waiting-for / someday-maybe) through the one
+            gtd-ingest sink with source="email" (idempotent, deduped by Gmail
+            thread id; the archived read/someday lanes are capped per run by
+            GTD_EMAIL_ARCHIVE_MAX so their firehose stays lean). No side-list.
   triage    LLM-classify primary inbox -> GTD labels + archive (local model).
   digest    Compose the daily brief (Action + Waiting + new primary mail, across
             all boxes, sorted by what Chef cares about) and send it to Hermes DM.
@@ -32,7 +35,6 @@ import json
 import os
 import subprocess
 import sys
-import uuid
 import datetime
 from pathlib import Path
 from skos import secret_env
@@ -167,66 +169,74 @@ def _load(name: str) -> list:
 def _save(name: str, items: list) -> None:
     (GTD_DIR / f"{name}.json").write_text(json.dumps(items, indent=2, ensure_ascii=False))
 
-def _existing_email_ids() -> set[str]:
-    ids = set()
-    for name in ("inbox", "next-actions", "waiting-for", "someday-maybe", "archive"):
-        for it in _load(name):
-            tid = it.get("email_thread_id")
-            if tid:
-                ids.add(tid)
-    return ids
+# Per-run, per-account cap on the ARCHIVED "later" lanes (3 Read / 4 Someday) so
+# their firehose (e.g. dounoit, ~800 read/day) can drain into the unified GTD
+# without flooding it. The active lanes (1 Action / 2 Waiting, which stay in the
+# inbox) keep the full page. Override via GTD_EMAIL_ARCHIVE_MAX (0 = skip that
+# lane entirely for a lean-store run).
+ARCHIVE_LANE_MAX = int(os.environ.get("GTD_EMAIL_ARCHIVE_MAX", "25"))
 
-def _make_email_item(account: str, row: dict, status: str, priority: str) -> dict:
-    sender = row["from"][:60]
-    subj = row["subject"][:120] or "(no subject)"
-    return {
-        "id": uuid.uuid4().hex[:12],
-        "text": f"[email:{account.split('@')[0]}] {subj} - {sender}",
-        "source": "email",
-        "privacy": "private",
-        "context": "@email",
-        "priority": priority,
-        "energy": None,
-        "status": status,
-        "created_at": _now(),
-        "clarified_at": _now(),
-        "email_account": account,
-        "email_thread_id": row["id"],
-        "email_from": sender,
-        "email_subject": subj,
-    }
+# The complete 4-C email cadence label set, each mapped to a unified-GTD lane.
+# This is the full set of actionable email sources; EVERY label drains through
+# the ONE gtd-ingest sink (source="email", source_ref = Gmail thread id, so
+# re-runs never duplicate and no parallel side-list is created):
+#   1 Action  -> next-actions   (@email,   high)   active lane, stays in inbox
+#   2 Waiting -> waiting-for     (@email,   medium) active lane, stays in inbox
+#   3 Read    -> read/review     (@read,    low)    someday-maybe.json, archived
+#   4 Someday -> someday-maybe   (@someday, low)    someday-maybe.json, archived
+# status "reference" and "someday" both file into someday-maybe.json (see the
+# gtd_ingest._LIST_FILE map), tagged by context + email_label so they stay
+# distinguishable. Set GTD_EMAIL_LABELS (comma-separated gmail labels) to pull a
+# subset.
+EMAIL_LABELS = [
+    # (gmail label, gtd status, priority, context, per-account cap)
+    ("1 Action",  "next",      "high",   "@email",   100),
+    ("2 Waiting", "waiting",   "medium", "@email",   100),
+    ("3 Read",    "reference", "low",    "@read",    ARCHIVE_LANE_MAX),
+    ("4 Someday", "someday",   "low",    "@someday", ARCHIVE_LANE_MAX),
+]
+
+
+def _active_email_labels() -> list:
+    """EMAIL_LABELS filtered by GTD_EMAIL_LABELS (if set) and by a >0 cap."""
+    want = [s.strip() for s in os.environ.get("GTD_EMAIL_LABELS", "").split(",") if s.strip()]
+    rows = [r for r in EMAIL_LABELS if not want or r[0] in want]
+    return [r for r in rows if r[4] > 0]
 
 def email_captures() -> list:
-    """The email adapter's poll(): Gmail `1 Action`/`2 Waiting` threads across all
-    boxes as GtdCapture objects (deduped later by the sink on the thread id)."""
+    """The email adapter's poll(): the FULL 4-C cadence labels (`1 Action` /
+    `2 Waiting` / `3 Read` / `4 Someday`) across all boxes as GtdCapture objects,
+    deduped later by the sink on the Gmail thread id. Every label routes through
+    the one gtd-ingest sink; no parallel store."""
     from .gtd_ingest import GtdCapture
     caps = []
     for acct in ACCOUNTS:
-        for label, status, prio in (('1 Action', "next", "high"), ('2 Waiting', "waiting", "medium")):
-            for row in list_threads(acct, f'label:"{label}"'):
+        short = acct.split("@")[0]
+        for label, status, prio, ctx, cap in _active_email_labels():
+            for row in list_threads(acct, f'label:"{label}"', cap):
                 if not row["id"]:
                     continue
                 subj = row["subject"][:120] or "(no subject)"
                 sender = row["from"][:60]
                 caps.append(GtdCapture(
-                    text=f"[email:{acct.split('@')[0]}] {subj} - {sender}",
-                    source="email", source_ref=row["id"], context="@email",
+                    text=f"[email:{short}] {subj} - {sender}",
+                    source="email", source_ref=row["id"], context=ctx,
                     priority=prio, status=status,
                     meta={"email_account": acct, "email_from": sender,
-                          "email_subject": subj, "email_thread_id": row["id"]}))
+                          "email_subject": subj, "email_thread_id": row["id"],
+                          "email_label": label}))
     return caps
 
 def cmd_capture() -> None:
     """Emit the email captures through the skos gtd-ingest sink (source_ref-deduped)."""
     from .gtd_ingest import capture as sink
-    a = w = 0
+    counts: dict[str, int] = {}
     for c in email_captures():
         if sink(c):
-            if c.status == "next":
-                a += 1
-            else:
-                w += 1
-    print(f"gtd-mail capture: +{a} next-actions, +{w} waiting-for (email source)")
+            counts[c.status] = counts.get(c.status, 0) + 1
+    summary = ", ".join(f"+{counts.get(s, 0)} {s}"
+                        for s in ("next", "waiting", "reference", "someday"))
+    print(f"gtd-mail capture: {summary} (email source, all 4-C labels)")
 
 def cmd_digest(send: bool = True) -> str:
     """Compose + send the daily email brief to Hermes DM."""
