@@ -1,8 +1,11 @@
 """skos' SKWorld module manifest: shape, origin-relative URLs, operator facet,
-and the static-file emitter the umbrella shell registry reads (spec 5.3)."""
+the static-file emitter the umbrella shell registry reads (spec 5.3), and the
+capauth signature round-trip the shell gate depends on (spec 5.3: "the shell
+refuses any manifest whose detached capauth signature does not verify")."""
 
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from skos.cli import app
@@ -134,3 +137,48 @@ def test_cli_manifest_emit_custom_out(tmp_path):
     )
     assert result.exit_code == 0, result.output
     assert json.loads(out.read_text())["entry"]["url"] == "http://h:1/"
+
+
+# --- signature verify (spec 5.3: the shell's refuse-unless-verifies gate) -------
+#
+# skos does not sign its own manifest (an operator signs it with the capauth
+# root key, exactly as the shipped ~/.skcapstone/shell/modules/skos.skworld-
+# module.json.sig shows). What skos MUST guarantee is that the bytes it emits
+# are a stable, signable, verifiable payload: sign the emitted bytes, verify OK
+# against the signer's public key, and confirm any tamper breaks verification.
+# The crypto goes through the SAME capauth backend the fleet signing path uses
+# (fleet/signing.py -> capauth.crypto). Gated on the sibling repo being present
+# so skos' suite still runs standalone (mirrors the conformance drift-guard).
+
+
+def _pgpy_backend_and_keys():
+    """An ephemeral (Ed25519, fast) capauth PGP keypair + PGPy backend, or skip."""
+    pytest.importorskip("pgpy", reason="pgpy (capauth crypto dep) not installed")
+    crypto = pytest.importorskip(
+        "capauth.crypto", reason="capauth (sibling repo) not installed"
+    )
+    models = pytest.importorskip("capauth.models")
+    backend = crypto.get_backend(crypto.CryptoBackendType.PGPY)
+    bundle = backend.generate_keypair(
+        "skos manifest test", "skos-test@skworld.io", "pw", models.Algorithm.ED25519
+    )
+    return backend, bundle
+
+
+def test_emitted_manifest_bytes_sign_and_verify_round_trip():
+    backend, bundle = _pgpy_backend_and_keys()
+    payload = render_manifest_json("http://100.108.59.57:7781/").encode("utf-8")
+    signature = backend.sign(payload, bundle.private_armor, "pw")
+    # The signer's public key verifies the exact emitted bytes (the shell gate).
+    assert backend.verify(payload, signature, bundle.public_armor) is True
+
+
+def test_tampered_manifest_fails_signature_verification():
+    backend, bundle = _pgpy_backend_and_keys()
+    payload = render_manifest_json("http://host:7781/").encode("utf-8")
+    signature = backend.sign(payload, bundle.private_armor, "pw")
+    # Flip the grade B -> A in the signed bytes: verification must reject it,
+    # so a mutated manifest can never render behind a stale-but-valid signature.
+    tampered = payload.replace(b'"grade": "B"', b'"grade": "A"')
+    assert tampered != payload
+    assert backend.verify(tampered, signature, bundle.public_armor) is False
