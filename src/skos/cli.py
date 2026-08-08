@@ -753,6 +753,20 @@ def autopilot_triage(
                   f"{out.get('decisions', 0)} decisions queued (dry_run={dry_run})")
 
 
+@autopilot_app.command("release")
+def autopilot_release(
+    epic: str = typer.Argument(..., help="Epic id whose staged children to release"),
+):
+    """Promote an epic's STAGED (Proposed-lane) children into the active buildable
+    backlog. A scoped `triage --tasks <epic>` decomposes into the Proposed lane
+    (autopilot-staged: hidden from OPEN, never built); after reviewing them, release
+    strips the stage so they become normal OPEN cards. The human pick-up step."""
+    from skos.autopilot import orchestrator
+    released = orchestrator.release_epic(epic)
+    typer.echo(f"released {len(released)} staged child card(s) of {epic}"
+               + (": " + ", ".join(released) if released else ""))
+
+
 @autopilot_app.command("cleanup")
 def autopilot_cleanup(
     teardown: bool = typer.Option(False, "--teardown",
