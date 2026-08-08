@@ -6,6 +6,12 @@
 #   2. on failure -> capture a GTD item (source=cron) AND fire sk-alert (realtime)
 # Returns the wrapped command's exit code. Nothing fails silently.
 set -uo pipefail
+# Load sovereign secrets (rotated gog keyring password etc.) from the environment.d
+# drop-in instead of hardcoding them in crontab. Keeps dead/rotated values out of
+# the crontab and lets a rotation land in one file. See card b1d62821.
+if [ -f "$HOME/.config/environment.d/gog.conf" ]; then
+  set -a; . "$HOME/.config/environment.d/gog.conf"; set +a
+fi
 JOB="${1:?usage: sk-cron-run <job-name> <command...>}"; shift
 LEDGER="$HOME/.skcapstone/logs/cron-ledger.jsonl"
 # Interpreter + host derive from the environment (no machine-specific literals):
