@@ -22,6 +22,19 @@ if [ -z "${PY:-}" ]; then
 fi
 SK_CRON_HOST="${SK_CRON_HOST:-$(hostname)}"
 SKOS_BIN="${SKOS_BIN:-$HOME/.skenv/bin/skos}"
+# sk-alert must be resolved by PATH-independent means, exactly like PY and
+# SKOS_BIN above. It lives in ~/.skenv/bin, which is on an interactive shell's
+# PATH and on NEITHER environment that runs scheduled jobs: a systemd user unit
+# (probed: not reachable) or cron (PATH=/usr/bin:/bin, and the crontab sets no
+# PATH). The old `command -v sk-alert` guard therefore evaluated false every
+# time and the realtime alert never fired for any scheduled job, while the GTD
+# capture kept working because it goes through $SKOS_BIN's absolute path.
+# Same class as the 2026-08-13 watchdog incident: cron's PATH lacked /usr/sbin,
+# so `qm` exited 127 while the `kill` builtin worked fine.
+if [ -z "${SK_ALERT_BIN:-}" ]; then
+  if [ -x "$HOME/.skenv/bin/sk-alert" ]; then SK_ALERT_BIN="$HOME/.skenv/bin/sk-alert"
+  else SK_ALERT_BIN="$(command -v sk-alert || true)"; fi
+fi
 mkdir -p "$(dirname "$LEDGER")"
 
 start_iso=$(date -Iseconds); start_s=$(date +%s)
@@ -58,8 +71,16 @@ capture(GtdCapture(text=os.environ["SK_GTD_TEXT"], source="cron",
                    context="@ops", priority="high"))
 PY
   fi
-  if command -v sk-alert >/dev/null 2>&1; then
-    printf 'cron FAILED: %s (exit %s)\n%s' "$JOB" "$rc" "$tail" | sk-alert -l crit -k "cron-$JOB" 2>/dev/null || true
+  if [ -n "${SK_ALERT_BIN:-}" ] && [ -x "$SK_ALERT_BIN" ]; then
+    # The message is an ARGUMENT, not stdin. sk-alert does not read stdin: it
+    # exits 2 with "sk_alert: empty message", and the `|| true` below then
+    # swallowed that, so a piped alert looked sent and never was. Two silent
+    # failures were stacked on this one line: unreachable binary, wrong
+    # calling convention.
+    "$SK_ALERT_BIN" -l crit -k "cron-$JOB" \
+      "cron FAILED: ${JOB} (exit ${rc}) - ${tail}" >/dev/null 2>&1 || true
+  else
+    printf 'sk-cron-run: no sk-alert binary found; %s failure was not alerted\n' "$JOB" >&2
   fi
 fi
 
