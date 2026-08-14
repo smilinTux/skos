@@ -37,7 +37,14 @@ class CalendarAdapter(GtdSourceAdapter):
             acct = acct.strip()
             try:
                 out = subprocess.run(
-                    [GOG, "calendar", "events", "-a", acct, "--all", "--days", str(DAYS), "-j"],
+                    # --all-pages, not a big --max: gog defaults to --max 10 and
+                    # (on v0.12.0) prints NO truncation hint, so this silently
+                    # ingested the first 10 events as if they were the calendar.
+                    # Measured 2026-08-14: 10 seen vs 234 real, a 120-day window.
+                    # A magic --max would just move the cliff to whoever has more
+                    # events than the number, and move it silently again.
+                    [GOG, "calendar", "events", "-a", acct, "--all", "--all-pages",
+                     "--days", str(DAYS), "-j"],
                     capture_output=True, text=True, timeout=60).stdout
                 data = json.loads(out)
             except Exception:
