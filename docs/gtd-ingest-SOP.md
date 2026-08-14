@@ -44,7 +44,7 @@ flowchart LR
   MAIL & ITIL & CRON & CAL & TG --> SINK[["capture() sink<br/>dedupe by (source,source_ref)"]]
   SINK --> STORE[( unified GTD store<br/>~/.skcapstone/coordination/gtd/*.json )]
   DOCS & WIKI -. read-only .-> RPT
-  STORE --> RPT[Ops Report 07:45]
+  STORE --> RPT[skwatchdog digest 07:45]
   STORE --> BRIEF[Email Brief 06:45]
   LEDGER[(cron-ledger.jsonl)] --> RPT
   BRIEF & RPT --> HERMES[Hermes/Telegram DM]
@@ -115,7 +115,7 @@ Telegram DM (Hermes bot). No public port.
 | 06:16 | `ingest-telegram` | `skos ingest telegram` → GTD |
 | 06:35 | `ingest-email` | `skos ingest email`: `1 Action`/`2 Waiting` labels → GTD (sink) |
 | 06:45 | `email-brief` | `gtd-mail digest`: 📬 Email Brief → Telegram DM |
-| 07:45 | `ops-report` | `sk-status report`: 📊 Ops Report → DM |
+| 07:45 | `ops-report` | `skos watchdog digest`: skwatchdog fleet-narrative digest → DM (absorbs the old `sk-status report` slot; WD-4, `docs/runbooks/skwatchdog-schedule-cutover.md`). `sk-status` stays installed as the digest's own counts engine. |
 | :22/3h | `ingest-order` | `skos ingest order`: drive tracked order state (every 3h) |
 | every 30m | `drchiro-ingest` | `drchiro-mail-ingest.py`: Dr Rich clinic mail → GTD |
 
@@ -141,6 +141,9 @@ skos schedule install --apply # write the managed block into the crontab
 and re-running is idempotent (replace-in-place, never duplicate). Rollback = remove
 the block (or `crontab -` an earlier saved copy). Full deploy/rollback + one-time
 cutover procedure: [`docs/runbooks/skos-scheduler.md`](./runbooks/skos-scheduler.md).
+The 07:45 `ops-report` job specifically runs `skos watchdog digest` (WD-4); its
+own deploy/rollback runbook is
+[`docs/runbooks/skwatchdog-schedule-cutover.md`](./runbooks/skwatchdog-schedule-cutover.md).
 
 ---
 
@@ -177,6 +180,7 @@ resolved at runtime from the gitignored env file `~/.skcapstone/skos-schedule.en
 ```
 skos status [email|cron|gtd|docs|corpus|all|report|corpus-check] [--json]
 skos ingest <email|calendar|telegram>
+skos watchdog digest [--dry-run] [--no-send]   # 07:45 job (WD-4); sk-status stays its counts engine
 sk-status …            # console entry = skos.status:run (same output as `skos status`)
 ```
 **Email adapter (`gtd-mail`):**
@@ -212,7 +216,7 @@ capture(GtdCapture(text="…", source="<src>", source_ref="<stable-key>",
 | `skmodels set` strips registry comments | `ruamel.yaml` missing (falls back to plain yaml dump). It is a core dep now → `pip install -e .` to restore. |
 | Sink writes to wrong dir | `SK_GTD_DIR` set unexpectedly, or skcapstone not importable → falls back to `SKCAPSTONE_HOME`. |
 | Email triage does nothing | local LLM `.100:8082` down (cold/GPU) → falls back to `read`; check `curl :8082/v1/models`. |
-| Report/brief not delivered | `hermes send` creds / Telegram bot token in `~/.hermes/.env`; run `sk-status report` by hand. |
+| Report/brief not delivered | `hermes send` creds / Telegram bot token in `~/.hermes/.env`; run `skos watchdog digest` by hand (or `sk-status report` for the legacy counts-only report). |
 | Cron ran but no ledger entry | job not wrapped in `sk-cron-run`; `tail ~/.skcapstone/logs/cron-ledger.jsonl`. |
 | Calendar noise captured | add the term to `adapters/calendar.py::_NOISE`. |
 | Telegram nothing captured | messages lack a trigger prefix (`todo:`…), or wrong `GTD_TG_CHAT`. |

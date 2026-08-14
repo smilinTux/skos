@@ -69,6 +69,32 @@ def test_valid_cron_accepted(good):
     sched.validate_schedule(good, "x")  # no raise
 
 
+def test_0745_job_resolves_to_watchdog_digest_not_sk_status_report():
+    """WD-4 (card 2405db76): the 07:45 slot is absorbed by `skos watchdog
+    digest` so Chef gets exactly one morning DM. This pins the cutover so a
+    future edit to jobs.yaml can't silently revert it back to the old
+    `sk-status report` DM path without a test failing.
+    """
+    s = sched.load()
+    by_name = {j.name: j for j in s.jobs}
+    assert "ops-report" in by_name, "the 07:45 job was renamed or removed"
+    job = by_name["ops-report"]
+    assert job.schedule == "45 7 * * *"
+    assert "skos watchdog digest" in job.command
+    assert "sk-status report" not in job.command
+
+    # sk-status stays installed as the digest's counts engine; it must not be
+    # ripped out of the schedule entirely (it still backs corpus-check).
+    assert any("sk-status" in j.command for j in s.jobs)
+
+    # exactly one job fires at 07:45, and it is the watchdog digest -- two
+    # jobs in this slot is precisely the "two daily DMs" failure WD-4 exists
+    # to prevent.
+    at_0745 = [j for j in s.jobs if j.schedule == "45 7 * * *"]
+    assert len(at_0745) == 1
+    assert at_0745[0].name == "ops-report"
+
+
 def test_missing_key_rejected(tmp_path):
     m = tmp_path / "jobs.yaml"
     m.write_text(textwrap.dedent("""
