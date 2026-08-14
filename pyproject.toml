@@ -1,8 +1,15 @@
 [project]
-# PyPI distribution name is `skos-sovereign` (the bare name `skos` is on PyPI's
-# prohibited-names list). The import package is still `skos` (unchanged), so
-# `pip install skos-sovereign` then `import skos`. Mirrors `skchat-sovereign`.
-name = "skos-sovereign"
+# PyPI distribution name matches the import package: `pip install skos`, then
+# `import skos`. Renamed from `skos-sovereign`, which existed only because the
+# distribution and import names had drifted apart. That drift is not free: a
+# direct reference of the form `skos @ git+...` fails pip's name check with a
+# misleading "No matching distribution found for skos (unavailable)", which
+# reads like a missing or private repo. It cost a CI cycle in skharness.
+#
+# `skos-sovereign` stays on PyPI permanently (there is no delete API) and keeps
+# resolving to its old releases, so nothing pinned to it breaks; it just stops
+# receiving updates. Anything tracking skos should depend on `skos`.
+name = "skos"
 version = "0.2.2"
 description = "skos: sovereign agent OS, filesystem & packaging foundation"
 requires-python = ">=3.12"

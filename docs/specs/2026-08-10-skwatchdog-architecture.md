@@ -146,7 +146,7 @@ Why skos and not skcapstone or a fresh `skwatchdog` repo:
 - A new repo buys nothing but overhead for a thin composition layer: another
   CI workflow, another OIDC trusted publisher (with the known filename
   binding trap), another skworld.module.json, another entry in the dev/CI/
-  prod sync design's doctor. skos publishes as `skos-sovereign` on merge to
+  prod sync design's doctor. skos publishes as `skos` on merge to
   main already; skwatchdog ships inside it for free.
 - skcapstone placement would couple a daily LLM-rendered report into the
   framework that hosts the safety loop, and would put chat/email reading
@@ -432,7 +432,7 @@ follows the normal Phase 3 card path, not a special one.
 ## 14. Answers to the ten questions, one line each
 
 1. **Where:** `skos/src/skos/watchdog/`, a skos capability module; no new
-   repo, no manifest change, ships in skos-sovereign.
+   repo, no manifest change, ships in skos.
 2. **Atlas relation:** peer plane beside Atlas; Atlas is a source, shares
    surfaces and output spine, and (Phase 4) observes watchdog freshness as a
    condition; nothing enters `loop.py`.
