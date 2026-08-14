@@ -6,6 +6,12 @@ name = "skos-sovereign"
 version = "0.2.2"
 description = "skos: sovereign agent OS, filesystem & packaging foundation"
 requires-python = ">=3.12"
+# Fleet-wide licence decision 2026-08-14 (Chef): GPL-3.0-or-later for every sk*
+# repo that carried no LICENSE. The full verbatim GPLv3 text is in ./LICENSE.
+license = {text = "GPL-3.0-or-later"}
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+]
 # typer pinned <0.13: newer typer drops click 8.1 compat and breaks the whole CLI
 # ("Choice is not subscriptable"). click pinned <8.2: click 8.2+ removes the
 # secondary-flag behavior typer 0.12.x relies on ("Secondary flag is not valid

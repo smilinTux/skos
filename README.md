@@ -1,8 +1,20 @@
 # skos: the Sovereign Agent OS 🐧
 
+**Purpose:** the filesystem, packaging, and capability foundation every SKWorld service
+is deployed through. A Python library + CLI (plus one optional read-only web surface).
+`Status:` pre-1.0, active · `Maturity-tier:` **T0 (classical)**, symmetric-only, no
+asymmetric key material · `License:` GPL-3.0-or-later · `SOP:` [SOP.md](SOP.md)
+
 > **Your agents. Your infrastructure. Deploy anything, anywhere, own all of it.**
 > One model (ports & adapters), from a laptop to a Kubernetes cluster, personal to
 > enterprise, with zero lock-in.
+
+> ⚠️ **Experimental, pre-1.0, and NOT independently security-audited.** skos holds one
+> piece of key material: a local **symmetric** Fernet key (AES-128-CBC + HMAC-SHA256)
+> that encrypts a single secret blob under `$SK_DATA_ROOT/secrets/`. There is no
+> asymmetric crypto, no key exchange, and no network crypto here, and the `capauth`
+> secret backend is a stub that raises. Read [SECURITY.md](SECURITY.md) before relying
+> on it.
 
 skos is the **filesystem, packaging, and capability foundation** of the
 [SKWorld](https://skworld.io) ecosystem. It gives every sovereign service one
@@ -96,10 +108,14 @@ live in exactly one place.
 
 | Doc | Contents |
 |---|---|
+| **[SOP](SOP.md)** | the repo-level operational source of truth: build/test/release/config/API/troubleshooting, and the executable docs-evidence block |
+| **[Security policy](SECURITY.md)** | honest crypto claims, threat model, supported versions, how to report a vulnerability |
+| **[Contributing](CONTRIBUTING.md)** | branch model, commit trailer, the green-bar gate, and the traps specific to this repo |
 | **[Architecture](docs/ARCHITECTURE.md)** | ports/adapters model, the install flow, the brain, surfaces, where it lives (mermaids) |
 | **[Capabilities](docs/CAPABILITIES.md)** | the full 4-C catalog: every port, default adapter, and alternates |
 | **[Unified GTD: architecture](docs/gtd-ingest-architecture.md)** | the `gtd-ingest` spec: one port, pluggable sources, phased roadmap (mermaids) |
 | **[Unified GTD: SOP](docs/gtd-ingest-SOP.md)** | build/test/deploy/config/API/troubleshoot for the GTD subsystem (crons, CLI, adapters) |
+| **[Autopilot: SOP](docs/skos-autopilot-SOP.md)** | the autocode engine: sandbox, harness registry, live-execution gate, kill switch, revert |
 | **[Secret migration](docs/SECRET-MIGRATION.md)** | moving secrets into the skvault secret plane |
 
 ## Profiles (one model, every scale)
