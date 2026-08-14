@@ -84,7 +84,14 @@ jobs:
 
   - name: ops-report
     schedule: "45 7 * * *"
-    command: "$HOME/.skenv/bin/sk-status report"
+    # WD-4: this slot is absorbed by `skos watchdog digest` (card 2405db76). The
+    # watchdog collects every registered source, publishes latest/, and sends the
+    # ONE morning Hermes DM. sk-status stays installed as the digest's own counts
+    # engine (adapters call it in-process); it is not removed, only no longer the
+    # thing that DMs Chef directly. Rollback is this one line, back to:
+    #   command: "$HOME/.skenv/bin/sk-status report"
+    # See docs/runbooks/skwatchdog-schedule-cutover.md.
+    command: "$HOME/.skenv/bin/skos watchdog digest"
     log: "$HOME/.skcapstone/logs/sk-status.log"
 
   - name: drchiro-ingest
