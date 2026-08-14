@@ -1,7 +1,8 @@
-"""skwatchdog Phase-1 collector adapters (WD-2): the first six read-only
-sources registered on the watchdog-source port (``skos.watchdog.port.
-registry``). Spec: docs/specs/2026-08-10-skwatchdog-architecture.md, section
-6.3's Phase-1 adapter table.
+"""skwatchdog collector adapters, registered on the watchdog-source port
+(``skos.watchdog.port.registry``). Spec:
+docs/specs/2026-08-10-skwatchdog-architecture.md.
+
+Phase 1 (WD-2), section 6.3's table:
 
     fleet_events    fleet/events.py::read() per node
     scheduler       the cron run-ledger (skharness.jobs staleness rule)
@@ -10,20 +11,26 @@ registry``). Spec: docs/specs/2026-08-10-skwatchdog-architecture.md, section
     atlas           Atlas's published brief + parked decisions
     git             git log + gh pr list across configured repos
 
+Phase 2 (WD-7), section 7:
+
+    grading         Lumina's outbound skchat/Telegram replies, graded
+                     against a versioned rubric via skos.watchdog.grader
+
 Every adapter here is READ-ONLY: no adapter writes to any source and no
 adapter creates a store (the only state skwatchdog owns anywhere is the
 cursor store in ``skos.watchdog.cursor``, WD-1's concern, untouched by
 these). Each imports its optional sibling package (``skcapstone`` /
-``skharness``), when it needs one, lazily inside ``collect()`` rather than
-at module import time, so an absent sibling degrades that ONE adapter to a
-``SourceUnavailable`` digest line via ``skos.watchdog.port.collect_safe``
-instead of silently vanishing the adapter from the registry, or, worse,
-breaking import of this whole package on a box that only has skos
-installed.
+``skharness`` / ``skchat``), when it needs one, lazily inside ``collect()``
+rather than at module import time, so an absent sibling degrades that ONE
+adapter to a ``SourceUnavailable`` digest line via
+``skos.watchdog.port.collect_safe`` instead of silently vanishing the
+adapter from the registry, or, worse, breaking import of this whole package
+on a box that only has skos installed.
 
     from skos.watchdog.adapters import load_all
-    load_all()   # registers all six; each class is also importable directly,
-                 # e.g. `from skos.watchdog.adapters.git import GitAdapter`
+    load_all()   # registers all seven; each class is also importable
+                 # directly, e.g. `from skos.watchdog.adapters.git import
+                 # GitAdapter`
 """
 from __future__ import annotations
 
@@ -39,15 +46,22 @@ PHASE1_SOURCES = (
     "git",
 )
 
+#: Phase 2 additions (WD-7 ships `grading`; WD-6's chat/email sources land
+#: separately and add to this tuple when they do).
+PHASE2_SOURCES = (
+    "grading",
+)
+
 
 def load_all() -> list[str]:
-    """Import and register every Phase-1 adapter on the watchdog-source port.
+    """Import and register every Phase-1 + Phase-2 adapter on the
+    watchdog-source port.
 
     Safe to call more than once (re-importing an already-imported module is a
     no-op; re-registering a name just overwrites the registry entry with the
     same class). Returns the registered names, sorted.
     """
-    from . import atlas, coord_autocode, fleet_events, git, itil, scheduler  # noqa: F401
+    from . import atlas, coord_autocode, fleet_events, git, grading, itil, scheduler  # noqa: F401
     from ..port import registry
 
     return registry.available_for("watchdog-source")
