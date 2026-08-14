@@ -13,7 +13,6 @@ import json
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
-import pytest
 
 from skos.models import cli as models_cli
 

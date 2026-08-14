@@ -37,13 +37,17 @@ import subprocess
 import sys
 import datetime
 from pathlib import Path
+from skos import gtd_ingest
 from skos import secret_env
 
 GOG = os.environ.get("GOG", "/home/linuxbrew/.linuxbrew/bin/gog")
 # gog keyring password is resolved at runtime from the env or the gitignored
 # operator env file - never hardcoded here (public repo).
 secret_env.ensure("GOG_KEYRING_PASSWORD")
-GTD_DIR = Path(os.environ.get("SKCAPSTONE_HOME", str(Path.home() / ".skcapstone"))) / "coordination" / "gtd"
+# SPE P1.5 (card 4082d990): the store directory is whatever gtd_ingest resolves,
+# never a second guess at it. Resolving it here independently meant that under
+# an SK_GTD_DIR override this module wrote to a different directory than the one
+# holding .gtd.lock, so the lock protected nothing. Call sites use gtd_dir().
 HERMES_DM = secret_env.resolve("HERMES_DM", "")  # operator DM target, set in env file
 ACCOUNTS = secret_env.accounts()  # operator Gmail boxes, set GTD_MAIL_ACCOUNTS in env file
 SHORT2ACCT = {a.split("@")[0]: a for a in ACCOUNTS}
@@ -158,7 +162,10 @@ def cmd_triage(cap_per_account: int = 200) -> None:
     print(f"gtd-mail triage: {grand}")
 
 def _load(name: str) -> list:
-    p = GTD_DIR / f"{name}.json"
+    """Read one store file. digest-index is a dict, not a store list, so this
+    stays tolerant rather than delegating to gtd_ingest._load (which quarantines
+    anything that is not a list)."""
+    p = gtd_ingest.gtd_dir() / f"{name}.json"
     if not p.exists():
         return []
     try:
@@ -167,7 +174,14 @@ def _load(name: str) -> list:
         return []
 
 def _save(name: str, items: list) -> None:
-    (GTD_DIR / f"{name}.json").write_text(json.dumps(items, indent=2, ensure_ascii=False))
+    """Write one store file through the shared ATOMIC sink (SPE P1.5).
+
+    Was a plain write_text: an in-place truncate, so a crash mid-write left a
+    half-written store file and a concurrent writer could clobber an update.
+    gtd_ingest._save writes a temp file, fsyncs, os.replace()s over the target
+    and fsyncs the directory, so the file is only ever whole. Callers that
+    read-modify-write must additionally hold gtd_ingest._store_lock()."""
+    gtd_ingest._save(f"{name}.json", items)
 
 # Per-run, per-account cap on the ARCHIVED "later" lanes (3 Read / 4 Someday) so
 # their firehose (e.g. dounoit, ~800 read/day) can drain into the unified GTD
@@ -315,6 +329,16 @@ def cmd_digest(send: bool = True) -> str:
     return body
 
 # ── Bidirectional email: act on GTD items (reply · done→archive · attachments) ──
+def _find_gtd_item(gtd_id: str) -> tuple[str, int, dict, list] | None:
+    """Locate a GTD item across the active lists. Returns (list, index, item,
+    the loaded list) or None."""
+    for name in ("inbox", "next-actions", "waiting-for", "someday-maybe", "projects"):
+        items = _load(name)
+        for idx, it in enumerate(items):
+            if it.get("id") == gtd_id:
+                return name, idx, it, items
+    return None
+
 def _all_items() -> list[tuple[str, dict]]:
     out = []
     for name in ("inbox", "next-actions", "waiting-for", "someday-maybe", "projects"):
@@ -429,35 +453,40 @@ def cmd_done(gtd_id: str) -> None:
             subprocess.run([GOG, "gmail", "mark-read", "-a", acct, *mids], capture_output=True)
             print(f"done: {key} archived+read email thread {tid} ({len(mids)} msgs), no GTD item to close")
             return
-    hit = None
-    for name in ("inbox", "next-actions", "waiting-for", "someday-maybe", "projects"):
-        items = _load(name)
-        for idx, it in enumerate(items):
-            if it.get("id") == gtd_id:
-                hit = (name, idx, it, items)
-                break
-        if hit:
-            break
+    hit = _find_gtd_item(gtd_id)
     if not hit:
         print(f"done: no GTD item {gtd_id}", file=sys.stderr)
         return
-    name, idx, it, items = hit
-    # archive + mark-read the email thread if this is an email item
+    _, _, it, _ = hit
+    # archive + mark-read the email thread if this is an email item. Network
+    # calls, so they stay OUTSIDE the store lock; the item is re-found under
+    # the lock below rather than trusting this unlocked read.
     if it.get("email_thread_id") and it.get("email_account"):
         acct, tid = it["email_account"], it["email_thread_id"]
         mids = [m["id"] for m in _thread(acct, tid)["messages"]] or [tid]
         subprocess.run([GOG, "gmail", "archive", "-a", acct, *mids], capture_output=True)
         subprocess.run([GOG, "gmail", "mark-read", "-a", acct, *mids], capture_output=True)
         print(f"  archived+read email thread {tid} ({len(mids)} msgs)")
-    # move GTD item -> archive.json with completed_at
-    items.pop(idx)
-    _save(name, items)
+
+    # move GTD item -> archive.json with completed_at. SPE P1.5: the whole
+    # read-modify-write is under the shared store lock, and P1.3's order holds
+    # (archive first, source second) so a crash in the window duplicates the
+    # item instead of destroying it.
     from datetime import datetime, timezone
-    it["status"] = "done"
-    it["completed_at"] = datetime.now(timezone.utc).isoformat()
-    arch = _load("archive")
-    arch.append(it)
-    _save("archive", arch)
+
+    with gtd_ingest._store_lock():
+        hit = _find_gtd_item(gtd_id)
+        if not hit:  # closed by someone else while gmail was talking
+            print(f"done: no GTD item {gtd_id}", file=sys.stderr)
+            return
+        name, idx, it, items = hit
+        it["status"] = "done"
+        it["completed_at"] = datetime.now(timezone.utc).isoformat()
+        arch = _load("archive")
+        arch.append(it)
+        _save("archive", arch)
+        items.pop(idx)
+        _save(name, items)
     print(f"done: {gtd_id} ({it.get('text','')[:50]}) -> archived")
 
 def _tg_token() -> str | None:
@@ -510,7 +539,7 @@ def cmd_attachments(ref: str, save: bool = False, to_dir: str | None = None,
         print(f"SAVED to {outdir}")
 
 def main():
-    GTD_DIR.mkdir(parents=True, exist_ok=True)
+    gtd_ingest.gtd_dir()  # resolves + creates the unified store dir
     cmd = sys.argv[1] if len(sys.argv) > 1 else "digest"
     def _opt(flag, default=None):
         return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
