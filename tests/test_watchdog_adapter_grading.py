@@ -8,7 +8,7 @@ already used by `test_watchdog_adapter_itil.py` (lazy sibling import) and
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytest
 

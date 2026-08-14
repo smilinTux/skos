@@ -4,7 +4,6 @@ a live skgateway; `_chat_completion` is monkeypatched exactly like
 `gtd_triage._chat_json` / `adapters.order.classify_llm` are in their own
 test suites.
 """
-import pytest
 
 from skos.watchdog import headline as hl
 
