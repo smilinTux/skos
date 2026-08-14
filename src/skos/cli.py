@@ -499,6 +499,40 @@ def up_cmd(
         typer.echo(f"  {marker} {outcome.capability:<14}  {outcome.adapter}  ({outcome.status}){note}")
 
 
+watchdog_app = typer.Typer(
+    help="skwatchdog: the fleet narrative digest (spec "
+    "docs/specs/2026-08-10-skwatchdog-architecture.md). Report-only in Phase 1: "
+    "no schedule is flipped by this command (WD-4 owns the 07:45 cutover)."
+)
+app.add_typer(watchdog_app, name="watchdog")
+
+
+@watchdog_app.command("digest")
+def watchdog_digest(
+    date: str = typer.Option(None, "--date", help="Override the digest's date label (YYYY-MM-DD)"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Collect, render, and preview only: no publish, no cursor "
+                                      "advance, no DM"),
+    no_send: bool = typer.Option(False, "--no-send",
+                                 help="Publish + advance cursors as normal, skip the DM"),
+):
+    """Run one skwatchdog digest by hand: collect every registered source,
+    assemble, render (Markdown + JSON), publish beside the Atlas brief, and
+    DM the result. Every adapter failure degrades to a noted gap in the
+    digest, never a missing digest; skgateway being unreachable degrades the
+    headline to its deterministic template, never blocks the run."""
+    from skos.watchdog.run import run_digest_and_deliver
+
+    report = run_digest_and_deliver(date=date or None, dry_run=dry_run, send=not no_send)
+    typer.echo(report["markdown"])
+    if dry_run:
+        typer.echo("(--dry-run: nothing published, no cursors advanced, no DM sent)")
+        return
+    artifacts = report.get("artifacts") or {}
+    typer.echo(f"published: {artifacts.get('latest_json', '?')}")
+    typer.echo(f"sent: {report.get('sent')}" if not no_send else "sent: skipped (--no-send)")
+
+
 secret_app = typer.Typer(help="skvault: sovereign secret storage")
 app.add_typer(secret_app, name="secret")
 
