@@ -38,9 +38,13 @@ import sys
 import datetime
 from pathlib import Path
 from skos import gtd_ingest
-from skos import secret_env
+from skos import gogbin, secret_env
 
-GOG = os.environ.get("GOG", "/home/linuxbrew/.linuxbrew/bin/gog")
+# Resolved, never assumed: GOG env override, then PATH, then known
+# locations. See skos.gogbin for why the old hardcoded Homebrew path
+# was wrong (fresh installs, a stale pinned tap, and three copies that
+# drift independently).
+GOG = gogbin.find_gog() or "gog"
 # gog keyring password is resolved at runtime from the env or the gitignored
 # operator env file - never hardcoded here (public repo).
 secret_env.ensure("GOG_KEYRING_PASSWORD")

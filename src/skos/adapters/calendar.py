@@ -11,11 +11,16 @@ import json
 import os
 import subprocess
 
+from .. import gogbin
 from ..gtd_ingest import GtdCapture, GtdSourceAdapter
 
 from ..secret_env import accounts as _mail_accounts
 
-GOG = os.environ.get("GOG", "/home/linuxbrew/.linuxbrew/bin/gog")
+# Resolved, never assumed: GOG env override, then PATH, then known
+# locations. See skos.gogbin for why the old hardcoded Homebrew path
+# was wrong (fresh installs, a stale pinned tap, and three copies that
+# drift independently).
+GOG = gogbin.find_gog() or "gog"
 # accounts whose calendars hold the operator's actionable commitments. Resolved
 # from GTD_CAL_ACCOUNTS, falling back to the shared mail-account list; no personal
 # address is hardcoded in this public repo.
