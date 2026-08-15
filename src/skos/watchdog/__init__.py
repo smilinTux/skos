@@ -20,9 +20,13 @@ WD-3 adds the four pieces this module skipped: the Markdown renderer
 (publish.py), the skgateway-backed headline with its deterministic fallback
 (headline.py), and DM delivery through the existing Hermes path
 (deliver.py) -- tied together by run.py's `run_digest_and_deliver`, what
-`skos watchdog digest` calls. No schedule cutover (WD-4), no GTD/card
-write-out (WD-8/WD-9), and no model call anywhere except headline.py's one
-narrated-summary pass.
+`skos watchdog digest` calls. No schedule cutover (WD-4) and no model call
+anywhere except headline.py's one narrated-summary pass.
+
+WD-8 adds the one write-out this package does beyond its own cursors and
+artifacts: gtd.py files `problem` findings into the unified GTD through
+`skos.gtd_ingest.upsert`, behind `SKWATCHDOG_GTD` (default OFF) and standing
+down under fleet freeze. Card dispatch (WD-9) is still absent.
 """
 from __future__ import annotations
 
@@ -37,6 +41,7 @@ from .render import render_markdown, strip_banned_dashes, link_of
 from .publish import publish_digest, digests_dir, latest_dir
 from .headline import render_headline_llm
 from .deliver import format_dm, send_digest_dm
+from .gtd import file_findings, gtd_enabled, fleet_frozen, source_ref_for
 from .run import collect_all, run_digest_and_deliver
 
 __all__ = [
@@ -49,5 +54,6 @@ __all__ = [
     "publish_digest", "digests_dir", "latest_dir",
     "render_headline_llm",
     "format_dm", "send_digest_dm",
+    "file_findings", "gtd_enabled", "fleet_frozen", "source_ref_for",
     "collect_all", "run_digest_and_deliver",
 ]

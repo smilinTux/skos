@@ -531,6 +531,19 @@ def watchdog_digest(
     artifacts = report.get("artifacts") or {}
     typer.echo(f"published: {artifacts.get('latest_json', '?')}")
     typer.echo(f"sent: {report.get('sent')}" if not no_send else "sent: skipped (--no-send)")
+    # WD-8: only speak up when SKWATCHDOG_GTD is on, so the flag-off output
+    # stays byte-identical to what this command printed before the card.
+    gtd = report.get("gtd") or {}
+    if gtd.get("enabled"):
+        if gtd.get("skipped"):
+            typer.echo(f"gtd: skipped ({gtd['skipped']})")
+        else:
+            typer.echo(
+                f"gtd: filed={len(gtd.get('filed') or [])} "
+                f"completed={len(gtd.get('completed') or [])} "
+                f"unchanged={gtd.get('unchanged', 0)}")
+        for err in gtd.get("errors") or []:
+            typer.echo(f"gtd error: {err}", err=True)
 
 
 secret_app = typer.Typer(help="skvault: sovereign secret storage")

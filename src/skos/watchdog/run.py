@@ -12,6 +12,9 @@ Order matters and is deliberate (spec 6.1's crash-safety rule, and WD-3's
     5. publish JSON + Markdown, dated + latest/ (publish.py) -- the digest
        "lands" here
     6. ONLY NOW advance every source's cursor (WD-1's `cursor.advance`)
+    6b. file problem findings into the unified GTD (WD-8's `gtd.file_findings`)
+       -- flagged off by default, freeze-aware, and fail-safe: it never
+       raises, so it can neither delay nor break a digest that has landed
     7. send the DM (deliver.py) -- best-effort, never gates the cursor
        advance in step 6; a Hermes outage must not cause tomorrow's window
        to silently swallow today's events
@@ -35,6 +38,7 @@ from .adapters import load_all
 from .cursor import advance, window_since
 from .deliver import send_digest_dm
 from .digest import assemble_digest
+from .gtd import file_findings
 from .headline import render_headline_llm
 from .port import AdapterRegistry, Window, collect_safe, now_iso, registry as _default_registry
 from .port import source_ok
@@ -109,7 +113,7 @@ def run_digest_and_deliver(*, date: Optional[str] = None, now: Optional[str] = N
 
     report = {
         "digest": digest, "markdown": markdown, "sources": sources,
-        "published": False, "sent": False, "artifacts": {},
+        "published": False, "sent": False, "artifacts": {}, "gtd": {},
     }
     if dry_run:
         return report
@@ -122,6 +126,13 @@ def run_digest_and_deliver(*, date: Optional[str] = None, now: Optional[str] = N
     # earlier than publish_digest().
     for name in sources:
         advance(name, run_until)
+
+    # WD-8: problem findings become tracked GTD work, behind SKWATCHDOG_GTD
+    # (default OFF) and standing down under fleet freeze. Runs after the
+    # digest has landed and never raises, so filing can neither delay nor
+    # break the report; with the flag off it writes nothing and the published
+    # digest is byte-identical.
+    report["gtd"] = file_findings(digest)
 
     if send:
         report["sent"] = send_digest_dm(digest)
