@@ -26,7 +26,14 @@ anywhere except headline.py's one narrated-summary pass.
 WD-8 adds the one write-out this package does beyond its own cursors and
 artifacts: gtd.py files `problem` findings into the unified GTD through
 `skos.gtd_ingest.upsert`, behind `SKWATCHDOG_GTD` (default OFF) and standing
-down under fleet freeze. Card dispatch (WD-9) is still absent.
+down under fleet freeze.
+
+WD-9 adds the second and last one: cards.py escalates the eligible few of
+those findings into STAGED coord cards in the existing "Proposed" lane,
+behind `SKWATCHDOG_CARDS` (default OFF), under ONE standing epic, requiring a
+repo tag, capped at 5 per day, deduped against every card ever filed, and
+freeze-aware. Nothing in this package promotes, builds, grades, or merges
+anything: the handoff ends at filing.
 """
 from __future__ import annotations
 
@@ -42,6 +49,7 @@ from .publish import publish_digest, digests_dir, latest_dir
 from .headline import render_headline_llm
 from .deliver import format_dm, send_digest_dm
 from .gtd import file_findings, gtd_enabled, fleet_frozen, source_ref_for
+from .cards import file_cards, cards_enabled, repo_for, EPIC_ID
 from .run import collect_all, run_digest_and_deliver
 
 __all__ = [
@@ -55,5 +63,6 @@ __all__ = [
     "render_headline_llm",
     "format_dm", "send_digest_dm",
     "file_findings", "gtd_enabled", "fleet_frozen", "source_ref_for",
+    "file_cards", "cards_enabled", "repo_for", "EPIC_ID",
     "collect_all", "run_digest_and_deliver",
 ]
