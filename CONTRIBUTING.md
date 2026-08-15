@@ -103,11 +103,14 @@ python -m build && twine check dist/*
 - **`skos.gtd_ingest` is the only write path into the GTD store.** `capture()` is
   create-or-skip, `upsert()` is create-or-update and performs no write on `unchanged`.
   Adding a source means adding an adapter, never a parallel store.
-- **`src/skos/timer_wrap.py` writes systemd drop-ins.** It currently reads `ExecStart`
-  from the base unit file only, which silently drops flags contributed by other
-  drop-ins. That is a known live defect owned by card `47e32514` and documented in
-  [SOP.md section 8](SOP.md). Read that section before touching this module, and do not
-  "helpfully" delete a `zz-*.conf` workaround drop-in on a live box.
+- **`src/skos/timer_wrap.py` writes systemd drop-ins.** It reads a unit's **effective**
+  `ExecStart` from systemd and falls back to the base unit file only when systemd cannot
+  answer. Reading the base file alone silently drops flags contributed by other drop-ins,
+  which is the defect card `47e32514` fixed; keep the fallback behaviourally identical to
+  the old path, and keep `wrap_command()` idempotent, because the effective ExecStart of
+  an already-wrapped unit is the wrapped command. Read [SOP.md section 8](SOP.md) before
+  touching this module, and do not "helpfully" delete a `zz-*.conf` workaround drop-in on
+  a live box; retiring one is an ordered operator sequence, not a cleanup.
 - **`deploy/` artifacts must stay machine-independent.** Write `$HOME` and `$SKOS_REPO`,
   never a literal `/home/<user>/...`. Never commit a secret **value**; add the variable
   **name** to `secret_env` in `deploy/schedule/jobs.yaml` and document it in

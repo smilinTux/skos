@@ -75,13 +75,15 @@ every claim is scoped to a surface and cites its primitive.
 - **Privilege gain through the scheduler wrap.** `scripts/sk-cron-run.sh` and the
   `timer_wrap` drop-ins run arbitrary commands with the operator's user rights. A defect
   that lets an untrusted input choose or alter the wrapped command is in scope.
-- **Silent alteration of a scheduled command.** ⚠️ **A known live defect:**
-  `timer_wrap._execstart_of()` reads `ExecStart` from the **base unit file only** and
-  never the effective post-drop-in value, so wrapping a unit can silently drop flags that
-  other drop-ins contributed. This has already reverted an executing operator seat to
-  report-only with no error. Full write-up and detection in
-  [SOP.md section 8](SOP.md); the fix is tracked as card `47e32514`. Related defects of
-  this class are in scope.
+- **Silent alteration of a scheduled command.** `timer_wrap` used to read `ExecStart`
+  from the **base unit file only**, never the effective post-drop-in value, so wrapping a
+  unit silently dropped flags that other drop-ins contributed. That reverted an executing
+  operator seat to report-only with no error. **Fixed by card `47e32514`**: the wrap now
+  reads the effective command from systemd and falls back to the file only when systemd
+  cannot answer. ⚠️ Merging the fix does not repair drop-ins a previous version already
+  wrote; see the retirement sequence in [SOP.md section 8](SOP.md). Related defects of
+  this class, any path by which a wrap changes the command a unit actually runs, remain
+  in scope.
 - **Write access through the read-only web surface.** Any route on `skos serve` that
   mutates state, or a default bind on a non-loopback interface.
 - **GTD sink integrity.** A capture that corrupts the shared JSON store, or a dedup-key
