@@ -5,6 +5,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 
 ## [Unreleased]
 
+### Fixed
+- **`timer_wrap` now wraps a unit's EFFECTIVE `ExecStart`, not its base fragment**
+  (card `47e32514`). systemd's effective value is the base unit plus its drop-ins in
+  lexical order, with a bare `ExecStart=` resetting the list. Reading only the base file
+  silently discarded every flag a drop-in contributed, which is how the wrap reverted
+  `skoperator.service` from `run --execute --honor` to report-only with no error, and it
+  applied to any of the 30 wrapped user timers whose flags come from a drop-in.
+  `plan_wraps()` now reads `systemctl --user show <unit>.service -p ExecStartEx --value`
+  (falling back to `ExecStart`) and parses the `argv[]=` field of the last record.
+- **`timer_wrap` falls back to the previous base-file read**, byte-for-byte, when
+  `systemctl` is absent, the query fails or returns empty, the unit is a bare template
+  (`foo@.service`, which systemd refuses to resolve), or the record carries an exec
+  prefix that cannot be reproduced without guessing at privileges (`+`, `!`, `@`).
+  systemd is consulted only when the target directory is one of systemd's own user unit
+  directories, so a fixture tree is never answered from the live manager.
+- **`wrap_command()` carries a `-` (ignore-failure) prefix ahead of the runner** instead
+  of leaving it in argument position, where systemd would have passed it to the job as a
+  literal argument.
+
+### Changed
+- **`plan_wraps()` and `apply_wraps()` take an `effective` parameter**, defaulting to
+  auto-detection, so callers and tests can inject or disable the systemd query. Plan
+  entries gained `exec_source` (`effective` or `file`). Existing positional callers are
+  unaffected.
+
 ### Added
 - **Licence: GPL-3.0-or-later.** Full verbatim GPLv3 text in `LICENSE`, plus
   `license = {text = "GPL-3.0-or-later"}` and the OSI classifier in `pyproject.toml`.
@@ -14,7 +39,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
   "Start here" entry-point list, a Symptom/Check troubleshooting table, and an
   executable `docs-evidence` block (10 hermetic checks pinning the entry points, the
   `127.0.0.1:7781` web defaults, the GET-only route set, the GTD store precedence, the
-  `timer_wrap` base-file read, the blocking ruff rule set, the scheduler config paths,
+  `timer_wrap` effective-ExecStart read, the blocking ruff rule set, the scheduler config paths,
   and the vault-file key handling). It links to the existing subsystem SOPs rather than
   restating them.
 - **`SECURITY.md`**: honest-claims posture (crypto tier **T0 classical**, symmetric-only
@@ -26,13 +51,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
   tiers 1 and 2.
 
 ### Documented (no code change)
-- **`timer_wrap._execstart_of()` reads the base `.service` file only** and never the
-  effective post-drop-in `ExecStart`, so wrapping a unit silently discards flags that
-  other drop-ins contributed. This reverted `skoperator.service` from
-  `run --execute --honor` to report-only with no error, and it generalises to any of the
-  wrapped user timers whose flags come from a drop-in. `scripts/sk-cron-run.sh` is not
-  implicated; it runs `"$@"` verbatim. SOP section 8 carries the detection method and the
-  live `zz-honor.conf` workaround. The code fix is owned by card `47e32514`.
+- **The `timer_wrap` base-file read**, its blast radius and its detection method, in SOP
+  section 8. `scripts/sk-cron-run.sh` is not implicated; it runs `"$@"` verbatim. The
+  code fix landed under card `47e32514` (see Fixed, above). ⚠️ That fix does not repair
+  drop-ins an earlier version already wrote, so section 8 now also carries the ordered
+  operator sequence for retiring the live `zz-honor.conf` workaround.
 - **`test (autopilot extra)` is a no-op GREEN without the `SKHARNESS_TOKEN` secret**: the
   gate step skips every later step, so the job reports success having run zero tests.
   Called out in SOP section 4 and `CONTRIBUTING.md`.

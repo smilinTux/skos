@@ -77,7 +77,7 @@ flowchart TD
 | `src/skos/cli.py` | The whole operator surface. Every `skos <verb>` and sub-app is registered here. |
 | `src/skos/paths.py` | Single source of path truth: `data_root()` resolves `$SK_DATA_ROOT` or the active profile default; `TREE` is the 8 subdirs. |
 | `src/skos/gtd_ingest.py` | The one GTD sink. `gtd_dir()` resolves the store; `capture()` and `upsert()` are the only write paths. |
-| `src/skos/timer_wrap.py` | Generates the systemd `sk-cron-run.conf` drop-ins. Read `_execstart_of()` before touching any timer (section 8). |
+| `src/skos/timer_wrap.py` | Generates the systemd `sk-cron-run.conf` drop-ins. Read `plan_wraps()` and its effective-vs-file ExecStart split before touching any timer (section 8). |
 | `src/skos/webui.py` | The optional read-only web surface: bind defaults, the five GET routes, the fail-safe status snapshot. |
 
 Deeper design docs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (ports/adapters, install
@@ -287,23 +287,44 @@ FastAPI's `docs_url`, `redoc_url` and `openapi_url` are all disabled. No `POST`,
 
 ## 8. Troubleshooting
 
-### ⚠️ The headline: a drop-in wrap silently strips flags from other drop-ins
+### ⚠️ The headline: a drop-in wrap once silently stripped flags from other drop-ins
 
-`timer_wrap._execstart_of()` reads `ExecStart` out of the **base `.service` file only**.
-It never consults the **effective**, post-drop-in `ExecStart`. So when skos wrapped
+**Fixed in code by card `47e32514`. The live drop-in state on a node is NOT fixed by
+merging that card**, so read the whole of this section before touching a wrapped unit.
+
+**What went wrong.** `timer_wrap._execstart_of()` read `ExecStart` out of the **base
+`.service` file only** and never consulted the **effective**, post-drop-in `ExecStart`.
+systemd's effective value is the base fragment plus its drop-ins applied in lexical
+order, where a bare `ExecStart=` resets the list. So when skos wrapped
 `skoperator.service`, it rebuilt the command from the base unit's report-only
 `ExecStart=%h/.skenv/bin/skoperator run` and silently discarded `--execute` (contributed
 by `execute.conf`) and `--honor`. Nothing errored. The seat quietly reverted to
 report-only while every status surface looked healthy.
 
-This **generalises**. `timer_wrap` wraps every wrappable systemd user timer on the node
+It **generalised**. `timer_wrap` wraps every wrappable systemd user timer on the node
 (30 today), so **any** unit whose flags arrive from a drop-in rather than its base
-fragment is exposed to the same silent strip.
+fragment was exposed to the same silent strip.
 
 `scripts/sk-cron-run.sh` is **innocent**. It runs `"$@"` verbatim (line 41). The stripping
-is entirely `timer_wrap`'s reconstruction of the command.
+was entirely `timer_wrap`'s reconstruction of the command.
 
-**Detect it.** Compare the effective `ExecStart` against the base fragment:
+**What the fix does.** `plan_wraps()` now asks systemd for the effective command,
+`systemctl --user show <unit>.service -p ExecStartEx --value` (falling back to
+`ExecStart`), and parses the `argv[]=` field of the last record. It falls back to the old
+base-file read when systemctl is absent, the call fails or returns empty, the unit is a
+bare template (`foo@.service`, which systemd refuses to resolve), or the record carries
+an exec prefix the module will not reproduce blind (`+`, `!`, `@`). Each plan entry
+reports which reading produced it in `exec_source` (`effective` or `file`). systemd is
+consulted **only** when the target directory is one of systemd's own user unit
+directories, so pointing `plan_wraps` at a fixture tree never reads the live manager.
+
+Two consequences worth knowing. `systemctl show` reports an **already-expanded** command,
+so a drop-in written from the effective value carries absolute paths where the file
+fallback would have preserved `%h`. And because the wrap now snapshots the flags of every
+other drop-in, **changing any contributing drop-in means re-running the wrap**, or
+`sk-cron-run.conf` keeps replaying the old flags.
+
+**Detect a stripped unit.** Compare the effective `ExecStart` against the base fragment:
 
 ```bash
 systemctl --user show <unit>.service -p ExecStart --value      # effective
@@ -324,19 +345,40 @@ ExecStart    = /home/cbrd21/clawd/skos/scripts/sk-cron-run.sh skoperator \
 DropInPaths  = execute.conf  sk-cron-run.conf  zz-honor.conf
 ```
 
-To revert: `rm ~/.config/systemd/user/skoperator.service.d/zz-honor.conf && systemctl
---user daemon-reload`, which returns the unit to whatever `sk-cron-run.conf` sets, that
-is report-only.
+`zz-honor.conf` stays load-bearing until an operator has done the retirement below. Do
+not delete it as cruft, and do not delete it merely because the code fix has merged.
 
-**The proper fix is not in this document.** Making `timer_wrap` preserve the wrapped
-unit's effective flags is owned by card `47e32514`. Until it lands, treat `zz-honor.conf`
-as load-bearing and do not delete it as cruft.
+**Retiring the workaround (operator, after the fix is deployed).** With the fix in place,
+`skoperator`'s effective `ExecStart` is already the correctly wrapped command, so
+`plan_wraps` reports it as needing nothing and will not rewrite the stale
+`sk-cron-run.conf` underneath. Retiring `zz-honor.conf` therefore takes a deliberate
+sequence, and every step is reversible by putting the file back:
+
+1. Confirm the deployed `skos` actually contains the fix.
+   `python -c "import skos.timer_wrap as t; print(hasattr(t,'parse_show_execstart'))"`
+2. Move the flags onto a drop-in that sorts **before** `sk-cron-run.conf`, so the wrap
+   can pick them up: add `--honor` to `execute.conf`'s `ExecStart` line (it already
+   carries `--execute`, and `e` sorts before `s`).
+3. Remove both the stale wrap and the workaround, then reload:
+   `rm ~/.config/systemd/user/skoperator.service.d/{sk-cron-run.conf,zz-honor.conf}`
+   then `systemctl --user daemon-reload`.
+4. Verify the unwrapped effective command carries the flags:
+   `systemctl --user show skoperator.service -p ExecStart --value` must end
+   `skoperator run --execute --honor`.
+5. Re-run the wrap so `sk-cron-run.conf` is regenerated from that effective command.
+6. `systemctl --user daemon-reload`, then verify the final state: `ExecStart` runs
+   through `sk-cron-run.sh` **and** ends `--execute --honor`, and `DropInPaths` no longer
+   lists `zz-honor.conf`.
+
+If step 4 or step 6 does not show both flags, restore `zz-honor.conf`, reload, and stop.
 
 ### Symptom to check table
 
 | Symptom | Check |
 |---|---|
-| A wrapped unit silently lost its flags; behaviour reverted to the base unit's defaults | `systemctl --user show <unit> -p ExecStart --value` vs `grep ExecStart "$(systemctl --user show <unit> -p FragmentPath --value)"`. If a drop-in's flags are missing from the effective line, this is the `timer_wrap._execstart_of()` base-file-only bug. Restore with a `zz-*.conf` drop-in that sorts last. Card `47e32514`. |
+| A wrapped unit silently lost its flags; behaviour reverted to the base unit's defaults | `systemctl --user show <unit> -p ExecStart --value` vs `grep ExecStart "$(systemctl --user show <unit> -p FragmentPath --value)"`. If a drop-in's flags are missing from the effective line, the node is running a `skos` from before card `47e32514`, or a `sk-cron-run.conf` written by one. Check the deployed code with `python -c "import skos.timer_wrap as t; print(hasattr(t,'parse_show_execstart'))"`, then follow the retirement sequence in section 8. Restore with a `zz-*.conf` drop-in that sorts last. |
+| A wrapped unit runs the flags it had a month ago, not the ones its drop-ins set now | The wrap SNAPSHOTS the effective command into `sk-cron-run.conf`, which sorts after most drop-ins. Editing a contributing drop-in does not update it. Re-run the wrap after changing any drop-in that contributes flags. |
+| A drop-in wrote absolute paths where the unit used `%h` | Expected. `systemctl show` reports an already-expanded command, so an entry with `exec_source: effective` cannot carry specifiers. Only the base-file fallback (`exec_source: file`, which is what a bare `foo@.service` template gets) preserves `%h`. |
 | `skoperator` behaves differently after a `git checkout` or an uncommitted edit in `~/clawd/skos` | `skoperator.service` runs `/home/cbrd21/clawd/skos/scripts/sk-cron-run.sh`, a path inside the **working checkout**, not an installed copy. Any edit or revert there changes production immediately. `git -C ~/clawd/skos status` and `git -C ~/clawd/skos log -1 -- scripts/sk-cron-run.sh`. |
 | A wrapped job runs **twice** per trigger | The drop-in is missing its bare `ExecStart=` reset. `ExecStart` is list-typed, so systemd appends. `grep -c '^ExecStart' <unit>.service.d/sk-cron-run.conf` must show 2 lines, the first empty. |
 | `skos --help` dies with `Choice is not subscriptable` or `Secondary flag is not valid for non-boolean flag` | The typer/click pins were bypassed. `pip show typer click`; require `typer>=0.12,<0.13` and `click>=8.1,<8.2`. Both pins are needed, not either one. |
@@ -447,8 +489,8 @@ checks:
     run: grep -qF '@app.get("/.well-known/skworld-module.json")' src/skos/webui.py && grep -qF '@app.get("/status.json")' src/skos/webui.py && grep -qF '@app.get("/health")' src/skos/webui.py && ! grep -qE '@app\.(post|put|patch|delete)' src/skos/webui.py
   - name: the GTD store path precedence and the six list files are unchanged
     run: grep -qF 'SK_GTD_DIR' src/skos/gtd_ingest.py && grep -qF 'home / "coordination" / "gtd"' src/skos/gtd_ingest.py && test "$(tr -d ' \n' < src/skos/gtd_ingest.py | grep -o '_ALL_FILES=\[[^]]*\]')" = '_ALL_FILES=["inbox.json","next-actions.json","projects.json","waiting-for.json","someday-maybe.json","archive.json"]'
-  - name: timer_wrap still reads the BASE unit only (section 8 hazard is still live)
-    run: grep -qF 'DROPIN_NAME = "sk-cron-run.conf"' src/skos/timer_wrap.py && grep -qF 'execstart = _execstart_of(service)' src/skos/timer_wrap.py && ! grep -qE 'DropInPaths|systemd-analyze|show .*ExecStart' src/skos/timer_wrap.py
+  - name: timer_wrap reads the EFFECTIVE ExecStart, with the base file only as fallback
+    run: grep -qF 'DROPIN_NAME = "sk-cron-run.conf"' src/skos/timer_wrap.py && grep -qF 'execstart = effective_execstart(f"{unit}.service", query)' src/skos/timer_wrap.py && grep -qF 'def parse_show_execstart' src/skos/timer_wrap.py && grep -qF 'execstart = _execstart_of(service)' src/skos/timer_wrap.py
   - name: sk-cron-run.sh still runs its argv verbatim (it is not the stripper)
     run: grep -qF 'out="$("$@" 2>&1)"' scripts/sk-cron-run.sh
   - name: the blocking ruff gate is exactly the rule set section 4 documents
