@@ -544,6 +544,25 @@ def watchdog_digest(
                 f"unchanged={gtd.get('unchanged', 0)}")
         for err in gtd.get("errors") or []:
             typer.echo(f"gtd error: {err}", err=True)
+    # WD-9: same rule, its own flag. Silent unless SKWATCHDOG_CARDS is on, so
+    # the flag-off output is byte-identical to what this command printed
+    # before the card. Dropped findings are named individually, never counted:
+    # a bare count reads as "covered everything" when it did not.
+    cards = report.get("cards") or {}
+    if cards.get("enabled"):
+        if cards.get("skipped"):
+            typer.echo(f"cards: skipped ({cards['skipped']})")
+        else:
+            typer.echo(
+                f"cards: filed={len(cards.get('filed') or [])} "
+                f"refused={len(cards.get('refused') or [])} "
+                f"deduped={cards.get('deduped', 0)} "
+                f"dropped={len(cards.get('dropped') or [])}")
+        for drop in cards.get("dropped") or []:
+            typer.echo(f"cards DROPPED (over budget): {drop['source_ref']} "
+                       f"{drop['title']}", err=True)
+        for err in cards.get("errors") or []:
+            typer.echo(f"cards error: {err}", err=True)
 
 
 secret_app = typer.Typer(help="skvault: sovereign secret storage")

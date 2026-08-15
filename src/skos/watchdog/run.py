@@ -15,6 +15,12 @@ Order matters and is deliberate (spec 6.1's crash-safety rule, and WD-3's
     6b. file problem findings into the unified GTD (WD-8's `gtd.file_findings`)
        -- flagged off by default, freeze-aware, and fail-safe: it never
        raises, so it can neither delay nor break a digest that has landed
+    6c. file the eligible few as STAGED coord cards (WD-9's `cards.file_cards`)
+       -- its own flag, also off by default, budgeted, deduped against every
+       card ever filed, and fail-safe in the same way. It runs AFTER 6b on
+       purpose: a card is an escalation of an existing GTD item, so the item
+       must exist first (and, by design, must have existed since a previous
+       run) before a card can be filed for it
     7. send the DM (deliver.py) -- best-effort, never gates the cursor
        advance in step 6; a Hermes outage must not cause tomorrow's window
        to silently swallow today's events
@@ -37,6 +43,7 @@ from typing import Optional
 from .adapters import load_all
 from .cursor import advance, window_since
 from .deliver import send_digest_dm
+from .cards import file_cards
 from .digest import assemble_digest
 from .gtd import file_findings
 from .headline import render_headline_llm
@@ -113,7 +120,7 @@ def run_digest_and_deliver(*, date: Optional[str] = None, now: Optional[str] = N
 
     report = {
         "digest": digest, "markdown": markdown, "sources": sources,
-        "published": False, "sent": False, "artifacts": {}, "gtd": {},
+        "published": False, "sent": False, "artifacts": {}, "gtd": {}, "cards": {},
     }
     if dry_run:
         return report
@@ -133,6 +140,14 @@ def run_digest_and_deliver(*, date: Optional[str] = None, now: Optional[str] = N
     # break the report; with the flag off it writes nothing and the published
     # digest is byte-identical.
     report["gtd"] = file_findings(digest)
+
+    # WD-9: the eligible few become STAGED coord cards, behind SKWATCHDOG_CARDS
+    # (default OFF), staged lane only, one epic, repo tag required, 5 per day,
+    # deduped against every card ever filed, and standing down under freeze.
+    # Same fail-safe posture as 6b: it never raises, and with the flag off it
+    # neither reads nor writes anything, so the published digest above is
+    # byte-identical either way.
+    report["cards"] = file_cards(digest)
 
     if send:
         report["sent"] = send_digest_dm(digest)

@@ -67,6 +67,26 @@ as SourceUnavailable lines rather than missing digests.
   under one standing `skwatchdog-findings` epic, repo-tag required, 5/day
   budget, board-wide `(source, source_ref)` dedupe, freeze-aware. Promotion
   stays human (`autopilot release`). Repos: `skos`.
+  SHIPPED as `skos/src/skos/watchdog/cards.py` (WD-9). Four things worth
+  knowing before flipping it:
+  - The dedupe ledger is the board's own `coordination/tasks/*.json`, read in
+    full with no status filter. Coord task files are immutable and archiving
+    only appends an id to `archive/<host>.jsonl`, so a card a human judged and
+    archived is still a file and its finding never returns. There is no side
+    list of "what we filed"; the board is asked.
+  - A card is an ESCALATION of a WD-8 GTD item, never a duplicate of one. It
+    is filed only when the finding is repo-attributable, WD-8 already has an
+    OPEN item for it, and that item was opened by an EARLIER run. So
+    `SKWATCHDOG_CARDS=1` does nothing at all while `SKWATCHDOG_GTD` is off,
+    and a one-morning blip never reaches the board.
+  - The 5/day budget counts cards already filed for that digest date off the
+    board, so re-running a digest cannot spend it twice. Anything over budget
+    is dropped, named individually in a `logging.warning` and in the run
+    report, never silently truncated, and is reconsidered next run.
+  - The staged lane is the existing one: the same `autopilot-staged` +
+    `autopilot-untriaged` pair `skharness.autocode.orchestrator` puts on a
+    child born into the Proposed lane, so `skos autopilot release <epic>`
+    promotes a watchdog card exactly like any other staged child.
 - 3b: browser QA lane for skchat web over chrome-cdp, Mon/Wed/Fri,
   screenshots + DOM asserts + console/network capture, ornith-graded,
   report-only events. Repos: `skchat` (the walk script + assertions),
