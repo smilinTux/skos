@@ -19,6 +19,14 @@ Phase 2 (WD-7 + WD-6), sections 6.5 and 7:
     chat.telegram   the Telegram window via `skcapstone telegram poll`
     email           the 4-C Gmail lanes via the gog CLI
 
+Phase 3 (WD-12), section 11:
+
+    sites           reachability + outbound-link checks over the configured
+                     static marketing sites (`SKWATCHDOG_SITES`), the only
+                     adapter that makes a network request; see
+                     adapters/sites.py's module docstring for the run-budget
+                     and blip-vs-outage rules that come with that
+
 The three WD-6 sources above carry SUMMARIES AND REFS ONLY: counts, labels,
 thread/chat identity and a deep link back to the real message. No message
 body, no email body, no subject line and no thread title ever reaches a
@@ -39,7 +47,7 @@ adapter from the registry, or, worse, breaking import of this whole package
 on a box that only has skos installed.
 
     from skos.watchdog.adapters import load_all
-    load_all()   # registers all ten; each class is also importable
+    load_all()   # registers all eleven; each class is also importable
                  # directly, e.g. `from skos.watchdog.adapters.git import
                  # GitAdapter`
 """
@@ -65,18 +73,22 @@ PHASE2_SOURCES = (
     "email",
 )
 
+#: Phase 3 additions: WD-12's `sites` (the only network-reaching adapter).
+PHASE3_SOURCES = (
+    "sites",
+)
+
 
 def load_all() -> list[str]:
-    """Import and register every Phase-1 + Phase-2 adapter on the
-    watchdog-source port (the six of PHASE1_SOURCES plus the four of
-    PHASE2_SOURCES).
+    """Import and register every Phase-1 + Phase-2 + Phase-3 adapter on the
+    watchdog-source port (PHASE1_SOURCES + PHASE2_SOURCES + PHASE3_SOURCES).
 
     Safe to call more than once (re-importing an already-imported module is a
     no-op; re-registering a name just overwrites the registry entry with the
     same class). Returns the registered names, sorted.
     """
     from . import (atlas, chat_skchat, chat_telegram, coord_autocode, email,  # noqa: F401
-                   fleet_events, git, grading, itil, scheduler)  # noqa: F401
+                   fleet_events, git, grading, itil, scheduler, sites)  # noqa: F401
     from ..port import registry
 
     return registry.available_for("watchdog-source")
