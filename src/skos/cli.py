@@ -1274,7 +1274,9 @@ def operator_explain():
 def operator_observe():
     """Print live operator conditions as JSON from real probes (each fails safe =
     healthy when skos is unreachable). SchedulerAlive reads the cron run-ledger;
-    GtdSinkDraining reads the GTD sink's quarantine backlog."""
+    GtdSinkDraining reads the GTD sink's quarantine backlog; WatchdogDigestFresh
+    reads the latest published skwatchdog digest's age; GradingBacklog reads
+    that same digest for a grading run that ran out of time budget."""
     import json as _json
     from skos.operator_probe import observe as _observe
     typer.echo(_json.dumps(_observe(), indent=2))
