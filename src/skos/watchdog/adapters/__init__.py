@@ -11,10 +11,21 @@ Phase 1 (WD-2), section 6.3's table:
     atlas           Atlas's published brief + parked decisions
     git             git log + gh pr list across configured repos
 
-Phase 2 (WD-7), section 7:
+Phase 2 (WD-7 + WD-6), sections 6.5 and 7:
 
     grading         Lumina's outbound skchat/Telegram replies, graded
                      against a versioned rubric via skos.watchdog.grader
+    chat.skchat     skchat thread activity (list_threads + the window read)
+    chat.telegram   the Telegram window via `skcapstone telegram poll`
+    email           the 4-C Gmail lanes via the gog CLI
+
+The three WD-6 sources above carry SUMMARIES AND REFS ONLY: counts, labels,
+thread/chat identity and a deep link back to the real message. No message
+body, no email body, no subject line and no thread title ever reaches a
+WatchdogEvent, because each of those adapters drops content at its READ
+BOUNDARY rather than filtering it on the way out. The digest is published
+and served over HTTP; a body copied into it is a copy of Chef's private
+correspondence sitting in a served file. See each module's docstring.
 
 Every adapter here is READ-ONLY: no adapter writes to any source and no
 adapter creates a store (the only state skwatchdog owns anywhere is the
@@ -28,7 +39,7 @@ adapter from the registry, or, worse, breaking import of this whole package
 on a box that only has skos installed.
 
     from skos.watchdog.adapters import load_all
-    load_all()   # registers all seven; each class is also importable
+    load_all()   # registers all ten; each class is also importable
                  # directly, e.g. `from skos.watchdog.adapters.git import
                  # GitAdapter`
 """
@@ -46,22 +57,26 @@ PHASE1_SOURCES = (
     "git",
 )
 
-#: Phase 2 additions (WD-7 ships `grading`; WD-6's chat/email sources land
-#: separately and add to this tuple when they do).
+#: Phase 2 additions: WD-7's `grading`, plus WD-6's chat and email sources.
 PHASE2_SOURCES = (
     "grading",
+    "chat.skchat",
+    "chat.telegram",
+    "email",
 )
 
 
 def load_all() -> list[str]:
     """Import and register every Phase-1 + Phase-2 adapter on the
-    watchdog-source port.
+    watchdog-source port (the six of PHASE1_SOURCES plus the four of
+    PHASE2_SOURCES).
 
     Safe to call more than once (re-importing an already-imported module is a
     no-op; re-registering a name just overwrites the registry entry with the
     same class). Returns the registered names, sorted.
     """
-    from . import atlas, coord_autocode, fleet_events, git, grading, itil, scheduler  # noqa: F401
+    from . import (atlas, chat_skchat, chat_telegram, coord_autocode, email,  # noqa: F401
+                   fleet_events, git, grading, itil, scheduler)  # noqa: F401
     from ..port import registry
 
     return registry.available_for("watchdog-source")
