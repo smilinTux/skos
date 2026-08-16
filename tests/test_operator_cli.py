@@ -23,8 +23,10 @@ runner = CliRunner()
 
 def test_explain_shape_matches_contract():
     c = op.explain()
-    assert c["kinds"] == ["scheduler", "gtd"]
-    assert c["conditions"] == ["SchedulerAlive", "GtdSinkDraining"]
+    assert c["kinds"] == ["scheduler", "gtd", "watchdog", "grading"]
+    assert c["conditions"] == [
+        "SchedulerAlive", "GtdSinkDraining", "WatchdogDigestFresh", "GradingBacklog",
+    ]
     names = [a["name"] for a in c["actions"]]
     assert names == ["restart_service", "replay_errors"]
     for a in c["actions"]:
@@ -44,18 +46,30 @@ def test_cli_explain_emits_contract_json():
     r = runner.invoke(app, ["operator", "explain"])
     assert r.exit_code == 0, r.output
     c = json.loads(r.output)
-    assert c["kinds"] == ["scheduler", "gtd"]
-    assert c["conditions"] == ["SchedulerAlive", "GtdSinkDraining"]
+    assert c["kinds"] == ["scheduler", "gtd", "watchdog", "grading"]
+    assert c["conditions"] == [
+        "SchedulerAlive", "GtdSinkDraining", "WatchdogDigestFresh", "GradingBacklog",
+    ]
     assert [a["name"] for a in c["actions"]] == ["restart_service", "replay_errors"]
 
 
-def test_explain_byte_compatible_with_adapter():
-    """explain() is the same shape/content as Atlas's skos_adapter.skos_explain."""
+def test_explain_superset_of_adapter():
+    """explain() must still carry every condition/kind Atlas's skos_adapter
+    declares (a real drift check on the shared surface). It is allowed to be
+    a strict superset until skcapstone lands its own WD-11 follow-up card
+    (adding WatchdogDigestFresh + GradingBacklog to skos_adapter.py) -- that
+    change is cross-repo and out of scope here. Actions are untouched by this
+    card and must still match exactly."""
     skos_adapter = pytest.importorskip(
         "skcapstone.operator_seat.skos_adapter",
         reason="optional sibling skcapstone not installed",
     )
-    assert op.explain() == skos_adapter.skos_explain()
+    c = op.explain()
+    ac = skos_adapter.skos_explain()
+    assert set(ac["conditions"]) <= set(c["conditions"])
+    assert set(ac["kinds"]) <= set(c["kinds"])
+    assert c["actions"] == ac["actions"]
+    assert {"WatchdogDigestFresh", "GradingBacklog"} <= set(c["conditions"])
 
 
 # --- observe -----------------------------------------------------------------
@@ -66,10 +80,15 @@ def _observe_types(doc):
 
 
 def test_observe_healthy_via_injected_probe():
-    doc = op.observe(lambda: {"scheduler_alive": True, "gtd_draining": True})
+    doc = op.observe(lambda: {
+        "scheduler_alive": True, "gtd_draining": True,
+        "digest_fresh": True, "grading_ok": True,
+    })
     assert _observe_types(doc) == [
         ("SchedulerAlive", "True", "skscheduler"),
         ("GtdSinkDraining", "True", "gtd-sink"),
+        ("WatchdogDigestFresh", "True", "watchdog-digest"),
+        ("GradingBacklog", "True", "grading-loop"),
     ]
 
 
@@ -87,33 +106,72 @@ def test_observe_gtd_sink_firing():
     assert by["GtdSinkDraining"] == "False"
 
 
-def test_observe_shape_byte_compatible_with_adapter():
+def test_observe_digest_stale_firing():
+    doc = op.observe(lambda: {"digest_fresh": False})
+    by = {c["type"]: c["status"] for c in doc["conditions"]}
+    assert by["WatchdogDigestFresh"] == "False"
+    # untouched keys still default healthy, per observe()'s own .get(..., True)
+    assert by["SchedulerAlive"] == "True"
+
+
+def test_observe_grading_backlog_firing():
+    doc = op.observe(lambda: {"grading_ok": False})
+    by = {c["type"]: c["status"] for c in doc["conditions"]}
+    assert by["GradingBacklog"] == "False"
+
+
+def test_observe_shared_conditions_match_adapter():
+    """op.observe() is byte-compatible with Atlas's skos_adapter.skos_observe
+    on every condition the adapter already knows about; the two NEW WD-11
+    conditions are additions skos carries ahead of that mirror (see
+    test_explain_superset_of_adapter) until skcapstone's own follow-up card
+    lands -- cross-repo, out of scope here."""
     skos_adapter = pytest.importorskip(
         "skcapstone.operator_seat.skos_adapter",
         reason="optional sibling skcapstone not installed",
     )
-    healthy = {"scheduler_alive": True, "gtd_draining": True}
-    assert op.observe(lambda: healthy) == skos_adapter.skos_observe(lambda: healthy)
+    healthy = {
+        "scheduler_alive": True, "gtd_draining": True,
+        "digest_fresh": True, "grading_ok": True,
+    }
+    ours = {c["type"]: c for c in op.observe(lambda: healthy)["conditions"]}
+    theirs = {c["type"]: c for c in skos_adapter.skos_observe(lambda: healthy)["conditions"]}
+    for cond_type, cond in theirs.items():
+        assert ours[cond_type] == cond
+    assert set(ours) - set(theirs) == {"WatchdogDigestFresh", "GradingBacklog"}
 
 
 def test_cli_observe_emits_conditions_json(monkeypatch):
     monkeypatch.setattr(
         op, "_default_probe",
-        lambda: {"scheduler_alive": True, "gtd_draining": True},
+        lambda: {
+            "scheduler_alive": True, "gtd_draining": True,
+            "digest_fresh": True, "grading_ok": True,
+        },
     )
     r = runner.invoke(app, ["operator", "observe"])
     assert r.exit_code == 0, r.output
     doc = json.loads(r.output)
-    assert {c["type"] for c in doc["conditions"]} == {"SchedulerAlive", "GtdSinkDraining"}
+    assert {c["type"] for c in doc["conditions"]} == {
+        "SchedulerAlive", "GtdSinkDraining", "WatchdogDigestFresh", "GradingBacklog",
+    }
 
 
 # --- default probe: real signals, fail safe ----------------------------------
 
 
 def test_default_probe_fails_safe_when_unreachable(tmp_path, monkeypatch):
-    """No ledger + empty GTD store -> healthy (fail safe), never a false alarm."""
+    """No ledger + empty GTD store -> healthy (fail safe), never a false alarm.
+
+    SK_WATCHDOG_DIR is isolated too (a bare tmp dir with no digest ever
+    published), even though this test does not assert on digest_fresh /
+    grading_ok: by design a never-published digest reads as STALE, not
+    unknown (see test_digest_age_is_infinite_when_never_published below), so
+    asserting it healthy here would assert the wrong thing. This isolation
+    only exists so the test never touches the real fleet's watchdog dir."""
     monkeypatch.setenv("SKOS_CRON_LEDGER", str(tmp_path / "nope.jsonl"))
     monkeypatch.setenv("SK_GTD_DIR", str(tmp_path / "empty-gtd"))
+    monkeypatch.setenv("SK_WATCHDOG_DIR", str(tmp_path / "watchdog"))
     st = op._default_probe()
     assert st["scheduler_alive"] is True
     assert st["gtd_draining"] is True
@@ -137,6 +195,123 @@ def test_quarantine_backlog_makes_sink_fire(tmp_path, monkeypatch):
     monkeypatch.setenv("SK_GTD_DIR", str(gtd))
     assert op._count_quarantine(op._gtd_dir()) == 1
     assert op._sink_draining(op._count_quarantine(op._gtd_dir())) is False
+
+
+# --- WatchdogDigestFresh -------------------------------------------------------
+
+
+def test_digest_fresh_pure_rule():
+    assert op._digest_fresh(None) is True                       # could not look -> safe
+    assert op._digest_fresh(60.0) is True                        # just published -> fresh
+    assert op._digest_fresh(op._DIGEST_MAX_AGE_S + 1) is False   # stale -> firing
+    assert op._digest_fresh(float("inf")) is False               # never published -> firing
+
+
+def test_digest_age_reads_real_publish_mtime(tmp_path, monkeypatch):
+    """A real digest just published reads back as fresh: the file's own mtime
+    IS the publish moment (publish_digest's atomic replace)."""
+    monkeypatch.setenv("SK_WATCHDOG_DIR", str(tmp_path / "watchdog"))
+    from skos.watchdog.publish import publish_digest
+
+    publish_digest(
+        {"date": "2026-08-16", "headline": "quiet", "problems": [], "notable": [],
+         "info_counts": {}, "per_source": {}},
+        "# hello\n",
+    )
+    age = op._probe_digest_age()
+    assert age is not None
+    assert age < 5.0
+    assert op._digest_fresh(age) is True
+
+
+def test_digest_age_is_infinite_when_never_published(tmp_path, monkeypatch):
+    """The 'I looked and it is stale' case: the watchdog home resolves fine,
+    nothing has ever been published there. That is a real observation (the
+    narrator has never spoken), not a probe failure, so it reads as an
+    always-stale age, not as unknown."""
+    monkeypatch.setenv("SK_WATCHDOG_DIR", str(tmp_path / "watchdog"))
+    age = op._probe_digest_age()
+    assert age == float("inf")
+    assert op._digest_fresh(age) is False
+
+
+def test_digest_age_unknown_when_probe_cannot_look(monkeypatch):
+    """The 'I could not look' case: a real read failure (e.g. a permissions
+    blip), not a missing file, must stay quiet -- never cry wolf."""
+    class _Unreadable:
+        def stat(self):
+            raise PermissionError("simulated: no read access")
+
+    monkeypatch.setattr(op, "_digest_path", lambda: _Unreadable())
+    age = op._probe_digest_age()
+    assert age is None
+    assert op._digest_fresh(age) is True
+
+
+def test_digest_age_unknown_when_path_resolution_fails(monkeypatch):
+    """Even resolving WHERE to look can fail (an unresolvable watchdog home);
+    that is also a probe failure, not an observation, so it stays quiet."""
+    def _boom():
+        raise RuntimeError("simulated: cannot resolve watchdog home")
+
+    monkeypatch.setattr(op, "_digest_path", _boom)
+    assert op._probe_digest_age() is None
+
+
+# --- GradingBacklog -------------------------------------------------------------
+
+
+def test_grading_not_backlogged_pure_rule():
+    assert op._grading_not_backlogged(False) is True   # budget not exhausted -> healthy
+    assert op._grading_not_backlogged(True) is False    # budget exhausted -> firing
+
+
+def _grading_gap_digest(*, budget_exhausted: bool, skipped: int = 3):
+    return {
+        "date": "2026-08-16", "headline": "x", "problems": [],
+        "notable": [{
+            "ts": "2026-08-16T06:00:00Z", "source": "grading", "kind": "GradingGap",
+            "object": "lumina-replies", "severity": "notable",
+            "summary": f"{skipped} reply grade(s) skipped this run.",
+            "link": {"uri": "", "http": ""}, "ref": "grading:gap:2026-08-16",
+            "meta": {"skipped": skipped, "budget_exhausted": budget_exhausted},
+        }],
+        "info_counts": {}, "per_source": {},
+    }
+
+
+def test_grading_budget_exhausted_true_fires_backlog(tmp_path, monkeypatch):
+    monkeypatch.setenv("SK_WATCHDOG_DIR", str(tmp_path / "watchdog"))
+    from skos.watchdog.publish import publish_digest
+
+    publish_digest(_grading_gap_digest(budget_exhausted=True), "# md\n")
+    assert op._probe_grading_budget_exhausted() is True
+    assert op._grading_not_backlogged(op._probe_grading_budget_exhausted()) is False
+
+
+def test_grading_gap_without_budget_exhausted_does_not_backlog(tmp_path, monkeypatch):
+    """A skgateway outage or an unparseable reply is a grader-availability
+    skip, not a backlog; GradingBacklog must not fire on it alone."""
+    monkeypatch.setenv("SK_WATCHDOG_DIR", str(tmp_path / "watchdog"))
+    from skos.watchdog.publish import publish_digest
+
+    publish_digest(_grading_gap_digest(budget_exhausted=False, skipped=1), "# md\n")
+    assert op._probe_grading_budget_exhausted() is False
+
+
+def test_grading_budget_exhausted_false_when_no_digest(tmp_path, monkeypatch):
+    """No digest at all is not evidence of a backlog -- WatchdogDigestFresh's
+    alarm to raise, not this one's."""
+    monkeypatch.setenv("SK_WATCHDOG_DIR", str(tmp_path / "watchdog"))
+    assert op._probe_grading_budget_exhausted() is False
+
+
+def test_grading_budget_exhausted_false_when_digest_corrupt(tmp_path, monkeypatch):
+    monkeypatch.setenv("SK_WATCHDOG_DIR", str(tmp_path / "watchdog"))
+    from skos.watchdog.publish import DIGEST_JSON_NAME, latest_dir
+
+    (latest_dir() / DIGEST_JSON_NAME).write_text("{not valid json", encoding="utf-8")
+    assert op._probe_grading_budget_exhausted() is False
 
 
 # --- act ---------------------------------------------------------------------
