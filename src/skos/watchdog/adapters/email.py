@@ -79,7 +79,7 @@ import json
 import os
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from ..events import WatchdogEvent, WatchdogLink, source_unavailable
