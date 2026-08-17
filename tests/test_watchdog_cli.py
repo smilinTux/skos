@@ -18,6 +18,11 @@ WD-12's `sites` source is the same shape of exception for a different reason:
 it is the one adapter that opens a real network connection. See
 `_isolate_network_sources` below for what that cost before it was closed.
 
+Card 04ad64d7's `systemd_tier_a` is the third exception, for a third reason:
+env isolation cannot reach it at all. It reads this machine's live systemd,
+which has no env override and no store to redirect, so it is stubbed at its
+one seam. See `_isolate_systemd_source`.
+
 Isolation is applied by ONE autouse fixture rather than a call at the top of
 each test. A per-test call is a thing a new test can forget, and forgetting it
 is not a visible failure -- it is a test that quietly reaches live state. That
@@ -47,6 +52,55 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(dl, "default_sender", lambda text: True)
     _isolate_private_sources(tmp_path, monkeypatch)
     _isolate_network_sources(monkeypatch)
+    _isolate_systemd_source(monkeypatch)
+
+
+#: The fake systemd view every test in this module runs the real
+#: `systemd_tier_a` adapter against: two Tier A units in the user scope, one of
+#: them enabled and STOPPED. That second one is the whole point of card
+#: 04ad64d7, and it is what makes the end-to-end acceptance test below able to
+#: assert that a stopped Tier A service reaches a human, without stopping a
+#: live service to find out.
+STOPPED_TIER_A_UNIT = "skgateway.service"
+
+
+def _fake_systemd_units(scope):
+    from skos.watchdog.adapters.systemd_tier_a import UnitState
+    if scope != "user":
+        return []
+    return [
+        UnitState(unit=STOPPED_TIER_A_UNIT, scope="user", unit_file_state="enabled",
+                  active_state="inactive", sub_state="dead", type="simple", tier_a=True),
+        UnitState(unit="sknoded.service", scope="user", unit_file_state="enabled",
+                  active_state="active", sub_state="running", type="simple", tier_a=True),
+        # deliberately off, and deliberately NOT a finding
+        UnitState(unit="shadowcopy-monitor.service", scope="user",
+                  unit_file_state="disabled", active_state="inactive", sub_state="dead",
+                  type="simple", tier_a=True),
+    ]
+
+
+def _isolate_systemd_source(monkeypatch):
+    """Card 04ad64d7's `systemd_tier_a` reads this machine's LIVE systemd.
+
+    Unlike every other source here there is no env var to point elsewhere and
+    no store to redirect: the unit state of the box the test runs on is the
+    input. Left open, these tests would shell out to the real `systemctl`,
+    read whatever this developer happens to have running, and report a real
+    stopped service as a finding in a test digest, which is both a live read
+    and a result that changes depending on whose box ran it.
+
+    So the adapter's one seam (`default_unit_reader`, the only place that
+    module talks to systemd) is replaced with a fixed fake view, and
+    `subprocess.run` inside the module is nailed shut behind it so a future
+    refactor that grows a second path out to the shell fails here loudly
+    instead of quietly going live.
+    """
+    from skos.watchdog.adapters import systemd_tier_a as ta
+    monkeypatch.delenv("SKWATCHDOG_SYSTEMD_SCOPES", raising=False)
+    monkeypatch.setattr(ta, "default_unit_reader", _fake_systemd_units)
+    monkeypatch.setattr(ta.subprocess, "run", lambda *a, **kw: (
+        _ for _ in ()).throw(AssertionError("the CLI test reached the real systemctl")))
 
 
 def _isolate_network_sources(monkeypatch):
@@ -143,6 +197,75 @@ def test_the_network_reaching_sites_source_runs_in_a_real_digest_and_stays_quiet
     per_source = json.loads(latest_dir().joinpath("digest.json").read_text())["per_source"]
     assert per_source["sites"]["ok"] is True
     assert per_source["sites"]["events"] == 0
+
+
+def test_a_stopped_tier_a_service_reaches_a_human_end_to_end(tmp_path, monkeypatch):
+    """Card 04ad64d7's own acceptance criterion: stop a Tier A service on
+    purpose and confirm a human is actually told.
+
+    The service is stopped AT THE SYSTEMD BOUNDARY (the `_fake_systemd_units`
+    view above says `skgateway.service` is enabled and inactive) rather than
+    by stopping a live one, and everything downstream of that boundary is the
+    real thing: the real adapter registry, the real digest assembly, the real
+    renderer, the real publish step, the real GTD sink and the real delivery
+    formatting. Each link is asserted individually, because the alarm silently
+    no-opping is exactly the failure this card exists to fix, and a chain is
+    only proven where it was actually pulled.
+
+    Asserted the whole way down:
+        systemd state -> WatchdogEvent -> digest.json -> published Markdown
+        -> the DM body handed to the delivery path -> a tracked GTD item
+
+    The one link this cannot exercise is the last hop off this box: the real
+    `hermes send` subprocess, and Telegram behind it. That is stubbed here on
+    purpose (the suite must not message Chef), so what this test proves is
+    that a correct, complete, deep-linked message is HANDED to the delivery
+    path, not that Telegram delivered it.
+    """
+    import json
+    from skos.watchdog import deliver as dl
+
+    monkeypatch.setenv("SKWATCHDOG_GTD", "1")
+    monkeypatch.setenv("SK_GTD_DIR", str(tmp_path / "gtd"))
+    sent = []
+    monkeypatch.setattr(dl, "default_sender", lambda text: sent.append(text) or True)
+
+    res = runner.invoke(app, ["watchdog", "digest", "--date", "2026-08-16"])
+    assert res.exit_code == 0, res.output
+
+    # 1. the source read OK and produced the finding (not a degraded source:
+    #    collect_safe would fold a broken adapter into a quiet notable line,
+    #    so checking `ok` is what stops a silent degrade from passing here)
+    published = json.loads(latest_dir().joinpath("digest.json").read_text())
+    assert published["per_source"]["systemd_tier_a"]["ok"] is True
+
+    # 2. it is a PROBLEM in the digest, with its deep link intact
+    problems = [p for p in published["problems"] if p["source"] == "systemd_tier_a"]
+    assert len(problems) == 1, published["problems"]
+    finding = problems[0]
+    assert finding["kind"] == "TierAUnitDown"
+    assert STOPPED_TIER_A_UNIT in finding["summary"]
+    assert finding["link"]["uri"].endswith(f"/systemd/user/{STOPPED_TIER_A_UNIT}")
+
+    # 3. the deliberately-disabled Tier A unit is nowhere in any of it
+    blob = json.dumps(published)
+    assert "shadowcopy-monitor" not in blob
+
+    # 4. it is in the published Markdown a human reads
+    md = latest_dir().joinpath("digest.md").read_text()
+    assert STOPPED_TIER_A_UNIT in md
+
+    # 5. it is in the DM body actually handed to the delivery path
+    assert len(sent) == 1, "no DM was handed to the delivery path at all"
+    assert STOPPED_TIER_A_UNIT in sent[0]
+    assert "Problems" in sent[0]
+
+    # 6. and it became tracked work in the unified GTD, keyed on the finding's
+    #    own coordinates rather than on today's date
+    from skos.gtd_ingest import gtd_dir
+    items = json.loads((gtd_dir() / "next-actions.json").read_text())
+    refs = [i.get("source_ref") for i in items]
+    assert f"systemd_tier_a:TierAUnitDown:{STOPPED_TIER_A_UNIT}@user" in refs, refs
 
 
 def test_no_send_skips_dm(monkeypatch):
