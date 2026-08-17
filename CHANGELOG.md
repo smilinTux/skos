@@ -6,6 +6,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 ## [Unreleased]
 
 ### Fixed
+- **skos no longer re-tests skharness's autocode engine through its own shims**
+  (card `ba782c14` follow-on). `skos.autopilot.{config,ci,claude_code}` are
+  `from skharness.autocode.X import *` re-exports since Wave 2 Phase B of the autocode
+  extraction, but skos kept copies of skharness's behaviour tests: 16 + 6 + 2 tests
+  whose names all exist in skharness, which owns supersets (19/13/8) that pass. The
+  copies added no coverage and guaranteed drift, and three had drifted far enough to
+  turn CI red: `DEFAULT_HARNESS` became `"pi"` while the copy asserted `"claude-code"`,
+  the claude-code argv changed, and `diff_coverage` was hardened (card `53b8c8be`/S21)
+  to delete any pre-existing `coverage.xml` so a planted report can never be read as a
+  measurement, which the copy planted and expected back. Replaced with
+  `tests/test_autocode_shim_contract.py`, asserting the only thing a shim is
+  responsible for: that every public engine name is re-exported and IS the engine's
+  object. Suite goes 3 failed → 0 failed (1342 passed).
+- **Two unused imports that failed the `ruff --select=...,F401 src tests` gate**:
+  `timezone` in `src/skos/watchdog/adapters/email.py` (from WD-6, `f8d941a`) and `time`
+  in `tests/test_watchdog_adapter_sites.py`. Unrelated to the above, but they fail the
+  same CI selector, so fixing only the tests would have left the gate red regardless.
 - **`timer_wrap` now wraps a unit's EFFECTIVE `ExecStart`, not its base fragment**
   (card `47e32514`). systemd's effective value is the base unit plus its drop-ins in
   lexical order, with a bare `ExecStart=` resetting the list. Reading only the base file

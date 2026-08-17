@@ -8,7 +8,6 @@ is never reached even when every higher-level seam is exercised.
 """
 from __future__ import annotations
 
-import time
 
 import pytest
 from urllib.error import HTTPError
