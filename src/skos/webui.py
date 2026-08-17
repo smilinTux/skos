@@ -72,10 +72,14 @@ def _scheduler_health() -> dict[str, Any]:
         from skos import operator_probe
 
         probe = operator_probe._default_probe()
+        # quarantine_depth is tri-state (operator_probe._count_quarantine): None
+        # means the probe could not look, and must stay None so the page renders
+        # "n/a" instead of a 0 nobody verified.
+        depth = probe.get("quarantine_depth")
         return {
             "scheduler_alive": bool(probe.get("scheduler_alive", True)),
             "gtd_draining": bool(probe.get("gtd_draining", True)),
-            "quarantine_depth": int(probe.get("quarantine_depth", 0)),
+            "quarantine_depth": None if depth is None else int(depth),
         }
     except Exception:
         return {"scheduler_alive": None, "gtd_draining": None, "quarantine_depth": None}
