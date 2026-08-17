@@ -27,6 +27,16 @@ Phase 3 (WD-12), section 11:
                      adapters/sites.py's module docstring for the run-budget
                      and blip-vs-outage rules that come with that
 
+Card 04ad64d7 ("Tier A does not mean running"):
+
+    systemd_tier_a  a STATE-BASED reconcile of every SERVICE_UNIT_STANDARD
+                     Tier A unit against "should be running". Tier A's
+                     `Restart=on-failure` does not cover a deliberate
+                     `systemctl stop`, so the one source here that cannot be
+                     event-driven: a stopped unit emits nothing, so nothing
+                     fires, so it must be periodically COMPARED instead of
+                     waited for
+
 The three WD-6 sources above carry SUMMARIES AND REFS ONLY: counts, labels,
 thread/chat identity and a deep link back to the real message. No message
 body, no email body, no subject line and no thread title ever reaches a
@@ -78,17 +88,23 @@ PHASE3_SOURCES = (
     "sites",
 )
 
+#: Card 04ad64d7: the Tier A liveness reconcile (the only state-based source).
+TIER_A_SOURCES = (
+    "systemd_tier_a",
+)
+
 
 def load_all() -> list[str]:
-    """Import and register every Phase-1 + Phase-2 + Phase-3 adapter on the
-    watchdog-source port (PHASE1_SOURCES + PHASE2_SOURCES + PHASE3_SOURCES).
+    """Import and register every adapter on the watchdog-source port
+    (PHASE1_SOURCES + PHASE2_SOURCES + PHASE3_SOURCES + TIER_A_SOURCES).
 
     Safe to call more than once (re-importing an already-imported module is a
     no-op; re-registering a name just overwrites the registry entry with the
     same class). Returns the registered names, sorted.
     """
     from . import (atlas, chat_skchat, chat_telegram, coord_autocode, email,  # noqa: F401
-                   fleet_events, git, grading, itil, scheduler, sites)  # noqa: F401
+                   fleet_events, git, grading, itil, scheduler, sites,  # noqa: F401
+                   systemd_tier_a)  # noqa: F401
     from ..port import registry
 
     return registry.available_for("watchdog-source")
