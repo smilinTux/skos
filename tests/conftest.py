@@ -1,4 +1,7 @@
 import importlib.util
+import ipaddress
+import os
+import socket
 from pathlib import Path
 
 import pytest
@@ -6,6 +9,103 @@ import pytest
 
 _HAVE_SKCAPSTONE = importlib.util.find_spec("skcapstone") is not None
 _HAVE_SKHARNESS = importlib.util.find_spec("skharness") is not None
+
+
+# --------------------------------------------------------------------------
+# No test opens a connection off this box.
+#
+# This is a hard suite-wide guard, not a convention, because the failure it
+# prevents is invisible: an adapter that reaches the network from a test does
+# not fail, it just gets slower, reads live state it was never meant to see,
+# and behaves differently depending on whose box and whose config it runs on.
+#
+# It has already happened once. `watchdog/adapters/sites.py` (WD-12) is the
+# one adapter that makes real HTTP requests, and it reads its target list from
+# `SKWATCHDOG_SITES` via the operator env. tests/test_watchdog_cli.py drives
+# the whole adapter registry end to end and did not clear that variable, so on
+# any box where an operator had configured it, four CLI tests each checked the
+# real domains over the real internet and spent the adapter's full 90s run
+# budget doing it: measured at 92-98s per test, 383s for that one file, all of
+# it blocked on the wire (1.3s of CPU across the whole run). The tests passed
+# the entire time. Only the clock said anything was wrong.
+#
+# Loopback stays open (local servers, ASGI/TestClient plumbing, unix sockets);
+# only a route off the machine is refused, and it is refused IMMEDIATELY so a
+# leak costs a visible error instead of a connect timeout. Set
+# SKOS_TESTS_ALLOW_NETWORK=1 to lift it deliberately for a session.
+# --------------------------------------------------------------------------
+
+_LOCAL_HOSTS = {"", "localhost", "localhost.localdomain", "0.0.0.0", "::", "<broadcast>"}
+
+
+def _address_is_local(address) -> bool:
+    """True for anything that cannot leave this machine. A non-tuple address is
+    an AF_UNIX path (or something equally exotic), which is local by
+    construction."""
+    if not isinstance(address, tuple) or not address:
+        return True
+    host = str(address[0])
+    if host in _LOCAL_HOSTS:
+        return True
+    try:
+        return ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False  # a hostname that is not plainly local: treat as off-box
+
+
+def _install_outbound_network_guard() -> None:
+    if os.environ.get("SKOS_TESTS_ALLOW_NETWORK") == "1":
+        return
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+
+    def _refuse(address):
+        raise RuntimeError(
+            f"the test suite tried to open a network connection to {address!r}. "
+            "Tests must not reach off this box: stub the module's network seam "
+            "(and clear whatever env supplied the target). Set "
+            "SKOS_TESTS_ALLOW_NETWORK=1 to lift this guard deliberately."
+        )
+
+    def guarded_connect(self, address):
+        if not _address_is_local(address):
+            _refuse(address)
+        return real_connect(self, address)
+
+    def guarded_connect_ex(self, address):
+        if not _address_is_local(address):
+            _refuse(address)
+        return real_connect_ex(self, address)
+
+    socket.socket.connect = guarded_connect
+    socket.socket.connect_ex = guarded_connect_ex
+
+
+_install_outbound_network_guard()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_operator_env(tmp_path, monkeypatch):
+    """Point the gitignored operator env file at a throwaway path for EVERY
+    test, and drop skos.secret_env's process-level cache of it on both sides.
+
+    `secret_env._file_values` is an `lru_cache(maxsize=1)` keyed on NOTHING, so
+    the first call anywhere in a pytest process pins that whole process to
+    whichever file was resolved at that instant. Two failures fall out of that,
+    and this fixture closes both: a test that redirects `SKOS_SCHEDULE_ENV`
+    after the cache is warm keeps silently reading the operator's REAL values
+    (tests/test_watchdog_cli.py's own docstring records being bitten by exactly
+    this), and a test that warms the cache from its own tmp file leaks those
+    values forward into every test that runs after it.
+
+    Tests that want their own operator env still just `monkeypatch.setenv` it;
+    that runs after this fixture and wins, and the cache is clear when they do.
+    """
+    from skos import secret_env
+    secret_env._file_values.cache_clear()
+    monkeypatch.setenv("SKOS_SCHEDULE_ENV", str(tmp_path / "no-operator.env"))
+    yield
+    secret_env._file_values.cache_clear()
 
 
 # skos.autopilot is a thin re-export shim over the OPTIONAL `skharness` package
