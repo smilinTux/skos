@@ -93,18 +93,27 @@ TIER_A_SOURCES = (
     "systemd_tier_a",
 )
 
+#: Card 99c33052: model fidelity. The only adapter that CONSUMES another
+#: service's artifact rather than probing for itself. skgateway owns the probe
+#: and stays the single prober: two probes of one fact drift apart and both keep
+#: answering confidently, which is the failure this adapter exists to catch.
+FIDELITY_SOURCES = (
+    "model_fidelity",
+)
+
 
 def load_all() -> list[str]:
     """Import and register every adapter on the watchdog-source port
-    (PHASE1_SOURCES + PHASE2_SOURCES + PHASE3_SOURCES + TIER_A_SOURCES).
+    (PHASE1_SOURCES + PHASE2_SOURCES + PHASE3_SOURCES + TIER_A_SOURCES
+    + FIDELITY_SOURCES).
 
     Safe to call more than once (re-importing an already-imported module is a
     no-op; re-registering a name just overwrites the registry entry with the
     same class). Returns the registered names, sorted.
     """
     from . import (atlas, chat_skchat, chat_telegram, coord_autocode, email,  # noqa: F401
-                   fleet_events, git, grading, itil, scheduler, sites,  # noqa: F401
-                   systemd_tier_a)  # noqa: F401
+                   fleet_events, git, grading, itil, model_fidelity,  # noqa: F401
+                   scheduler, sites, systemd_tier_a)  # noqa: F401
     from ..port import registry
 
     return registry.available_for("watchdog-source")
