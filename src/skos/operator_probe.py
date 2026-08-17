@@ -21,24 +21,30 @@ The observe probes are REAL and injectable (tests never touch a live skos):
     needs a replay. Resolving where that store lives is a pure read: see
     ``_gtd_dir`` for why it must never create the store.
   * ``WatchdogDigestFresh``  skwatchdog (spec section 4, Phase 4: "Atlas watches
-    the watchdog") published a digest within the last 26h: reads the mtime of
-    the published ``latest/digest.json`` (``skos.watchdog.publish``), the exact
-    moment ``publish_digest`` last landed one. A stale digest means the
+    the watchdog") published a digest within the last 26h: reads the published
+    ``<watchdog root>/digests/latest/digest.json`` (``skos.watchdog.publish``).
+    Age comes from the digest's OWN window end first, with the file's mtime
+    only as a fallback, so a stale digest that gets re-published today cannot
+    look fresh just because the bytes were rewritten. A stale digest means the
     narrator itself went quiet, the failure an absent morning message is easy
     to misread as "nothing happened" rather than "nobody is watching".
   * ``GradingBacklog``   the WD-7 grading loop (``skos.watchdog.adapters.grading``)
-    is not falling behind: reads the same latest digest for a ``GradingGap``
-    event whose ``meta.budget_exhausted`` is true, meaning a run had more
+    IS falling behind: reads the same latest digest for a ``GradingGap`` event
+    whose ``meta.budget_exhausted`` is exactly ``True``, meaning a run had more
     outbound replies queued than its fixed time budget could grade. A
     skgateway outage or one unparseable reply is a grader-AVAILABILITY skip,
     not a backlog, and deliberately does not fire this condition on its own.
+    Note the polarity: unlike the other three, this is a PROBLEM-when-True
+    condition (see ``PROBLEM_WHEN_TRUE``), matching the adapter exactly.
 
-Every probe fails SAFE (reports healthy) rather than raising a false alarm when
-skos is unreachable, matching the adapter's ``_default_probe`` fail-safe posture.
-``WatchdogDigestFresh`` carries one deliberate exception to "unreachable reads
-as healthy": a digest file that genuinely does not exist is not the same as a
-probe that could not look. See ``_probe_digest_age`` for how the two are told
-apart.
+The scheduler and GTD halves fail SAFE (report healthy) rather than raising a
+false alarm when skos is unreachable, matching the adapter's ``_default_probe``
+fail-safe posture. The two watchdog halves deliberately do NOT: they fail to
+UNKNOWN, never to healthy. A missing, unreadable, non-JSON or non-object digest,
+or a watchdog root that will not resolve, is exactly the "the narrator went
+quiet" case, so reporting it as fresh would silence the very signal the
+condition exists to raise. Unknown surfaces honestly as ``"Unknown"`` in the
+observe payload (see ``_tri``), which the operator brief reads as stale.
 
 Failing safe is not the same as inventing a reading. Every probe here resolves
 its paths WITHOUT creating anything (``_gtd_dir``, ``_digest_path``), and where
@@ -59,19 +65,32 @@ raises; a declared non-standard action escalates as MAJOR and never actuates).
 
 from __future__ import annotations
 
+import json
 import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-#: The four operator conditions. The first two match Atlas's skos_adapter.
-#: CONDITIONS exactly; WatchdogDigestFresh and GradingBacklog (WD-11, Phase 4)
-#: are ahead of that mirror until skcapstone lands its own follow-up card --
-#: see the module docstring's "Phase 4" bullets.
+#: The four operator conditions, matching Atlas's ``skos_adapter.CONDITIONS``
+#: exactly and in order. The generated SKWorld manifest's ``operator.conditions``
+#: block mirrors this same list, and skcapstone's drift guards
+#: (tests/operator_seat/test_manifest_adapter_conformance.py and
+#: test_manifest_adapter.py) assert all three agree.
 CONDITIONS = ["SchedulerAlive", "GtdSinkDraining", "WatchdogDigestFresh", "GradingBacklog"]
 
-#: The kinds skos exposes to the operator plane (mirrors skos_explain's kinds,
-#: same Phase-4-ahead-of-the-mirror caveat as CONDITIONS above).
-KINDS = ["scheduler", "gtd", "watchdog", "grading"]
+#: The kinds skos exposes to the operator plane (mirrors skos_explain's kinds).
+#: Grading is not its own kind: the grading loop is part of what the watchdog
+#: narrates, and the signal is read out of the watchdog's own digest.
+KINDS = ["scheduler", "gtd", "watchdog"]
+
+#: Condition types that indicate a PROBLEM when their status is "True"; the rest
+#: are health types, a problem when "False". ``GradingBacklog`` is a problem
+#: type: a backlog EXISTS when it is True. skcapstone's operator loop unions this
+#: optional module-level set across adapters (``loop.PROBLEM_WHEN_TRUE``), and
+#: skos' own adapter declares the identical set. Without it a backlog condition
+#: is read upside down: quiet when it fires, firing when it is quiet.
+PROBLEM_WHEN_TRUE = frozenset({"GradingBacklog"})
 
 #: Health-type conditions (they fire when status is False): a stalled scheduler
 #: or a backed-up GTD sink both read as False -> firing. The two actions mirror
@@ -110,10 +129,30 @@ _SCHEDULER_UNIT = "skscheduler.service"
 #: watchdog runs daily, so more than a day-plus of silence is genuinely "the
 #: narrator stopped", not a normal quiet morning.
 _DIGEST_MAX_AGE_S = 26 * 3600
+#: The published-digest filename and the two path segments below the watchdog
+#: root, mirroring ``publish.DIGEST_JSON_NAME`` / ``digests_dir`` / ``latest_dir``.
+#: Spelled out rather than imported because importing ``publish`` to learn a
+#: filename would be an import purely to read a constant, and the module it
+#: would pull in is the one whose mkdir side effects this probe exists to avoid.
+_DIGEST_JSON_NAME = "digest.json"
+_DIGEST_SEGMENTS = ("digests", "latest")
+#: The event kind the grading adapter emits for ungraded replies, and the meta
+#: flag separating "ran out of time" (backlog) from "grader was unavailable".
+_GRADING_GAP_KIND = "GradingGap"
+_BUDGET_FLAG = "budget_exhausted"
 
 
 def _b(value: bool) -> str:
     return "True" if value else "False"
+
+
+def _tri(value: Optional[bool]) -> str:
+    """Tri-state condition status, mirroring ``skos_adapter._tri``. ``None`` is
+    the honest Unknown and is NOT collapsed to healthy: see the module
+    docstring on why the watchdog halves must not fail safe."""
+    if value is None:
+        return "Unknown"
+    return _b(bool(value))
 
 
 # --- pure probe logic (unit-tested directly) ---------------------------------
@@ -141,26 +180,21 @@ def _sink_draining(quarantine_depth: Optional[int]) -> bool:
     return quarantine_depth <= _QUARANTINE_LIMIT
 
 
-def _digest_fresh(digest_age_s: Optional[float]) -> bool:
+def _digest_fresh(age_s: Optional[float]) -> Optional[bool]:
     """The digest-freshness rule: fresh when the latest published digest's age
-    is within the staleness window. Unknown age fails SAFE (fresh) -- but note
-    that a genuinely absent digest is NOT unknown here: `_probe_digest_age`
-    returns `float('inf')` for "looked, found nothing", which always compares
-    stale below, on purpose. Only `None` ("could not look at all") takes the
-    fail-safe branch."""
-    if digest_age_s is None:
-        return True
-    return digest_age_s <= _DIGEST_MAX_AGE_S
+    is within the staleness window.
 
-
-def _grading_not_backlogged(budget_exhausted: bool) -> bool:
-    """The grading loop is not falling behind when its most recent digest run
-    did not have to cut its grading list short for lack of time. Note the
-    inversion: the condition is named GradingBacklog (matching the spec and
-    Atlas's eventual mirror), but every condition in this module follows the
-    same status convention -- True means healthy -- so True here means NO
-    backlog was observed, exactly like SchedulerAlive/GtdSinkDraining."""
-    return not budget_exhausted
+    Tri-state, and deliberately NOT fail-safe (mirrors
+    ``skos_adapter._digest_fresh``). An unknown age stays UNKNOWN rather than
+    collapsing to fresh, because every way the age can come back unknown --
+    no digest on disk, an unreadable one, an unresolvable watchdog root -- is
+    itself the quiet-narrator case this condition exists to catch. Reporting
+    "fresh" there would be reporting that the watchdog is fine on the strength
+    of never having looked at it.
+    """
+    if age_s is None:
+        return None
+    return age_s <= _DIGEST_MAX_AGE_S
 
 
 # --- real signal readers (each fails safe = healthy) -------------------------
@@ -276,116 +310,184 @@ def _count_quarantine(gtd_dir: Optional[Path]) -> Optional[int]:
         return None
 
 
-def _digest_path() -> Optional[Path]:
-    """The published `latest/digest.json` path, resolved with the exact same
-    precedence `skos.watchdog.cursor.watchdog_home` uses (`SK_WATCHDOG_DIR` >
-    `<SKCAPSTONE_HOME>/watchdog` > `~/.skcapstone/watchdog`) but WITHOUT that
-    helper's mkdir side effect: this probe only ever reads (card: "Read-only
-    observation. This card adds no actions and actuates nothing."), so
-    merely asking whether a digest exists must never create the directory
-    tree underneath it. None on any resolution failure (fails safe: unknown,
-    mirroring `_gtd_dir`'s own soft-import posture)."""
-    try:
-        from skos.watchdog.publish import DIGEST_JSON_NAME
-    except Exception:
-        DIGEST_JSON_NAME = "digest.json"  # noqa: N806 - matches the publish.py constant
-    try:
-        env = os.environ.get("SK_WATCHDOG_DIR")
-        if env:
-            home = Path(env).expanduser()
-        else:
-            base = os.environ.get("SKCAPSTONE_HOME", str(Path.home() / ".skcapstone"))
-            home = Path(base) / "watchdog"
-        return home / "digests" / "latest" / DIGEST_JSON_NAME
-    except Exception:
-        return None
+def _watchdog_home() -> Optional[Path]:
+    """skos' watchdog state root, resolved WITHOUT creating it.
 
+    Mirrors ``skos.watchdog.cursor.watchdog_home()``'s precedence exactly
+    (``SK_WATCHDOG_DIR`` > ``<SKCAPSTONE_HOME>/watchdog`` >
+    ``~/.skcapstone/watchdog``) but never mkdirs. This re-implements the
+    precedence by hand for the same reason ``_gtd_dir`` above does, and the
+    same "do not simplify this back into a helper call" note applies with full
+    force: ``watchdog_home()`` mkdirs, and so do ``publish.digests_dir`` and
+    ``publish.latest_dir``. An operator that creates the store it is only
+    supposed to look at manufactures the state it then reports on, and a
+    freshly-mkdir'd empty digests dir is indistinguishable from a watchdog that
+    has never run.
 
-def _probe_digest_age() -> Optional[float]:
-    """Age in seconds since the latest published digest landed, or a sentinel
-    for two DIFFERENT failure modes -- this probe must tell them apart, not
-    collapse them into one fail-safe branch:
-
-      * the digest file genuinely does not exist (`FileNotFoundError`): the
-        probe DID look, successfully, and there is nothing there. That is
-        exactly the "narrator went quiet" signal `WatchdogDigestFresh` exists
-        to catch, so it reads back as an unbounded age (`float('inf')`) and
-        always fails the freshness check in `_digest_fresh` -- never as an
-        unknown that fails safe.
-      * anything else (a permission error on the digests dir, an unresolvable
-        watchdog home, or any other `OSError` reading the path): the probe
-        could NOT look at all. That is a probe failure, not an observation of
-        staleness, so it returns `None`, the same "I don't know" every other
-        probe in this module uses to stay quiet rather than cry wolf on a
-        permissions blip.
+    An empty/whitespace override falls back to the default rather than
+    resolving against the cwd. Returns None when nothing resolves, which reads
+    as UNKNOWN downstream, never as healthy.
     """
-    import time
-
     try:
-        p = _digest_path()
+        env = (os.environ.get("SK_WATCHDOG_DIR") or "").strip()
+        if env:
+            return Path(env).expanduser()
+        home = (os.environ.get("SKCAPSTONE_HOME") or "").strip()
+        base = Path(home).expanduser() if home else Path.home() / ".skcapstone"
+        return base / "watchdog"
     except Exception:
         return None
-    if p is None:
+
+
+def _digest_path() -> Optional[Path]:
+    """``<watchdog root>/digests/latest/digest.json``: the file
+    ``publish.publish_digest`` atomically replaces on every digest run, and the
+    one a served host (and the Flutter Digest tab) fetches."""
+    root = _watchdog_home()
+    if root is None:
         return None
-    try:
-        mtime = p.stat().st_mtime
-    except FileNotFoundError:
-        return float("inf")
-    except OSError:
-        return None
-    return max(0.0, time.time() - mtime)
+    return root.joinpath(*_DIGEST_SEGMENTS, _DIGEST_JSON_NAME)
 
 
-def _probe_grading_budget_exhausted() -> bool:
-    """Whether the latest published digest reports the WD-7 grading loop's own
-    run-time budget as exhausted (`GRADE_RUN_BUDGET_S` ran out mid-list, per
-    `skos.watchdog.adapters.grading`): the real "falling behind" signal, more
-    outbound replies queued than one run's fixed time budget could grade.
-    Deliberately narrower than "any grade was skipped this run": a skgateway
-    outage or one unparseable reply (`grader.SkipReason.GATEWAY_UNREACHABLE` /
-    `UNPARSEABLE_REPLY`) is a grader-AVAILABILITY problem, not a backlog, and
-    must not fire this condition on its own.
+def _read_digest() -> Optional[dict]:
+    """The published digest as a dict, or None (UNKNOWN) when it is absent,
+    unreadable, not JSON, or not a JSON object.
 
-    Unlike `_probe_digest_age`, this does not need a tri-state result: a
-    missing or unreadable digest is not, itself, evidence of a backlog (an
-    absent digest is `WatchdogDigestFresh`'s alarm to raise, not this one's),
-    so any failure to read or parse it -- missing file, corrupt JSON, an
-    unreadable dir -- reads as False, the same "unresolvable reads as no
-    problem" shape `_count_quarantine` already uses."""
-    import json
-
+    Never raises, never writes, and never creates a parent dir on the way to
+    looking. Both watchdog conditions read this one snapshot, so a single
+    filesystem read backs both and they can never disagree about what was on
+    disk."""
     try:
         p = _digest_path()
         if p is None:
-            return False
+            return None
+        if not p.is_file():
+            return None
         data = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
-        return False
-    for bucket in ("problems", "notable"):
-        for event in data.get(bucket) or ():
-            if not isinstance(event, dict):
-                continue
-            if event.get("source") != "grading" or event.get("kind") != "GradingGap":
-                continue
-            if bool((event.get("meta") or {}).get("budget_exhausted")):
-                return True
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _parse_iso(ts) -> Optional[float]:
+    """Epoch seconds for an ISO8601 stamp (a naive stamp reads as UTC), or None."""
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except (ValueError, AttributeError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def _window_end(digest: dict) -> Optional[float]:
+    """The end of the period the digest run actually covered, epoch seconds.
+
+    ``skos_adapter._digest_age_s`` reads ``window.until``; ``Window.to_dict``
+    (``skos.watchdog.port``) serialises the same field as ``to``, so the shipped
+    digests on disk carry ``{"from": ..., "to": ...}``. Both spellings are
+    accepted, ``until`` first so this stays a strict superset of the adapter's
+    behaviour: anything the adapter can date from the window, this dates
+    identically, and the real digests skos publishes get dated too instead of
+    silently falling through to mtime forever.
+    """
+    window = digest.get("window")
+    if not isinstance(window, dict):
+        return None
+    for key in ("until", "to"):
+        parsed = _parse_iso(window.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _digest_age_s(digest: Optional[dict], *, now: Optional[float] = None) -> Optional[float]:
+    """Age of the published digest in seconds, or None when unknown.
+
+    Prefers the digest's OWN window end (what the run actually covered) over
+    the file's mtime, so a stale digest that gets re-published cannot look
+    fresh just because the bytes were rewritten. Falls back to the file mtime
+    only when the window is missing or unparseable, and to None when even that
+    cannot be read.
+    """
+    if digest is None:
+        return None
+    published = _window_end(digest)
+    if published is None:
+        try:
+            p = _digest_path()
+            published = p.stat().st_mtime if p is not None else None
+        except Exception:
+            published = None
+    if published is None:
+        return None
+    return max(0.0, (time.time() if now is None else now) - published)
+
+
+def _digest_events(digest: dict):
+    """Every event a digest carries. ``assemble_digest`` puts problem- and
+    notable-severity events in these two lists (info events are only counted,
+    never carried), and ``GradingGap`` is emitted at notable severity."""
+    for key in ("problems", "notable"):
+        value = digest.get(key)
+        if not isinstance(value, list):
+            continue
+        for event in value:
+            if isinstance(event, dict):
+                yield event
+
+
+def _grading_backlog(digest: Optional[dict]) -> Optional[bool]:
+    """True only when a ``GradingGap`` event says the run's own time budget ran
+    out (``GRADE_RUN_BUDGET_S`` expired mid-list, per
+    ``skos.watchdog.adapters.grading``): the real "more replies queued than one
+    run had time to grade" signal.
+
+    Deliberately NARROW, and it must stay that way. The same ``GradingGap`` kind
+    is also emitted when the grader was unreachable or a reply did not parse
+    (``grader.SkipReason.GATEWAY_UNREACHABLE`` / ``UNPARSEABLE_REPLY``); that is
+    grader AVAILABILITY, not backlog. Widening this to "any GradingGap" would
+    turn every skgateway blip into a backlog alarm and make the real signal
+    worthless.
+
+    The flag test is ``is True``, not a truthiness check, on purpose: a digest
+    is JSON off disk and a meta value of the string ``"false"`` is truthy in
+    Python. ``is True`` fires only on a real JSON boolean true.
+
+    None (UNKNOWN) when there is no readable digest to judge from: an absent
+    digest is ``WatchdogDigestFresh``'s alarm to raise, and claiming "no
+    backlog" from a file nobody could read would be inventing a reading.
+    """
+    if digest is None:
+        return None
+    for event in _digest_events(digest):
+        if event.get("kind") != _GRADING_GAP_KIND:
+            continue
+        meta = event.get("meta")
+        if isinstance(meta, dict) and meta.get(_BUDGET_FLAG) is True:
+            return True
     return False
 
 
 def _default_probe() -> dict:
-    """Best-effort skos health from real signals. Fails SAFE (healthy) when skos
-    is unreachable, so an inability to probe never raises a false alarm (with
-    WatchdogDigestFresh's one deliberate exception, see `_probe_digest_age`)."""
+    """Best-effort skos health from real signals.
+
+    Two different fail postures, on purpose (mirrors
+    ``skos_adapter._default_probe``): the scheduler/GTD halves fail SAFE
+    (healthy) when skos is unreachable so an inability to probe never raises a
+    false alarm, while the two watchdog halves fail to UNKNOWN (None), never to
+    healthy. Each half is read independently, so a failing scheduler probe never
+    hides the digest reading and vice versa.
+    """
     run_age = _probe_scheduler_run_age()
     depth = _count_quarantine(_gtd_dir())
-    digest_age = _probe_digest_age()
-    budget_exhausted = _probe_grading_budget_exhausted()
+    digest = _read_digest()
     return {
         "scheduler_alive": _scheduler_alive(run_age),
         "gtd_draining": _sink_draining(depth),
         "quarantine_depth": depth,
-        "digest_fresh": _digest_fresh(digest_age),
-        "grading_ok": _grading_not_backlogged(budget_exhausted),
+        "digest_fresh": _digest_fresh(_digest_age_s(digest)),
+        "grading_backlog": _grading_backlog(digest),
     }
 
 
@@ -421,14 +523,17 @@ def observe(probe: Optional[Callable[[], dict]] = None) -> dict:
                 "status": _b(bool(st.get("gtd_draining", True))),
                 "object": "gtd-sink",
             },
+            # Tri-state, and note the missing-key default is None -> "Unknown",
+            # NOT True: a probe that did not report a watchdog reading has not
+            # told us the watchdog is fine.
             {
                 "type": "WatchdogDigestFresh",
-                "status": _b(bool(st.get("digest_fresh", True))),
+                "status": _tri(st.get("digest_fresh")),
                 "object": "watchdog-digest",
             },
             {
                 "type": "GradingBacklog",
-                "status": _b(bool(st.get("grading_ok", True))),
+                "status": _tri(st.get("grading_backlog")),
                 "object": "grading-loop",
             },
         ]
@@ -510,6 +615,7 @@ def act(
 __all__ = [
     "CONDITIONS",
     "KINDS",
+    "PROBLEM_WHEN_TRUE",
     "explain",
     "observe",
     "act",

@@ -87,6 +87,8 @@ def skos_module_manifest(base_url: str) -> dict:
             "conditions": [
                 "SchedulerAlive",
                 "GtdSinkDraining",
+                "WatchdogDigestFresh",
+                "GradingBacklog",
             ],
             "proposedStandardActions": ["restart_service", "replay_errors"],
         },

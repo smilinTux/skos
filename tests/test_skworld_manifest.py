@@ -60,6 +60,8 @@ def test_operator_facet_matches_the_skos_adapter_contract():
     assert op["conditions"] == [
         "SchedulerAlive",
         "GtdSinkDraining",
+        "WatchdogDigestFresh",
+        "GradingBacklog",
     ]
     assert op["proposedStandardActions"] == ["restart_service", "replay_errors"]
 
