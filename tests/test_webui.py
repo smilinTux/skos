@@ -28,7 +28,9 @@ def test_manifest_served_at_well_known(client):
     assert m["id"] == "skos"
     assert m["schemaVersion"] == SCHEMA_VERSION
     assert m["grade"] == "B"
-    assert m["operator"]["conditions"] == ["SchedulerAlive", "GtdSinkDraining"]
+    assert m["operator"]["conditions"] == [
+        "SchedulerAlive", "GtdSinkDraining", "WatchdogDigestFresh", "GradingBacklog",
+    ]
 
 
 def test_manifest_urls_are_origin_relative(client):
