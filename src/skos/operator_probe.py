@@ -18,7 +18,8 @@ The observe probes are REAL and injectable (tests never touch a live skos):
     the "error-recovery queue" is the sink's quarantine backlog, the
     ``*.corrupt-*`` files ``gtd_ingest._quarantine`` preserves when a store file
     fails to parse. A non-empty backlog reads as a sink that is not draining and
-    needs a replay.
+    needs a replay. Resolving where that store lives is a pure read: see
+    ``_gtd_dir`` for why it must never create the store.
   * ``WatchdogDigestFresh``  skwatchdog (spec section 4, Phase 4: "Atlas watches
     the watchdog") published a digest within the last 26h: reads the mtime of
     the published ``latest/digest.json`` (``skos.watchdog.publish``), the exact
@@ -38,6 +39,12 @@ skos is unreachable, matching the adapter's ``_default_probe`` fail-safe posture
 as healthy": a digest file that genuinely does not exist is not the same as a
 probe that could not look. See ``_probe_digest_age`` for how the two are told
 apart.
+
+Failing safe is not the same as inventing a reading. Every probe here resolves
+its paths WITHOUT creating anything (``_gtd_dir``, ``_digest_path``), and where
+it could not look it says so rather than reporting a confident zero: the
+observe verb is read-only, in the filesystem sense as well as the contract
+sense.
 
 The act verb maps the two reversible standard actions the adapter declares onto
 real actuation through an injectable runner:
@@ -120,9 +127,17 @@ def _scheduler_alive(newest_run_age_s: Optional[float]) -> bool:
     return newest_run_age_s <= _SCHEDULER_MAX_AGE_S
 
 
-def _sink_draining(quarantine_depth: int) -> bool:
+def _sink_draining(quarantine_depth: Optional[int]) -> bool:
     """The sink is draining when the error-recovery (quarantine) backlog is at or
-    below the limit. A backed-up backlog reads as not draining."""
+    below the limit. A backed-up backlog reads as not draining.
+
+    An unknown depth (None, see ``_count_quarantine``) fails SAFE (draining),
+    matching every other condition in this module: not being able to look is
+    not evidence of a backlog, and firing on every node that simply has no GTD
+    store yet would turn this condition into permanent noise. The distinction
+    is not lost, it is carried by ``quarantine_depth`` staying None."""
+    if quarantine_depth is None:
+        return True
     return quarantine_depth <= _QUARANTINE_LIMIT
 
 
@@ -157,15 +172,46 @@ def _cron_ledger() -> str:
 
 
 def _gtd_dir() -> Optional[Path]:
-    """The unified GTD store dir, via skos's own resolver. None on any failure
-    (fails safe: an unresolvable store reads as an empty backlog)."""
-    try:
-        from skos.gtd_ingest import gtd_dir
+    """The unified GTD store dir, resolved with the exact same precedence
+    ``skos.gtd_ingest.gtd_dir`` uses (``SK_GTD_DIR`` > skcapstone's own
+    shared-root resolver > ``<SKCAPSTONE_HOME>/coordination/gtd``) but WITHOUT
+    that helper's mkdir side effect.
 
-        return gtd_dir()
-    except Exception:
+    Why this re-implements the precedence by hand instead of just calling
+    ``gtd_dir()``: ``gtd_dir()`` CREATES the directory tree, and the skcapstone
+    resolver it delegates to (``skcapstone.mcp_tools.gtd_tools._gtd_dir``)
+    additionally seeds six empty store files. This module is the operator
+    facet's explain / observe / act contract, and observation here is
+    read-only, so merely asking "is the GTD sink draining" must never bring the
+    store into existence. Before this was fixed, running the test suite or
+    hitting the web UI's ``/status.json`` (which reaches ``_default_probe``
+    with no env isolation at all) created ``~/.skcapstone/coordination/gtd``,
+    seed files and all, as a side effect of a READ. An observer with a write
+    side effect is not an observer. Do not "simplify" this back into a
+    ``gtd_dir()`` call; ``_digest_path`` below re-implements
+    ``watchdog_home()`` for exactly the same reason (WD-11).
+
+    ``gtd_dir()`` itself is deliberately left alone: every one of its other
+    callers (``gtd_ingest``'s own writers and ``_store_lock``, ``mail``,
+    ``coldstart``, ``backup``) is a writer that wants the tree created.
+
+    Returns None when the path cannot be resolved at all. That reads as
+    UNKNOWN downstream, never as a confident "no backlog": see
+    ``_count_quarantine``.
+    """
+    try:
         env = os.environ.get("SK_GTD_DIR")
-        return Path(env).expanduser() if env else None
+        if env:
+            return Path(env).expanduser()
+        try:  # optional, soft: the same sibling alignment gtd_dir() does
+            from skcapstone.mcp_tools._helpers import _shared_root
+
+            return Path(_shared_root()).expanduser() / "coordination" / "gtd"
+        except Exception:  # noqa: BLE001 - absent or broken sibling: documented default
+            home = Path(os.environ.get("SKCAPSTONE_HOME", str(Path.home() / ".skcapstone")))
+            return home / "coordination" / "gtd"
+    except Exception:
+        return None
 
 
 def _probe_scheduler_run_age() -> Optional[float]:
@@ -201,18 +247,33 @@ def _probe_scheduler_run_age() -> Optional[float]:
         return None
 
 
-def _count_quarantine(gtd_dir: Optional[Path]) -> int:
+def _count_quarantine(gtd_dir: Optional[Path]) -> Optional[int]:
     """Count the sink's error-recovery backlog: quarantined ``*.corrupt-*`` store
-    files. A missing/unresolvable dir is zero (healthy)."""
+    files. Tri-state on purpose, the same way ``_probe_digest_age`` is:
+
+      * an ``int`` is a real observation. The store directory exists and was
+        enumerated, so the count IS the backlog.
+      * ``None`` means UNKNOWN: the path could not be resolved, the store does
+        not exist, or the directory could not be listed. Absence of the store
+        is not evidence the sink is fine, so this deliberately does not report
+        a confident ``0``, a number the probe never actually verified. This
+        matters more now that resolving the path no longer creates the store:
+        before, the probe's own mkdir guaranteed the dir existed and the 0 was
+        self-fulfilling.
+
+    ``_sink_draining`` still fails safe on the unknown, so this raises no false
+    alarm; the unknown-ness survives in the probe's ``quarantine_depth``, which
+    stays None rather than 0, and the web UI already renders that as "n/a".
+    """
     if gtd_dir is None:
-        return 0
+        return None
     p = Path(gtd_dir)
     if not p.is_dir():
-        return 0
+        return None
     try:
         return sum(1 for f in p.iterdir() if f.is_file() and ".corrupt-" in f.name)
     except Exception:
-        return 0
+        return None
 
 
 def _digest_path() -> Optional[Path]:

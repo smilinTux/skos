@@ -186,6 +186,7 @@ def test_scheduler_alive_pure_rule():
 def test_sink_draining_pure_rule():
     assert op._sink_draining(0) is True
     assert op._sink_draining(1) is False
+    assert op._sink_draining(None) is True   # could not look -> safe (draining)
 
 
 def test_quarantine_backlog_makes_sink_fire(tmp_path, monkeypatch):
@@ -195,6 +196,65 @@ def test_quarantine_backlog_makes_sink_fire(tmp_path, monkeypatch):
     monkeypatch.setenv("SK_GTD_DIR", str(gtd))
     assert op._count_quarantine(op._gtd_dir()) == 1
     assert op._sink_draining(op._count_quarantine(op._gtd_dir())) is False
+
+
+# --- observation is read-only, in the filesystem sense too ---------------------
+
+
+def test_probe_never_creates_the_gtd_store(tmp_path, monkeypatch):
+    """The bug this test exists for: `_gtd_dir()` used to call
+    `gtd_ingest.gtd_dir()`, which CREATES the store tree (and, through
+    skcapstone's resolver, seeds six JSON files). Merely asking "is the GTD
+    sink draining" therefore brought the store into existence, on a developer
+    machine or in CI, as a side effect of a read.
+
+    This does not mock mkdir. It points the store env at a path that genuinely
+    does not exist, runs the whole `_default_probe()` (the same entry point
+    `/status.json` reaches with no env isolation), and asserts with
+    `Path.exists()` that the path STILL does not exist afterwards.
+    """
+    store = tmp_path / "never" / "created" / "gtd"
+    monkeypatch.setenv("SK_GTD_DIR", str(store))
+    monkeypatch.setenv("SKCAPSTONE_HOME", str(tmp_path / "no-such-home"))
+    monkeypatch.setenv("SKOS_CRON_LEDGER", str(tmp_path / "no-ledger.jsonl"))
+    monkeypatch.setenv("SK_WATCHDOG_DIR", str(tmp_path / "watchdog"))
+
+    assert op._gtd_dir() == store
+    assert not store.exists()
+    assert not (tmp_path / "never").exists()
+
+    st = op._default_probe()                      # must not raise ...
+
+    assert not store.exists()                     # ... and must not have created it
+    assert not (tmp_path / "never").exists()
+    assert not (tmp_path / "no-such-home").exists()
+    # ... and reads as unknown, never as a confident "no backlog".
+    assert st["quarantine_depth"] is None
+    assert st["gtd_draining"] is True             # fail safe: no false alarm either
+
+
+def test_gtd_dir_falls_back_to_skcapstone_home_without_creating(tmp_path, monkeypatch):
+    """Resolution order without SK_GTD_DIR and without the optional sibling:
+    `<SKCAPSTONE_HOME>/coordination/gtd`, mirroring `gtd_ingest.gtd_dir`'s own
+    fallback, and still creating nothing."""
+    import sys
+
+    monkeypatch.delenv("SK_GTD_DIR", raising=False)
+    monkeypatch.setenv("SKCAPSTONE_HOME", str(tmp_path / "home"))
+    # simulate the sibling being absent: `from ... import _shared_root` raises
+    monkeypatch.setitem(sys.modules, "skcapstone.mcp_tools._helpers", None)
+
+    assert op._gtd_dir() == tmp_path / "home" / "coordination" / "gtd"
+    assert not (tmp_path / "home").exists()
+
+
+def test_count_quarantine_is_unknown_not_zero_when_it_cannot_look(tmp_path):
+    """An absent or unresolvable store is UNKNOWN, not an observed empty
+    backlog: absence of the store is not evidence the sink is fine."""
+    assert op._count_quarantine(None) is None
+    assert op._count_quarantine(tmp_path / "absent") is None
+    (tmp_path / "present").mkdir()
+    assert op._count_quarantine(tmp_path / "present") == 0   # looked, found none
 
 
 # --- WatchdogDigestFresh -------------------------------------------------------
