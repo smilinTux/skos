@@ -198,3 +198,314 @@ def data_root(tmp_path, monkeypatch):
 def vault_key(monkeypatch):
     from cryptography.fernet import Fernet
     monkeypatch.setenv("SKOS_VAULT_KEY", Fernet.generate_key().decode())
+
+
+# --------------------------------------------------------------------------- #
+# Cost directory and wallet isolation (S31, card 1bb4d4b0)                    #
+# --------------------------------------------------------------------------- #
+# Copied from skharness/tests/conftest.py to prevent skos tests from writing
+# to the live cost ledger and joule wallet.
+# See docs/S29-cost-ledger-leak-attribution.md for details.
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cost_dir(tmp_path_factory, monkeypatch):
+    """Point the autopilot cost ledger AND the settlement journal at a throwaway
+    dir for EVERY test. The gated settle path consults the settlement journal for
+    its double-settle guard and appends to it on a real settlement, so without
+    this a finalize test would read and write the live, Syncthing-synced
+    ~/.skcapstone/autopilot-cost tree."""
+    from skharness.autocode import joules
+    from skharness.autocode import ledger_correction
+    from skharness.autocode import wallet_correction
+    
+    # We need to import these to access their path constants, but we don't want
+    # to actually use the skharness modules in a way that would trigger imports
+    # during test collection when skharness might not be available.
+    # Instead, we'll use the same approach as skharness conftest.
+    
+    # Point the cost directory to a temporary directory
+    cd = tmp_path_factory.mktemp("autopilot-cost")
+    monkeypatch.setenv("SKAI_COST_DIR", str(cd))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_joule_wallet(tmp_path_factory, monkeypatch):
+    """Point the JOULE WALLET at a throwaway skcapstone root for EVERY test.
+
+    joules.settle() mints and spends against JouleWallet(agent), which resolves
+    the operator's real ~/.skcapstone home when nothing overrides it. settle() is
+    the twin-gate pass path and the finalize tests exercise the pass path, so the
+    suite minted well formed joules into the live ledger for weeks: 1,433 rows
+    carrying the fixture description 'autocode task_complete t1' and 107,475
+    joules, in a wallet the joule economy reads as real. The rows are individually
+    valid and indistinguishable from genuine ones except by that string.
+
+    SKAI_COST_DIR above closed the settlement JOURNAL half of this. This closes
+    the WALLET half, and _usage_home rides the same override so the cost
+    telemetry under {home}/usage is covered too.
+
+    On by default rather than opt-in: opt-in isolation fails exactly when someone
+    forgets, which is the case that matters. Per-file fixtures that pass an
+    explicit home= still win, same precedence as SKAI_COST_DIR.
+    """
+    from skharness.autocode import joules
+    
+    root = tmp_path_factory.mktemp("joule-wallet")
+    monkeypatch.setenv(joules.WALLET_HOME_ENV, str(root))
+
+
+# Session-scoped production-store guard for skos (similar to skharness's S29)
+# This ensures we catch if skos tests somehow write to production stores
+_LIVE_LEDGER = Path("~/.skcapstone/autopilot-cost/ledger.jsonl").expanduser()
+_LIVE_WALLET = Path("~/.skcapstone/agents/lumina/wallet/transactions.jsonl").expanduser()
+
+
+def _wallet_fixture_rows(path: Path) -> int:
+    """Count wallet rows carrying the fixture mint signature. READ ONLY, and
+    never raises: a guard that can break the suite it guards is a liability."""
+    if not path.exists():
+        return 0
+    total = 0
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    import json
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if (isinstance(row, dict)
+                        and str(row.get("description", "")).strip()
+                        == "autocode task_complete t1"):  # This is the fixture description from skharness
+                    total += 1
+    except OSError:
+        return total
+    return total
+
+
+def _ledger_fixture_rows(path: Path) -> int:
+    """Count ledger rows carrying the fixture mint signature."""
+    if not path.exists():
+        return 0
+    # We'd need to import ledger_correction from skharness, but to avoid
+    # import issues during collection, we'll do a simple string match for
+    # the fixture signature. This is less precise but safe.
+    if not path.exists():
+        return 0
+    total = 0
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                if "autocode task_complete t1" in line:
+                    total += 1
+    except OSError:
+        return total
+    return total
+
+
+def _production_fixture_counts() -> dict:
+    try:
+        return {
+            "cost ledger": (str(_LIVE_LEDGER), _ledger_fixture_rows(_LIVE_LEDGER)),
+            "joule wallet": (str(_LIVE_WALLET), _wallet_fixture_rows(_LIVE_WALLET)),
+        }
+    except Exception:  # noqa: BLE001 -- never let the guard break the suite
+        return {}
+
+
+def pytest_sessionstart(session):
+    session.config._s31_store_baseline = _production_fixture_counts()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    before = getattr(session.config, "_s31_store_baseline", None)
+    if not before:
+        return
+    after = _production_fixture_counts()
+    moved = [
+        (name, path, before[name][1], count)
+        for name, (path, count) in after.items()
+        if name in before and count > before[name][1]
+    ]
+    if not moved:
+        return
+
+    banner = [
+        "",
+        "=" * 78,
+        "PRODUCTION STORE CORRUPTED DURING SKOS TEST SESSION",
+        "=" * 78,
+    ]
+    for name, path, was, now in moved:
+        banner.append(f"  {name}: fixture rows {was} -> {now}  (+{now - was})")
+        banner.append(f"    {path}")
+    banner += [
+        "",
+        "  These stores are append-only and Syncthing-synced. A fixture row",
+        "  written into them cannot be taken back; it can only be corrected",
+        "  beside them (skharness.autocode.ledger_correction,",
+        "  skharness.autocode.wallet_correction).",
+        "",
+        "  If this suite wrote them, an isolation fixture in tests/conftest.py",
+        "  regressed or was missing. The skos test suite must isolate its writes",
+        "  to the cost ledger and joule wallet to prevent corrupting production",
+        "  data. See docs/S29-cost-ledger-leak-attribution.md.",
+        "=" * 78,
+        "",
+    ]
+    print("\n".join(banner), file=sys.stderr)
+    # Only ever raises the status; a real test failure must not be downgraded
+    if not exitstatus:
+        session.exitstatus = 1
+
+
+# --------------------------------------------------------------------------- #
+# Cost directory and wallet isolation (S31, card 1bb4d4b0)                    #
+# --------------------------------------------------------------------------- #
+# Add isolation fixtures to prevent skos tests from writing to the live cost
+# ledger and joule wallet. These mirror the fixtures in skharness/tests/conftest.py.
+# See docs/S29-cost-ledger-leak-attribution.md for details.
+
+_HAVE_SKHARNESS = False
+try:
+    import skharness  # noqa: F401
+    _HAVE_SKHARNESS = True
+except Exception:
+    pass  # skharness not available; isolation fixtures will be no-ops
+
+if _HAVE_SKHARNESS:
+    from skharness.autocode import joules
+    from skharness.autocode import ledger_correction
+    from skharness.autocode import wallet_correction
+
+    @pytest.fixture(autouse=True)
+    def _isolate_cost_dir(tmp_path_factory, monkeypatch):
+        """Point the autopilot cost ledger AND the settlement journal at a throwaway
+        dir for EVERY test."""
+        cd = tmp_path_factory.mktemp("autopilot-cost")
+        monkeypatch.setenv("SKAI_COST_DIR", str(cd))
+
+    @pytest.fixture(autouse=True)
+    def _isolate_joule_wallet(tmp_path_factory, monkeypatch):
+        """Point the JOULE WALLET at a throwaway skcapstone root for EVERY test."""
+        root = tmp_path_factory.mktemp("joule-wallet")
+        monkeypatch.setenv(joules.WALLET_HOME_ENV, str(root))
+
+
+    # Session-scoped production-store guard for skos (similar to skharness's S29)
+    # This ensures we catch if skos tests somehow write to production stores
+    _LIVE_LEDGER = Path("~/.skcapstone/autopilot-cost/ledger.jsonl").expanduser()
+    _LIVE_WALLET = Path("~/.skcapstone/agents/lumina/wallet/transactions.jsonl").expanduser()
+
+
+    def _wallet_fixture_rows(path: Path) -> int:
+        """Count wallet rows carrying the fixture mint signature. READ ONLY, and
+        never raises: a guard that can break the suite it guards is a liability."""
+        if not path.exists():
+            return 0
+        total = 0
+        try:
+            with path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        import json
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if (isinstance(row, dict)
+                            and str(row.get("description", "")).strip()
+                            == "autocode task_complete t1"):  # This is the fixture description from skharness
+                        total += 1
+        except OSError:
+            return total
+        return total
+
+
+    def _ledger_fixture_rows(path: Path) -> int:
+        """Count ledger rows carrying the fixture mint signature."""
+        if not path.exists():
+            return 0
+        total = 0
+        try:
+            with path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    if "autocode task_complete t1" in line:
+                        total += 1
+        except OSError:
+            return total
+        return total
+
+
+    def _production_fixture_counts() -> dict:
+        try:
+            return {
+                "cost ledger": (str(_LIVE_LEDGER), _ledger_fixture_rows(_LIVE_LEDGER)),
+                "joule wallet": (str(_LIVE_WALLET), _wallet_fixture_rows(_LIVE_WALLET)),
+            }
+        except Exception:  # noqa: BLE001 -- never let the guard break the suite
+            return {}
+
+
+    def pytest_sessionstart(session):
+        session.config._s31_store_baseline = _production_fixture_counts()
+
+
+    def pytest_sessionfinish(session, exitstatus):
+        before = getattr(session.config, "_s31_store_baseline", None)
+        if not before:
+            return
+        after = _production_fixture_counts()
+        moved = [
+            (name, path, before[name][1], count)
+            for name, (path, count) in after.items()
+            if name in before and count > before[name][1]
+        ]
+        if not moved:
+            return
+
+        banner = [
+            "",
+            "=" * 78,
+            "PRODUCTION STORE CORRUPTED DURING SKOS TEST SESSION",
+            "=" * 78,
+        ]
+        for name, path, was, now in moved:
+            banner.append(f"  {name}: fixture rows {was} -> {now}  (+{now - was})")
+            banner.append(f"    {path}")
+        banner += [
+            "",
+            "  These stores are append-only and Syncthing-synced. A fixture row",
+            "  written into them cannot be taken back; it can only be corrected",
+            "  beside them (skharness.autocode.ledger_correction,",
+            "  skharness.autocode.wallet_correction).",
+            "",
+            "  If this suite wrote them, an isolation fixture in tests/conftest.py",
+            "  regressed or was missing. The skos test suite must isolate its writes",
+            "  to the cost ledger and joule wallet to prevent corrupting production",
+            "  data. See docs/S29-cost-ledger-leak-attribution.md.",
+            "=" * 78,
+            "",
+        ]
+        print("\n".join(banner), file=sys.stderr)
+        # Only ever raises the status; a real test failure must not be downgraded
+        if not exitstatus:
+            session.exitstatus = 1
+
+else:
+    # skharness is not available; provide no-op fixtures to avoid breaking the test suite
+    # This allows the skos test suite to run in environments where only skos is installed
+    # (though autopilot-related tests would likely fail or be skipped due to missing dependency)
+    @pytest.fixture(autouse=True)
+    def _isolate_cost_dir(tmp_path_factory, monkeypatch):
+        pass
+
+    @pytest.fixture(autouse=True)
+    def _isolate_joule_wallet(tmp_path_factory, monkeypatch):
+        pass
