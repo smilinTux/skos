@@ -11,7 +11,8 @@ SB1.1 (this deliverable) is the PURE foundation, IO isolated behind interfaces:
   - embed   : Embedder protocol + mxbai HTTP client                         [IO, stubbable]
   - writer  : content-hash-diffed UpsertPlan + WriterBackend protocol       [plan pure, IO stubbable]
 
-Live sync CLI + cron are SB1.3, deliberately not wired here.
+Live sync, retrieval, secret lint and health checks are wired through the
+``skbrain`` CLI while keeping database and embedding I/O injectable.
 """
 
 from skos.brain.ops.chunker import chunk_body, chunk_page
