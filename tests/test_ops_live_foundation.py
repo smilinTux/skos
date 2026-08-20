@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from skos.brain.ops.doctor import run_checks
 from skos.brain.ops.read_api import OpsReader, build_retriever
 from skos.brain.ops.secrets import lint_text, lint_tree
@@ -17,24 +16,40 @@ class Cursor:
         self.rows = []
         self.calls = []
 
-    def __enter__(self): return self
-    def __exit__(self, *args): return None
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
     def execute(self, sql, params=None):
         self.calls.append((sql, params))
         self.rows = self.responses.pop(0)
-    def fetchall(self): return list(self.rows)
-    def fetchone(self): return self.rows[0] if self.rows else None
+
+    def fetchall(self):
+        return list(self.rows)
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
 
 
 class Connection:
-    def __init__(self, responses): self.cur = Cursor(responses)
-    def __enter__(self): return self
-    def __exit__(self, *args): return None
-    def cursor(self): return self.cur
+    def __init__(self, responses):
+        self.cur = Cursor(responses)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+    def cursor(self):
+        return self.cur
 
 
 class Embedder:
-    def embed(self, texts): return [[0.0] * 1024 for _ in texts]
+    def embed(self, texts):
+        return [[0.0] * 1024 for _ in texts]
 
 
 def test_secret_lint_redacts_value(tmp_path: Path):
@@ -76,7 +91,8 @@ def test_doctor_fails_closed_without_database(tmp_path: Path):
 
 def test_doctor_checks_schema_grants_and_population(tmp_path: Path):
     (tmp_path / "page.md").write_text("safe content", encoding="utf-8")
-    conn = Connection([[("ops.wiki_nodes", "ops.wiki_chunks", "ops.links")],
-                       [(True, True)], [(3, 60)]])
+    conn = Connection(
+        [[("ops.wiki_nodes", "ops.wiki_chunks", "ops.links")], [(True, True)], [(3, 60)]]
+    )
     checks = run_checks(canon=tmp_path, reader_dsn="redacted", connect=lambda dsn: conn)
     assert all(c.ok for c in checks)

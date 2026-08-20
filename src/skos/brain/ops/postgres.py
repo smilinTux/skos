@@ -56,27 +56,42 @@ class PostgresWriterBackend:
         with self._conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO ops.wiki_nodes
-                   (id, kind, title, namespace, origin, lifecycle, frontmatter, body_md, content_hash)
+                   (id, kind, title, namespace, origin, lifecycle,
+                    frontmatter, body_md, content_hash)
                    VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)
                    ON CONFLICT (id) DO UPDATE SET kind=EXCLUDED.kind,title=EXCLUDED.title,
                    namespace=EXCLUDED.namespace,origin=EXCLUDED.origin,
                    lifecycle=EXCLUDED.lifecycle,frontmatter=EXCLUDED.frontmatter,
                    body_md=EXCLUDED.body_md,content_hash=EXCLUDED.content_hash,updated_at=now()""",
-                (node.slug, node.kind, node.title, node.namespace, node.origin,
-                 node.lifecycle, json.dumps(node.frontmatter, default=str), node.body_md,
-                 node.content_hash),
+                (
+                    node.slug,
+                    node.kind,
+                    node.title,
+                    node.namespace,
+                    node.origin,
+                    node.lifecycle,
+                    json.dumps(node.frontmatter, default=str),
+                    node.body_md,
+                    node.content_hash,
+                ),
             )
             cur.execute("DELETE FROM ops.wiki_chunks WHERE node_id=%s", (node.slug,))
             for chunk in chunks:
-                vector = None if chunk.embedding is None else "[" + ",".join(map(str, chunk.embedding)) + "]"
+                vector = (
+                    None
+                    if chunk.embedding is None
+                    else "[" + ",".join(map(str, chunk.embedding)) + "]"
+                )
                 cur.execute(
-                    "INSERT INTO ops.wiki_chunks(node_id,ord,content,embedding) VALUES (%s,%s,%s,%s::public.vector)",
+                    "INSERT INTO ops.wiki_chunks(node_id,ord,content,embedding) "
+                    "VALUES (%s,%s,%s,%s::public.vector)",
                     (node.slug, chunk.ord, chunk.content, vector),
                 )
             cur.execute("DELETE FROM ops.links WHERE src=%s", (node.slug,))
             for edge in links:
                 cur.execute(
-                    "INSERT INTO ops.links(src,dst,edge_type,provenance) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                    "INSERT INTO ops.links(src,dst,edge_type,provenance) "
+                    "VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
                     (edge.src, edge.dst, edge.edge_type, edge.provenance),
                 )
             self._upsert_graph(cur, node, links)
@@ -97,7 +112,8 @@ class PostgresWriterBackend:
         node_id, title, kind = map(json.dumps, (node.slug, node.title, node.kind))
         query = (
             f"MERGE (n:OpsEntity {{id: {node_id}}}) "
-            f"SET n.title = {title}, n.kind = {kind}, n.content_hash = {json.dumps(node.content_hash)} "
+            f"SET n.title = {title}, n.kind = {kind}, "
+            f"n.content_hash = {json.dumps(node.content_hash)} "
             "RETURN n"
         )
         cur.execute(

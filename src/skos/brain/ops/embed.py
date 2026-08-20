@@ -44,9 +44,7 @@ def embed_chunks(chunks: list[OpsChunk], embedder: Embedder) -> list[OpsChunk]:
         return []
     vectors = embedder.embed([c.content for c in chunks])
     if len(vectors) != len(chunks):
-        raise EmbedError(
-            f"embedder returned {len(vectors)} vectors for {len(chunks)} chunks"
-        )
+        raise EmbedError(f"embedder returned {len(vectors)} vectors for {len(chunks)} chunks")
     return [
         OpsChunk(node_id=c.node_id, ord=c.ord, content=c.content, embedding=list(vec))
         for c, vec in zip(chunks, vectors)
@@ -89,6 +87,7 @@ class MxbaiEmbedder:
                 raise EmbedError(
                     "requests not installed; inject a transport or install requests"
                 ) from exc
+
             # Map the (url, json_body, timeout) transport contract onto
             # requests.post's (url, data=, json=, timeout=) signature. Passing
             # positionally binds body->data= (form-encoded) and timeout->json=,
@@ -128,6 +127,4 @@ class MxbaiEmbedder:
             return [list(v) for v in payload["embeddings"]]
         if "embedding" in payload:
             return [list(payload["embedding"])]
-        raise EmbedError(
-            f"no 'embeddings'/'embedding' key in response: {list(payload)}"
-        )
+        raise EmbedError(f"no 'embeddings'/'embedding' key in response: {list(payload)}")

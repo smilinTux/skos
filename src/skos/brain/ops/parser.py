@@ -85,9 +85,7 @@ def parse_page(text: str, *, slug: str) -> OpsPage:
     if fm is None:
         fm = {}
     if not isinstance(fm, dict):
-        raise OpsParseError(
-            f"Frontmatter must be a YAML mapping, got {type(fm).__name__}"
-        )
+        raise OpsParseError(f"Frontmatter must be a YAML mapping, got {type(fm).__name__}")
 
     # Slug invariant (spec 3.4): a declared id must equal the filename slug.
     declared_id = fm.get("id")
@@ -99,9 +97,7 @@ def parse_page(text: str, *, slug: str) -> OpsPage:
 
     kind = fm.get("type")
     if not kind:
-        raise OpsParseError(
-            f"Page {slug!r} is missing required frontmatter field 'type'."
-        )
+        raise OpsParseError(f"Page {slug!r} is missing required frontmatter field 'type'.")
 
     body = body.lstrip("\n")
     title = fm.get("title") or slug

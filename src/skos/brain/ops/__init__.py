@@ -9,7 +9,7 @@ SB1.1 (this deliverable) is the PURE foundation, IO isolated behind interfaces:
   - parser  : ops-page markdown -> OpsPage (slug, kind, edges, wikilinks)   [pure]
   - chunker : OpsPage body -> OpsChunk list (512-token mxbai discipline)     [pure]
   - embed   : Embedder protocol + mxbai HTTP client                         [IO, stubbable]
-  - writer  : content-hash-diffed UpsertPlan + WriterBackend protocol       [plan pure, IO stubbable]
+  - writer  : content-hash-diffed UpsertPlan + WriterBackend protocol
 
 Live sync, retrieval, secret lint and health checks are wired through the
 ``skbrain`` CLI while keeping database and embedding I/O injectable.

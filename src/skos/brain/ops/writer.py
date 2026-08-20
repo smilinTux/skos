@@ -63,9 +63,7 @@ class WriterBackend(Protocol):
 
     def existing_hashes(self) -> dict[str, str]: ...
 
-    def upsert_node(
-        self, node: OpsPage, chunks: list[OpsChunk], links: list[OpsEdge]
-    ) -> None: ...
+    def upsert_node(self, node: OpsPage, chunks: list[OpsChunk], links: list[OpsEdge]) -> None: ...
 
     def delete_node(self, node_id: str) -> None: ...
 
@@ -115,9 +113,7 @@ def embed_plan(plan: UpsertPlan, embedder: Embedder) -> UpsertPlan:
     )
 
 
-def apply_plan(
-    plan: UpsertPlan, backend: WriterBackend, *, commit: bool = False
-) -> ApplyResult:
+def apply_plan(plan: UpsertPlan, backend: WriterBackend, *, commit: bool = False) -> ApplyResult:
     """Execute *plan* against *backend*, guarded by *commit*.
 
     ``commit=False`` (default) is a dry run: nothing is written, but the returned

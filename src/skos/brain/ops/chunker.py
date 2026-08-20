@@ -138,7 +138,5 @@ def chunk_page(
     """Chunk ``page.body_md`` into ordered ``OpsChunk`` rows (embedding unset)."""
     return [
         OpsChunk(node_id=page.slug, ord=i, content=content)
-        for i, content in enumerate(
-            chunk_body(page.body_md, max_chars=max_chars, overlap=overlap)
-        )
+        for i, content in enumerate(chunk_body(page.body_md, max_chars=max_chars, overlap=overlap))
     ]

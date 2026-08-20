@@ -23,8 +23,13 @@ class SearchHit:
 class OpsReader:
     """Fail-safe read surface using the dedicated read-only DSN."""
 
-    def __init__(self, dsn: str, *, connect: Callable[[str], Any] = _connect,
-                 embedder: Embedder | None = None):
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        connect: Callable[[str], Any] = _connect,
+        embedder: Embedder | None = None,
+    ):
         self._dsn, self._connect, self._embedder = dsn, connect, embedder or MxbaiEmbedder()
 
     def search(self, query: str, *, limit: int = 8, kind: str | None = None) -> list[SearchHit]:
@@ -37,27 +42,53 @@ class OpsReader:
         encoded = "[" + ",".join(map(str, vector)) + "]"
         with self._connect(self._dsn) as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT node_id,kind,title,content,score FROM ops.hybrid_search_ops(%s,%s::public.vector,%s,%s)",
+                "SELECT node_id,kind,title,content,score "
+                "FROM ops.hybrid_search_ops(%s,%s::public.vector,%s,%s)",
                 (query, encoded, limit, kind),
             )
-            return [SearchHit(str(r[0]), str(r[1]), str(r[2]), str(r[3]), float(r[4])) for r in cur.fetchall()]
+            return [
+                SearchHit(str(r[0]), str(r[1]), str(r[2]), str(r[3]), float(r[4]))
+                for r in cur.fetchall()
+            ]
 
     def page(self, node_id: str) -> dict[str, Any] | None:
         """Return one page plus typed outgoing links, or None."""
         with self._connect(self._dsn) as conn, conn.cursor() as cur:
-            cur.execute("SELECT id,kind,title,lifecycle,body_md,updated_at FROM ops.wiki_nodes WHERE id=%s", (node_id,))
+            cur.execute(
+                "SELECT id,kind,title,lifecycle,body_md,updated_at "
+                "FROM ops.wiki_nodes WHERE id=%s",
+                (node_id,),
+            )
             row = cur.fetchone()
             if row is None:
                 return None
-            cur.execute("SELECT dst,edge_type,provenance FROM ops.links WHERE src=%s ORDER BY dst,edge_type", (node_id,))
-            return {"id": row[0], "kind": row[1], "title": row[2], "lifecycle": row[3],
-                    "body_md": row[4], "updated_at": str(row[5]), "links": [list(x) for x in cur.fetchall()]}
+            cur.execute(
+                "SELECT dst,edge_type,provenance FROM ops.links "
+                "WHERE src=%s ORDER BY dst,edge_type",
+                (node_id,),
+            )
+            return {
+                "id": row[0],
+                "kind": row[1],
+                "title": row[2],
+                "lifecycle": row[3],
+                "body_md": row[4],
+                "updated_at": str(row[5]),
+                "links": [list(x) for x in cur.fetchall()],
+            }
 
     def backlinks(self, node_id: str) -> list[dict[str, str]]:
         """Return bounded incoming links."""
         with self._connect(self._dsn) as conn, conn.cursor() as cur:
-            cur.execute("SELECT src,edge_type,provenance FROM ops.links WHERE dst=%s ORDER BY src,edge_type LIMIT 100", (node_id,))
-            return [{"src": str(x[0]), "edge_type": str(x[1]), "provenance": str(x[2])} for x in cur.fetchall()]
+            cur.execute(
+                "SELECT src,edge_type,provenance FROM ops.links "
+                "WHERE dst=%s ORDER BY src,edge_type LIMIT 100",
+                (node_id,),
+            )
+            return [
+                {"src": str(x[0]), "edge_type": str(x[1]), "provenance": str(x[2])}
+                for x in cur.fetchall()
+            ]
 
     def neighborhood(self, node_id: str, *, limit: int = 50) -> list[dict[str, str]]:
         """Return a bounded one-hop neighborhood from the relational graph mirror."""
@@ -68,8 +99,15 @@ class OpsReader:
                    WHERE src=%s OR dst=%s ORDER BY src,dst,edge_type LIMIT %s""",
                 (node_id, node_id, limit),
             )
-            return [{"src": str(x[0]), "dst": str(x[1]), "edge_type": str(x[2]),
-                     "provenance": str(x[3])} for x in cur.fetchall()]
+            return [
+                {
+                    "src": str(x[0]),
+                    "dst": str(x[1]),
+                    "edge_type": str(x[2]),
+                    "provenance": str(x[3]),
+                }
+                for x in cur.fetchall()
+            ]
 
 
 def build_retriever(*, dsn: str | None = None, embedder: Embedder | None = None):
