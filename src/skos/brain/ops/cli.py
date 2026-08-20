@@ -84,7 +84,7 @@ def operator_observe(json_output: bool = typer.Option(False, "--json"),
     by_name = {c.name: c for c in checks}
     def condition(name: str, checks_: tuple[str, ...]) -> dict[str, object]:
         relevant = [by_name[x] for x in checks_ if x in by_name]
-        return {"type": name, "status": "False" if relevant and all(x.ok for x in relevant) else "Unknown",
+        return {"type": name, "status": "True" if relevant and all(x.ok for x in relevant) else "Unknown",
                 "reason": "; ".join(x.detail for x in relevant) or "evidence unavailable"}
     payload = {"application": "skbrain", "conditions": [
         condition("OpsSchemaPresent", ("skbrain:schema", "skbrain:grants")),
