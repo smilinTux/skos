@@ -99,6 +99,19 @@ skos status skbrain             # per-step health (a partial install reads UNHEA
 skos remove skbrain             # reverse activation (fleet objects + manifest); --purge-db for the schema rollback
 ```
 
+The installed pack exposes a thin private-knowledge CLI. Database credentials
+are supplied only through the dedicated projector and reader DSNs; the reader
+identity cannot write the `ops` namespace.
+
+```bash
+skbrain lint                     # redacted secret scan of git canon
+skbrain sync                     # read-only projection plan, no embedding call
+skbrain sync --commit            # atomic projector write + embeddings
+skbrain search "telegram wedge"  # bounded hybrid retrieval as reader
+skbrain doctor                   # content/schema/grant/projector health as JSON
+skbrain operator observe --json  # fail-closed ATLAS observation contract
+```
+
 Coupling is by construction: there is no `--only` and no sub-selection. The
 `sql_migration` and `db_roles` steps delegate to the shipped skmemory runners
 (`skmemory pg migrate` / `skmemory pg roles`), so the ops DDL and the role SQL

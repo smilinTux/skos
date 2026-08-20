@@ -39,7 +39,7 @@
     "kinds": ["runbook", "known-error", "postmortem"],
     "kedb": true,
     "reader_role": "skbrain_ops_ro",
-    "retriever": "skos.skbrain.read_api:build_retriever"
+    "retriever": "skos.brain.ops.read_api:build_retriever"
   },
   "install": {
     "requires": {
