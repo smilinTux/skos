@@ -20,10 +20,8 @@
 #   runs on. No machine-specific absolute path (/home/<user>/...) is committed here.
 #
 # SECRETS: no secret value is committed. `secret_env` lists env var NAMES that are
-#   prepended to each job line; their VALUES are resolved at install time from the
-#   scheduler env file (default: ~/.skcapstone/skos-schedule.env, mode 600, NOT in
-#   git). See skos-schedule.env.example. `skos schedule render` prints the var name
-#   ($GOG_KEYRING_PASSWORD), never the value.
+#   required at runtime. Crontab contains only SKOS_SCHEDULE_ENV=<protected-path>;
+#   values are loaded by sk-cron-run.sh and are never read by the installer.
 version: 1
 
 defaults:

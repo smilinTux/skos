@@ -6,11 +6,23 @@
 #   2. on failure -> capture a GTD item (source=cron) AND fire sk-alert (realtime)
 # Returns the wrapped command's exit code. Nothing fails silently.
 set -uo pipefail
-# Load sovereign secrets (rotated gog keyring password etc.) from the environment.d
-# drop-in instead of hardcoding them in crontab. Keeps dead/rotated values out of
-# the crontab and lets a rotation land in one file. See card b1d62821.
-if [ -f "$HOME/.config/environment.d/gog.conf" ]; then
-  set -a; . "$HOME/.config/environment.d/gog.conf"; set +a
+# Load sovereign runtime configuration from one protected file. The crontab carries
+# only this path, never values. Refuse symlinks, foreign ownership, or group/world
+# access before sourcing because this file is executable shell syntax.
+SCHEDULE_ENV="${SKOS_SCHEDULE_ENV:-$HOME/.skcapstone/skos-schedule.env}"
+if [ -e "$SCHEDULE_ENV" ]; then
+  if [ -L "$SCHEDULE_ENV" ] || [ ! -f "$SCHEDULE_ENV" ]; then
+    printf 'sk-cron-run: refusing unsafe schedule env file\n' >&2; exit 78
+  fi
+  env_uid=$(stat -c '%u' "$SCHEDULE_ENV" 2>/dev/null || printf 'invalid')
+  env_mode=$(stat -c '%a' "$SCHEDULE_ENV" 2>/dev/null || printf 'invalid')
+  case "$env_mode" in 600|400) ;; *)
+    printf 'sk-cron-run: schedule env file must deny group/world access\n' >&2; exit 78;;
+  esac
+  if [ "$env_uid" != "$(id -u)" ]; then
+    printf 'sk-cron-run: schedule env file has foreign owner\n' >&2; exit 78
+  fi
+  set -a; . "$SCHEDULE_ENV"; set +a
 fi
 JOB="${1:?usage: sk-cron-run <job-name> <command...>}"; shift
 LEDGER="$HOME/.skcapstone/logs/cron-ledger.jsonl"

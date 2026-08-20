@@ -13,8 +13,9 @@ the user crontab by ``skos schedule install``. This module owns:
   value ignored), and
 * installing the desired schedule into a marked, idempotently-replaced crontab block.
 
-No secret value is ever read from or written to the repo. Secret values are resolved
-at install time from the scheduler env file (``~/.skcapstone/skos-schedule.env``).
+No secret value is ever read from, rendered into, or written to crontab. Jobs receive
+only the path of a protected runtime env file; ``sk-cron-run.sh`` loads it immediately
+before execution. Rotating that file therefore does not require rewriting crontab.
 """
 from __future__ import annotations
 
@@ -141,6 +142,7 @@ def load(path: str | os.PathLike | None = None) -> Schedule:
 
     jobs: list[Job] = []
     seen: set[str] = set()
+    seen_slots: dict[str, str] = {}
     for i, rj in enumerate(raw_jobs):
         for key in ("name", "schedule", "command", "log"):
             if not rj.get(key):
@@ -150,6 +152,13 @@ def load(path: str | os.PathLike | None = None) -> Schedule:
             raise ScheduleError(f"duplicate job name: {name!r}")
         seen.add(name)
         validate_schedule(rj["schedule"], name)
+        normalized_slot = " ".join(rj["schedule"].split())
+        if normalized_slot in seen_slots:
+            raise ScheduleError(
+                f"duplicate cron slot {normalized_slot!r}: jobs "
+                f"{seen_slots[normalized_slot]!r} and {name!r}"
+            )
+        seen_slots[normalized_slot] = name
         jobs.append(Job(name=name, schedule=rj["schedule"], command=rj["command"], log=rj["log"]))
 
     sched = Schedule(runner=runner, path=path_str, secret_env=secret_env, jobs=jobs)
@@ -183,31 +192,33 @@ def render_lines(
     expand: bool = False,
     home: str | None = None,
     repo: str | None = None,
+    env_file: str | None = None,
     secrets: dict[str, str] | None = None,
 ) -> list[str]:
     """Render the schedule to crontab job lines.
 
     expand=False (default): portable form with literal ``$HOME`` / ``$SKOS_REPO`` and
     the secret as a ``$NAME`` reference - safe to print / commit / show.
-    expand=True: host-concrete form for install. ``secrets`` (name->value) supplies
-    the secret VALUES; any name not in ``secrets`` stays as a ``$NAME`` reference so a
-    value is never fabricated.
+    expand=True: host-concrete form for install. Only ``SKOS_SCHEDULE_ENV`` is
+    rendered; secret values remain in that protected file and never enter crontab.
+
+    ``secrets`` is retained as a compatibility-only argument and is deliberately
+    ignored. Callers cannot accidentally inline credentials through this API.
     """
     home = home or os.path.expanduser("~")
     repo = repo or os.environ.get("SKOS_REPO", os.path.join(home, "clawd", "skos"))
-    secrets = secrets or {}
+    del secrets
+    env_file = env_file or DEFAULT_ENV_FILE
 
     def maybe(v: str) -> str:
         return _expand(v, home=home, repo=repo) if expand else v
 
     lines: list[str] = []
     for job in sched.jobs:
-        env_tokens = []
-        for name in sched.secret_env:
-            if expand and name in secrets:
-                env_tokens.append(f"{name}={secrets[name]}")
-            else:
-                env_tokens.append(f"{name}=${name}")
+        env_path = maybe(env_file)
+        if any(ch.isspace() for ch in env_path):
+            raise ScheduleError("scheduler env-file path must not contain whitespace")
+        env_tokens = [f"SKOS_SCHEDULE_ENV={env_path}"]
         env_prefix = " ".join(env_tokens + [f"PATH={maybe(sched.path)}"])
         runner = maybe(sched.runner)
         command = maybe(job.command)
@@ -373,18 +384,14 @@ def install(
     repo: str | None = None,
     dry_run: bool = True,
 ) -> str:
-    """Render the managed block (host-expanded, secrets injected) and splice it into
+    """Render the managed block (host-expanded, env-file reference only) and splice it into
     the user crontab. Returns the full new crontab text. When dry_run is False the
-    new crontab is written via `crontab -`. Raises if a declared secret is unresolved.
+    new crontab is written via `crontab -`. Secret contents are never read.
     """
-    secrets = resolve_secrets(sched, env_file)
-    missing = [n for n in sched.secret_env if n not in secrets]
-    if missing:
-        raise ScheduleError(
-            "unresolved secret(s): " + ", ".join(missing)
-            + f" - set them in the env file ({env_file or DEFAULT_ENV_FILE}) or the environment"
-        )
-    block = render_block(sched, expand=True, home=home, repo=repo, secrets=secrets)
+    configured_env = str(Path(env_file or DEFAULT_ENV_FILE).expanduser())
+    block = render_block(
+        sched, expand=True, home=home, repo=repo, env_file=configured_env
+    )
     new_text = splice_block(read_crontab(), block)
     if not dry_run:
         subprocess.run(["crontab", "-"], input=new_text, text=True, check=True)

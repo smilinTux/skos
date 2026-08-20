@@ -1123,12 +1123,12 @@ def schedule_diff(
 @schedule_app.command("install")
 def schedule_install(
     manifest: str = typer.Option("", "--manifest", help="Path to jobs.yaml"),
-    env_file: str = typer.Option("", "--env-file", help=f"Secret env file (default: {'~/.skcapstone/skos-schedule.env'})"),
+    env_file: str = typer.Option("", "--env-file", help=f"Runtime env-file path (default: {'~/.skcapstone/skos-schedule.env'})"),
     apply: bool = typer.Option(False, "--apply", help="Actually write the crontab (default: dry-run preview)"),
 ):
-    """Render the managed block (secrets injected from the env file) and splice it
+    """Render the managed block (only the protected env-file path) and splice it
     into the user crontab. Default is a DRY RUN that prints the resulting crontab;
-    pass --apply to write it."""
+    pass --apply to write it. The installer never reads or prints env-file values."""
     from skos import schedule as _sched
     s = _load_schedule(manifest)
     try:

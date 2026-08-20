@@ -15,7 +15,7 @@ Card: `29ae4313` · deploy-plan item 4b (`docs/deploy-plan/skos-bulletproof-depl
 | `deploy/schedule/skos-schedule.env.example` | Template for the not-committed secret env file. |
 | `src/skos/schedule.py` | Load/validate/render/diff/install engine. |
 | `skos schedule {list,render,diff,install}` | Operator CLI. |
-| `~/.skcapstone/skos-schedule.env` | Real secret values (mode 600, **not** in git). |
+| `~/.skcapstone/skos-schedule.env` | Runtime values (owned regular file, mode 600, **not** in git or crontab). |
 
 Design note (why crontab, not systemd timers) is in the header of `jobs.yaml`: the
 live pipeline is already a user crontab, every job is wrapped in `sk-cron-run.sh`, and
@@ -55,12 +55,12 @@ that cutover is a no-op for behavior.
    never blind-overwrite.
 3. **Preview** the resulting crontab:
    ```bash
-   skos schedule install            # DRY RUN, prints the new crontab
+skos schedule install            # DRY RUN; prints paths/commands, never values
    ```
 4. **Apply** — writes the managed block (`# >>> skos schedule (managed) >>>` …
    `# <<< skos schedule (managed) <<<`) into the crontab:
    ```bash
-   skos schedule install --apply
+skos schedule install --apply
    ```
 5. **Remove the legacy duplicates.** After apply, the 12 legacy hand-edited
    `sk-cron-run.sh` lines still exist *outside* the managed block. Delete exactly those
@@ -103,8 +103,18 @@ applied** until failover. This is scheduler-only; it does not extend to skmem-pg
 
 | Symptom | Check |
 |---|---|
-| `install error: unresolved secret(s): GOG_KEYRING_PASSWORD` | env file missing / still `replace-me`; set the real value in `~/.skcapstone/skos-schedule.env` or export it. |
+| job exits 78 before execution | runtime env file is a symlink, foreign-owned, or not mode 600/400; replace it atomically with a safe regular file. |
 | `diff` shows `changed` for a job | manifest schedule/command differs from live; reconcile the manifest, then `install --apply`. |
 | `diff` shows `extra` | a `sk-cron-run.sh` job exists live but is not declared; add it to `jobs.yaml` or remove it from the crontab. |
 | job runs twice | legacy line not removed after cutover (step 5). |
 | `schedule error: runner script … not found` | running from outside the repo, or a bad checkout; the runner is repo-relative (`$SKOS_REPO/scripts/sk-cron-run.sh`). |
+
+### Credential rotation
+
+Write the replacement env file beside the existing file with mode 600, validate its
+ownership and contents locally, then atomically rename it over
+`~/.skcapstone/skos-schedule.env`. Run one wrapped job as a canary. The managed
+crontab does not change because it contains only `SKOS_SCHEDULE_ENV=<path>`.
+Retire the old credential only after the canary succeeds. Roll back by atomically
+restoring the protected prior file. Never paste either version into `crontab`, a
+systemd unit, command output, or the repository.

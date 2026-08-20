@@ -29,10 +29,11 @@ def test_committed_manifest_has_no_secret_values():
     """The committed manifest must never carry a secret value; only $NAME refs."""
     text = (sched.repo_root() / "deploy" / "schedule" / "jobs.yaml").read_text()
     assert "sk2026" not in text
-    # rendered lines (portable form) must reference the secret by name, not value
+    # rendered lines carry only the protected env-file path, never values
     s = sched.load()
     for line in sched.render_lines(s):
-        assert "GOG_KEYRING_PASSWORD=$GOG_KEYRING_PASSWORD" in line
+        assert "SKOS_SCHEDULE_ENV=" in line
+        assert "GOG_KEYRING_PASSWORD=" not in line
         assert "sk2026" not in line
 
 
@@ -48,6 +49,19 @@ def test_duplicate_job_name_rejected(tmp_path):
           - {name: a, schedule: "5 6 * * *", command: "echo ho", log: "/tmp/a.log"}
     """))
     with pytest.raises(sched.ScheduleError, match="duplicate job name"):
+        sched.load(m)
+
+
+def test_duplicate_cron_slot_rejected(tmp_path):
+    m = tmp_path / "jobs.yaml"
+    m.write_text(textwrap.dedent("""
+        version: 1
+        defaults: {runner: "$SKOS_REPO/scripts/sk-cron-run.sh", path: "/usr/bin", secret_env: []}
+        jobs:
+          - {name: first, schedule: "45 7 * * *", command: "echo hi", log: "/tmp/a.log"}
+          - {name: second, schedule: "45 7 * * *", command: "echo ho", log: "/tmp/b.log"}
+    """))
+    with pytest.raises(sched.ScheduleError, match="duplicate cron slot"):
         sched.load(m)
 
 
@@ -118,10 +132,11 @@ def test_render_expand_produces_concrete_paths():
     assert "/home/tester/clawd/skos/scripts/sk-cron-run.sh" in joined
 
 
-def test_render_injects_secret_only_when_provided():
+def test_render_never_injects_secret_even_when_provided():
     s = sched.load()
     lines = sched.render_lines(s, expand=True, home="/h", repo="/h/r", secrets={"GOG_KEYRING_PASSWORD": "SEKRET"})
-    assert any("GOG_KEYRING_PASSWORD=SEKRET" in ln for ln in lines)
+    assert all("SEKRET" not in ln for ln in lines)
+    assert all("GOG_KEYRING_PASSWORD=" not in ln for ln in lines)
 
 
 # ------------------------------------------------------------------------- diff
@@ -169,12 +184,15 @@ def test_splice_inserts_then_replaces_idempotently():
 
 
 def test_install_fails_without_resolved_secret(tmp_path, monkeypatch):
+    """Dry-run is safe and useful before credential provisioning."""
     s = sched.load()
     monkeypatch.delenv("GOG_KEYRING_PASSWORD", raising=False)
     empty_env = tmp_path / "empty.env"
     empty_env.write_text("# nothing here\n")
-    with pytest.raises(sched.ScheduleError, match="unresolved secret"):
-        sched.install(s, env_file=empty_env, dry_run=True)
+    monkeypatch.setattr(sched, "read_crontab", lambda: "")
+    rendered = sched.install(s, env_file=empty_env, dry_run=True)
+    assert "SKOS_SCHEDULE_ENV=" in rendered
+    assert "GOG_KEYRING_PASSWORD=" not in rendered
 
 
 def test_env_file_placeholder_not_treated_as_secret(tmp_path, monkeypatch):
