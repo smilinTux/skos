@@ -106,6 +106,16 @@ class PostgresWriterBackend:
                 (f"MATCH (n:OpsEntity {{id: {graph_id}}}) DETACH DELETE n RETURN 1",),
             )
 
+    def mark_observed(self, node_ids: list[str]) -> None:
+        """Stamp unchanged nodes only after a complete committed projection."""
+        if not node_ids:
+            return
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE ops.wiki_nodes SET updated_at=now() WHERE id = ANY(%s)",
+                (node_ids,),
+            )
+
     @staticmethod
     def _upsert_graph(cur: Any, node: OpsPage, links: list[OpsEdge]) -> None:
         """Mirror a node and its outgoing edges into AGE inside the transaction."""

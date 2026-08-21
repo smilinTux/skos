@@ -67,6 +67,8 @@ class WriterBackend(Protocol):
 
     def delete_node(self, node_id: str) -> None: ...
 
+    def mark_observed(self, node_ids: list[str]) -> None: ...
+
 
 def build_plan(pages: list[OpsPage], existing_hashes: dict[str, str]) -> UpsertPlan:
     """Diff *pages* against *existing_hashes* into an idempotent ``UpsertPlan`` (pure).
@@ -126,6 +128,7 @@ def apply_plan(plan: UpsertPlan, backend: WriterBackend, *, commit: bool = False
             backend.upsert_node(up.node, up.chunks, up.links)
         for node_id in plan.deletes:
             backend.delete_node(node_id)
+        backend.mark_observed(plan.unchanged)
     return ApplyResult(
         upserted=len(plan.upserts),
         deleted=len(plan.deletes),

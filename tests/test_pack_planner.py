@@ -27,12 +27,11 @@ class TestOrdering:
     def test_canonical_order(self, skbrain):
         plan = plan_pack(skbrain, _satisfying_facts())
         kinds = [s.kind for s in plan.steps]
-        # schema -> roles -> content -> seeds(x3) -> fleet -> doctor
+        # schema -> roles -> content -> seeds(x2) -> fleet -> doctor
         assert kinds == [
             "sql_migration",
             "db_roles",
             "content_repo",
-            "seed",
             "seed",
             "seed",
             "fleet_objects",
@@ -59,11 +58,11 @@ class TestOrdering:
         assert kinds == ["sql_migration", "db_roles", "doctor"]
 
     def test_stable_within_kind(self, skbrain):
-        # The three seeds keep their declaration order.
+        # The two seeds keep their declaration order.
         plan = plan_pack(skbrain, _satisfying_facts())
         seeds = [s for s in plan.steps if s.kind == "seed"]
         cmds = [s.params["cmd"][0] for s in seeds]
-        assert cmds == ["skoperator", "skcapstone", "skbrain"]
+        assert cmds == ["skoperator", "skbrain"]
 
     def test_deterministic(self, skbrain):
         f = _satisfying_facts()

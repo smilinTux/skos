@@ -30,6 +30,7 @@ and sibling `sk*` packages that import `skos.paths` / `skos.gtd_ingest`.
 | Timer wrapping | `src/skos/timer_wrap.py`, systemd drop-ins that route user timers through the same wrapper. |
 | Secret plane adapter | `skos.secrets`, a `vault-file` Fernet backend plus a not-yet-implemented `capauth` backend. |
 | Brain + surfaces | the entity-graph ontology and its obsidian / claude-code / codex / n8n adapters. |
+| SKBrain ops plane | PostgreSQL + AGE canon projector, bounded read API, secret lint, doctor, and the signed capability pack under `src/skos/packs/skbrain/`. |
 | Read-only web surface | `src/skos/webui.py`, optional extra `skos[web]`. |
 
 **What skos explicitly does NOT do**
@@ -177,6 +178,31 @@ Rollback is `crontab -` with the saved previous block. Full flow:
 `deploy/systemd/skos-backup.{service,timer}`, is inert in the repo and installed by
 copying into `~/.config/systemd/user/` then `systemctl --user enable --now
 skos-backup.timer`. Rollback: `systemctl --user disable --now skos-backup.timer`.
+
+**Provision and verify SKBrain.** SKBrain is a capability pack, not a second
+CMDB or ITIL authority. Install from a tagged GitHub checkout with the existing
+`skmem-pg` PostgreSQL/AGE service available. The installer creates least-
+privilege projector/reader roles and writes only the runtime variable names
+`SKBRAIN_PG_PROJECTOR_DSN` and `SKBRAIN_PG_READER_DSN` to the owner-only
+environment drop-in. It seeds KEDB content and projects canonical git content;
+it deliberately does not invent a `cmdb seed` ownership path.
+
+```bash
+git pull --ff-only origin main
+skos install skbrain                 # plan / dry-run
+skos install skbrain --apply         # explicit mutation
+skbrain lint                         # must return no findings
+skbrain sync --commit                # transactional projector
+skbrain doctor                       # schema, grants, content, lint, freshness
+```
+
+A committed projection refreshes observation time for unchanged canon nodes;
+a dry run never does. The module may be registered with ATLAS only after its
+canonical manifest bytes carry a trusted detached signature and one complete
+observation reports every declared condition healthy. Missing DSNs, an absent
+signature, or a failed doctor remain fail-closed. Roll back by restoring the
+pre-install database dump recorded by the installer and the prior signed module
+registry; do not delete canonical git content or CMDB/ITIL state.
 
 **Rollback the timer wrapping.** Every wrap is a drop-in file, so undo is a delete:
 

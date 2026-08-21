@@ -31,6 +31,7 @@ class StubBackend:
         self._existing = dict(existing or {})
         self.upserts: list[tuple[str, int, int]] = []  # (node_id, nchunks, nlinks)
         self.deletes: list[str] = []
+        self.observed: list[str] = []
         self.committed = False
 
     def existing_hashes(self) -> dict[str, str]:
@@ -41,6 +42,9 @@ class StubBackend:
 
     def delete_node(self, node_id: str) -> None:
         self.deletes.append(node_id)
+
+    def mark_observed(self, node_ids: list[str]) -> None:
+        self.observed.extend(node_ids)
 
 
 class StubEmbedder:
@@ -175,6 +179,7 @@ def test_apply_plan_uses_backend_existing_hashes_helper():
     # unchanged -> no writes
     assert backend.upserts == []
     assert result.unchanged == 1
+    assert backend.observed == ["runbook-a"]
 
 
 def test_project_embeds_then_writes_changed():

@@ -6,6 +6,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 ## [Unreleased]
 
 ### Fixed
+- **The skbrain credential drop-in now exports the DSN names consumed by the
+  projector and reader** (`SKBRAIN_PG_PROJECTOR_DSN` and
+  `SKBRAIN_PG_READER_DSN`). The former doubled the `SKBRAIN_` prefix, leaving a
+  successfully provisioned database unreachable to `skbrain sync`.
+- **A successful committed skbrain projection now refreshes observation time
+  for unchanged canon nodes.** Previously content-hash idempotency skipped all
+  writes and the doctor reported a healthy, repeatedly verified projection as
+  permanently stale. Dry runs still make no writes.
+- **The built-in skbrain pack now gates on the versions that actually ship its
+  required contracts** (`skcapstone>=0.15.18`, `skos>=0.2.2`, and
+  `skmemory>=0.11.17.dev1`) instead of unreleased future versions. The live
+  installer can therefore prove compatibility rather than requiring an
+  unreviewable `--force` bypass.
+- **The skbrain pack no longer invokes the nonexistent `skcapstone cmdb seed`
+  command.** CMDB is an existing canonical store with its own migration and
+  reconciliation lifecycle; fabricating a seed verb would create a second
+  ownership path. KEDB seeding and the idempotent skbrain projection remain.
+- **The service-unit limiter audit is now part of scheduler-as-code**, completing
+  the 13-job managed block. The live migration moved the shared schedule
+  credential into an owner-only runtime environment file, removed legacy
+  duplicate wrapped jobs, and verified a clean manifest diff.
 - **skos no longer re-tests skharness's autocode engine through its own shims**
   (card `ba782c14` follow-on). `skos.autopilot.{config,ci,claude_code}` are
   `from skharness.autocode.X import *` re-exports since Wave 2 Phase B of the autocode

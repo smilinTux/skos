@@ -20,13 +20,12 @@ class TestFromDict:
         assert m.id == "skbrain"
         assert m.schema_version == "1.2"
         assert m.requires.capabilities == ("skmem-pg",)
-        assert m.requires.packages["skcapstone"] == ">=0.16"
+        assert m.requires.packages["skcapstone"] == ">=0.15.18"
         kinds = [s.kind for s in m.steps]
         assert kinds == [
             "sql_migration",
             "db_roles",
             "content_repo",
-            "seed",
             "seed",
             "seed",
             "fleet_objects",

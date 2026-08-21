@@ -91,7 +91,6 @@ class TestDispatch:
             "content_repo",
             "seed",
             "seed",
-            "seed",
             "fleet_objects",
             "doctor",
         ]
@@ -125,7 +124,7 @@ class TestCoupling:
         fx = FakeEffects({"seed": StepResult(PENDING, "deferred")})
         report = install(manifest, pack_dir, facts=_facts(), effects=fx)
         # all steps still dispatched
-        assert fx.calls.count("seed") == 3
+        assert fx.calls.count("seed") == 2
         assert "doctor" in fx.calls
         assert report.status == _state.STATUS_PARTIAL
         assert report.ok  # partial is not a failure

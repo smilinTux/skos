@@ -2,6 +2,7 @@ import importlib.util
 import ipaddress
 import os
 import socket
+import sys
 from pathlib import Path
 
 import pytest
@@ -215,9 +216,9 @@ def _isolate_cost_dir(tmp_path_factory, monkeypatch):
     its double-settle guard and appends to it on a real settlement, so without
     this a finalize test would read and write the live, Syncthing-synced
     ~/.skcapstone/autopilot-cost tree."""
-    from skharness.autocode import joules
-    from skharness.autocode import ledger_correction
-    from skharness.autocode import wallet_correction
+    from skharness.autocode import joules  # noqa: F401
+    from skharness.autocode import ledger_correction  # noqa: F401
+    from skharness.autocode import wallet_correction  # noqa: F401
     
     # We need to import these to access their path constants, but we don't want
     # to actually use the skharness modules in a way that would trigger imports
@@ -379,8 +380,8 @@ except Exception:
 
 if _HAVE_SKHARNESS:
     from skharness.autocode import joules
-    from skharness.autocode import ledger_correction
-    from skharness.autocode import wallet_correction
+    from skharness.autocode import ledger_correction  # noqa: F401
+    from skharness.autocode import wallet_correction  # noqa: F401
 
     @pytest.fixture(autouse=True)
     def _isolate_cost_dir(tmp_path_factory, monkeypatch):

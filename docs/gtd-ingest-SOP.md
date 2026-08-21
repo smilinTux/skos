@@ -130,7 +130,7 @@ gog keyring password is injected at install time from `~/.skcapstone/skos-schedu
 
 ```bash
 cd ~/clawd/skos
-skos schedule list            # validate manifest, show the 12 jobs
+skos schedule list            # validate manifest, show the 13 jobs
 skos schedule diff            # compare manifest vs the live crontab (exit 1 = drift)
 skos schedule install         # DRY RUN: print the resulting crontab
 skos schedule install --apply # write the managed block into the crontab

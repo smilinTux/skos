@@ -1,10 +1,10 @@
 """Tests for skos.packs.loader + the side-effect-free parts of effects."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-
 from skos.packs import loader
 from skos.packs.effects import DONE, DefaultEffects, resolve_package_path
 
@@ -74,6 +74,21 @@ class TestEffectsDryRun:
         )
         assert r.status == DONE
         assert "would create login roles" in r.note
+
+    def test_env_drop_in_uses_reader_api_dsn_names(self, tmp_path):
+        path = tmp_path / "skbrain.conf"
+        DefaultEffects()._write_env_drop_in(
+            str(path),
+            {"SKBRAIN_PG_PROJECTOR_PW": "projector-secret"},
+            {
+                "skbrain_projector": "postgresql://projector",
+                "skbrain_reader": "postgresql://reader",
+            },
+        )
+        text = path.read_text()
+        assert "SKBRAIN_PG_PROJECTOR_DSN=postgresql://projector" in text
+        assert "SKBRAIN_PG_READER_DSN=postgresql://reader" in text
+        assert "SKBRAIN_SKBRAIN_" not in text
 
     def test_seed_dry_run(self):
         fx = DefaultEffects()

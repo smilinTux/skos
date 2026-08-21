@@ -101,3 +101,8 @@ jobs:
     schedule: "22 */3 * * *"
     command: "$HOME/.skenv/bin/skos ingest order"
     log: "$HOME/.skcapstone/logs/sk-ingest.log"
+
+  - name: service-unit-audit
+    schedule: "40 6 * * *"
+    command: "$HOME/clawd/scripts/fleet-service-unit-audit.sh"
+    log: "$HOME/.skcapstone/logs/service-unit-audit.log"

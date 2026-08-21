@@ -1,6 +1,6 @@
 # Runbook: skos scheduler-as-code (deploy / rollback / cutover)
 
-The skos gtd-ingest + observability pipeline (12 `sk-cron-run.sh`-wrapped jobs) is
+The skos gtd-ingest + observability pipeline (13 `sk-cron-run.sh`-wrapped jobs) is
 **declared in the repo**, not hand-edited into a crontab. This runbook covers the
 one-time cutover of the primary node (noroc2027 / .158) from the legacy hand-edited
 crontab lines to the committed manifest, plus routine deploy and rollback.
@@ -35,7 +35,7 @@ ${EDITOR:-nano} ~/.skcapstone/skos-schedule.env   # set the real GOG_KEYRING_PAS
 ## Validate before touching anything
 
 ```bash
-skos schedule list     # parses + validates the manifest, lists the 12 jobs
+skos schedule list     # parses + validates the manifest, lists the 13 jobs
 skos schedule diff     # compares manifest vs live crontab; exit 0 = already matches
 skos schedule render --expand   # host-concrete lines (secret still shown as $NAME)
 ```
@@ -62,11 +62,12 @@ skos schedule install            # DRY RUN; prints paths/commands, never values
    ```bash
 skos schedule install --apply
    ```
-5. **Remove the legacy duplicates.** After apply, the 12 legacy hand-edited
-   `sk-cron-run.sh` lines still exist *outside* the managed block. Delete exactly those
-   12 lines with `crontab -e` so each job runs once. Verify:
+5. **Remove any legacy duplicates.** After apply, older hand-edited
+   `sk-cron-run.sh` lines may still exist *outside* the managed block. Compare
+   exact job names and remove only confirmed duplicates with `crontab -e`; do
+   not assume their count. Verify the final managed count:
    ```bash
-   crontab -l | grep -c 'sk-cron-run.sh'   # expect 12 (all inside the managed block)
+   crontab -l | grep -c 'sk-cron-run.sh'   # expect 13 (all inside the managed block)
    skos schedule diff                       # expect: clean
    ```
 

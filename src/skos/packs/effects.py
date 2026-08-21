@@ -65,7 +65,9 @@ class Effects(Protocol):
     methods honor ``dry_run`` (describe, do not touch the world).
     """
 
-    def migrate(self, params: Mapping[str, Any], pack_dir: Path, *, dry_run: bool) -> StepResult: ...
+    def migrate(
+        self, params: Mapping[str, Any], pack_dir: Path, *, dry_run: bool
+    ) -> StepResult: ...
 
     def db_roles(self, params: Mapping[str, Any], *, dry_run: bool) -> StepResult: ...
 
@@ -196,8 +198,17 @@ class DefaultEffects:
             )
         rc, out = _run(
             [
-                "docker", "exec", "-i", self.pg_container, "psql",
-                "-U", self.pg_super_user, "-v", "ON_ERROR_STOP=1", "-f", "-",
+                "docker",
+                "exec",
+                "-i",
+                self.pg_container,
+                "psql",
+                "-U",
+                self.pg_super_user,
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-f",
+                "-",
             ],
             stdin=script_path.read_text(encoding="utf-8"),
         )
@@ -234,7 +245,7 @@ class DefaultEffects:
             entry = vault_entries.get(login) or f"{login.upper()}_PW"
             try:
                 password = backend.get(self.secret_scope, entry)
-            except Exception:  # noqa: BLE001: create-on-first-install
+            except Exception:  # noqa: BLE001 -- create on first install
                 password = _gen_password()
                 try:
                     backend.set(self.secret_scope, entry, password)
@@ -253,7 +264,9 @@ class DefaultEffects:
             rc, out = _run(["skmemory", "pg", "roles"], env=env)
             if rc != 0:
                 return StepResult(FAILED, f"`skmemory pg roles` failed: {out.strip()[:400]}")
-            return StepResult(DONE, f"bound {len(logins)} login role(s) via skmemory pg roles{drop_note}")
+            return StepResult(
+                DONE, f"bound {len(logins)} login role(s) via skmemory pg roles{drop_note}"
+            )
 
         return StepResult(
             PENDING,
@@ -271,7 +284,8 @@ class DefaultEffects:
         for var, pw in pw_env.items():
             lines.append(f"{var}={pw}")
         for login, dsn in dsns.items():
-            lines.append(f"SKBRAIN_{login.upper()}_DSN={dsn}")
+            role = login.removeprefix("skbrain_").upper()
+            lines.append(f"SKBRAIN_PG_{role}_DSN={dsn}")
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         os.chmod(path, 0o600)
         return f"wrote credential drop-in {path}"
@@ -360,7 +374,9 @@ class DefaultEffects:
             except json.JSONDecodeError:
                 registry = {}
         registry[pack_id] = checks
-        reg_path.write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        reg_path.write_text(
+            json.dumps(registry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
         return StepResult(DONE, f"registered {len(checks)} doctor check(s) for {pack_id}")
 
     def emit_manifest(self, pack_id: str, pack_dir: Path, *, dry_run: bool) -> StepResult:
@@ -400,7 +416,9 @@ class DefaultEffects:
         objects = [Path(str(o)).name for o in params.get("objects", [])]
         target_dir = self._fleet_dir()
         if dry_run:
-            return StepResult(DONE, f"would delete {len(objects)} fleet object(s) from {target_dir}")
+            return StepResult(
+                DONE, f"would delete {len(objects)} fleet object(s) from {target_dir}"
+            )
         removed = 0
         for name in objects:
             path = target_dir / name
@@ -422,7 +440,9 @@ class DefaultEffects:
         # The documented rollback: DROP SCHEMA ops + ops_brain CASCADE. Guarded off
         # by default; only reached on `skos remove skbrain --purge-db`.
         if dry_run:
-            return StepResult(DONE, "would DROP SCHEMA ops + ops_brain CASCADE (documented rollback)")
+            return StepResult(
+                DONE, "would DROP SCHEMA ops + ops_brain CASCADE (documented rollback)"
+            )
         if not shutil.which("docker"):
             return StepResult(FAILED, "docker not available; cannot purge ops schema")
         sql = "DROP SCHEMA IF EXISTS ops CASCADE;\nDROP SCHEMA IF EXISTS ops_brain CASCADE;\n"

@@ -45,9 +45,9 @@
     "requires": {
       "capabilities": ["skmem-pg"],
       "packages": {
-        "skcapstone": ">=0.16",
-        "skos": ">=0.3",
-        "skmemory": ">=0.12"
+        "skcapstone": ">=0.15.18",
+        "skos": ">=0.2.2",
+        "skmemory": ">=0.11.17.dev1"
       }
     },
     "steps": [
@@ -83,10 +83,6 @@
       {
         "kind": "seed",
         "cmd": ["skoperator", "kedb-seed"]
-      },
-      {
-        "kind": "seed",
-        "cmd": ["skcapstone", "cmdb", "seed"]
       },
       {
         "kind": "seed",
