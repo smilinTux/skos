@@ -1,0 +1,21 @@
+-- Fresh-node gate bootstrap workaround (card d17892ae). NOT part of the
+-- skmemory repo; mounted by scripts/fresh-node-gate.sh ahead of skmemory's
+-- own deploy/skmem-pg/initdb/00-run-init.sh (docker-entrypoint-initdb.d runs
+-- scripts in lexical order; "00-pre-schemas.sql" sorts before
+-- "00-run-init.sh").
+--
+-- REAL FINDING from running this gate against a genuinely empty Postgres
+-- data volume (not a workaround for anything in skos/skbrain): schema.sql's
+--   CREATE EXTENSION IF NOT EXISTS pg_search WITH SCHEMA paradedb;
+--   CREATE EXTENSION IF NOT EXISTS age WITH SCHEMA ag_catalog;
+-- both fail with "schema ... does not exist" on a fresh cluster, even though
+-- pg_search.control declares `schema = paradedb` (non-relocatable) and the
+-- age extension similarly expects ag_catalog. PostgreSQL 17 does not
+-- auto-create a WITH SCHEMA target for these; it must already exist. This
+-- means the skmemory docker-compose.yml's own documented claim -- "a clean
+-- `docker compose up` yields a fully-migrated instance" -- is not currently
+-- true against an empty data volume. See
+-- docs/runbooks/skbrain-fresh-node-gate.md "Follow-ups" for the writeup;
+-- deliberately not fixed in the skmemory repo (out of scope, sibling repo).
+CREATE SCHEMA IF NOT EXISTS paradedb;
+CREATE SCHEMA IF NOT EXISTS ag_catalog;

@@ -1,0 +1,51 @@
+{
+  "card": "d17892ae",
+  "epic": "fb3cc09d",
+  "gate_conditions": [
+    {
+      "reason": "ops relations present; reader wall valid",
+      "status": "True",
+      "type": "OpsSchemaPresent"
+    },
+    {
+      "reason": "0 node(s); age_seconds=unknown",
+      "status": "Unknown",
+      "type": "ProjectorFresh"
+    },
+    {
+      "reason": "CMDB evidence is owned by the CMDB adapter",
+      "status": "Unknown",
+      "type": "CmdbDriftBounded"
+    },
+    {
+      "reason": "authoritative KEDB fold is unavailable to this read-only adapter",
+      "status": "Unknown",
+      "type": "KedbCanonCovered"
+    }
+  ],
+  "gate_pass": false,
+  "harness": "skbrain-fresh-node-e2e-gate",
+  "harness_ok": true,
+  "steps": {
+    "doctor": {
+      "command": "skbrain doctor",
+      "exit_code": 1,
+      "output": "{\"checks\": [{\"detail\": \"canon missing\", \"name\": \"skbrain:content\", \"ok\": false}, {\"detail\": \"content unavailable\", \"name\": \"skbrain:secret-lint\", \"ok\": false}, {\"detail\": \"ops relations present\", \"name\": \"skbrain:schema\", \"ok\": true}, {\"detail\": \"reader wall valid\", \"name\": \"skbrain:grants\", \"ok\": true}, {\"detail\": \"0 node(s); age_seconds=unknown\", \"name\": \"skbrain:projector\", \"ok\": false}], \"ok\": false}\n"
+    },
+    "install": {
+      "command": "skos install skbrain --force",
+      "exit_code": 1,
+      "output": "install skbrain: status=failed  done=2 pending=0 failed=1 skipped=5\n  + [sql_migration] done: applied 03-ops-namespace.sql via skmemory pg migrate\n  + [db_roles] done: bound 2 login role(s) via skmemory pg roles; wrote credential drop-in /root/.config/environment.d/skbrain.conf\n  x [content_repo] failed: clone failed: fatal: repository 'skbrain-ops' does not exist\n  . [seed] skipped: skipped after an earlier failure\n  . [seed] skipped: skipped after an earlier failure\n  . [fleet_objects] skipped: skipped after an earlier failure\n  . [doctor] skipped: skipped after an earlier failure\n  . [manifest] skipped: skipped after an earlier failure\n"
+    },
+    "operator_explain": {
+      "command": "skbrain operator explain --json",
+      "exit_code": 0,
+      "output": "{\"application\": \"skbrain\", \"conditions\": [\"OpsSchemaPresent\", \"ProjectorFresh\", \"KedbCanonCovered\"], \"read_only\": true}"
+    },
+    "operator_observe": {
+      "command": "skbrain operator observe --json",
+      "exit_code": 0,
+      "output": "{\"application\": \"skbrain\", \"conditions\": [{\"reason\": \"ops relations present; reader wall valid\", \"status\": \"True\", \"type\": \"OpsSchemaPresent\"}, {\"reason\": \"0 node(s); age_seconds=unknown\", \"status\": \"Unknown\", \"type\": \"ProjectorFresh\"}, {\"reason\": \"CMDB evidence is owned by the CMDB adapter\", \"status\": \"Unknown\", \"type\": \"CmdbDriftBounded\"}, {\"reason\": \"authoritative KEDB fold is unavailable to this read-only adapter\", \"status\": \"Unknown\", \"type\": \"KedbCanonCovered\"}]}\n"
+    }
+  }
+}

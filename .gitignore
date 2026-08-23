@@ -5,3 +5,9 @@ src/skos/__pycache__/
 __pycache__/
 *.bak-pre-*
 .autocode-phaseB-report.md
+
+# scripts/fresh-node-gate.sh run output (evidence dir). One captured run is
+# committed at docs/evidence/skbrain-fresh-node-gate-2026-08-23.json as proof
+# of the real fresh-node run for card d17892ae; fresh runs under
+# artifacts/fresh-node-gate/ are not.
+artifacts/fresh-node-gate/

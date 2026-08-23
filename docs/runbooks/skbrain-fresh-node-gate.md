@@ -110,29 +110,92 @@ node with genuinely no prior skbrain state.
   and `~/.skcapstone/shell/modules/` -- never the host's real ATLAS
   registry, and nothing here starts a cron job or systemd timer from them.
 
-## Expected result (as of 2026-08-23)
+## Actual result of the first real run (2026-08-23)
 
-The gate is expected to **fail** (`gate_pass: false`, harness exit `1`) even
-on a clean, successful run, for two independent reasons visible in the
-evidence JSON:
+Confirmed by running `scripts/fresh-node-gate.sh` for real. Full evidence:
+`docs/evidence/skbrain-fresh-node-gate-2026-08-23.json`.
+
+```
+install skbrain: status=failed  done=2 pending=0 failed=1 skipped=5
+  + [sql_migration] done: applied 03-ops-namespace.sql via skmemory pg migrate
+  + [db_roles] done: bound 2 login role(s) via skmemory pg roles; wrote credential drop-in /root/.config/environment.d/skbrain.conf
+  x [content_repo] failed: clone failed: fatal: repository 'skbrain-ops' does not exist
+  . [seed] skipped: skipped after an earlier failure
+  . [seed] skipped: skipped after an earlier failure
+  . [fleet_objects] skipped: skipped after an earlier failure
+  . [doctor] skipped: skipped after an earlier failure
+  . [manifest] skipped: skipped after an earlier failure
+
+skbrain doctor:
+  skbrain:content       false  canon missing
+  skbrain:secret-lint   false  content unavailable
+  skbrain:schema        true   ops relations present
+  skbrain:grants        true   reader wall valid
+  skbrain:projector     false  0 node(s); age_seconds=unknown
+
+skbrain operator observe --json:
+  OpsSchemaPresent   True     ops relations present; reader wall valid
+  ProjectorFresh     Unknown  0 node(s); age_seconds=unknown
+  CmdbDriftBounded   Unknown  CMDB evidence is owned by the CMDB adapter
+  KedbCanonCovered   Unknown  authoritative KEDB fold is unavailable to this read-only adapter
+
+gate_pass: false
+```
+
+**Harness: PASS.** It built a genuinely clean node, ran the real
+(non-mocked) install path against a real, freshly-migrated Postgres, and
+produced machine-readable evidence.
+
+**Gate: FAIL**, for the two reasons anticipated below, now confirmed with
+real evidence rather than predicted:
 
 1. `src/skos/packs/skbrain/skworld.module.json`'s `content_repo` step has no
    `remotes` entry, so `DefaultEffects.content_repo()` falls back to
    `git clone skbrain-ops <dest>` -- not a valid URL. On a fresh node with no
-   pre-existing Syncthing-synced checkout, this step fails and the
-   all-or-nothing pack install stops there (after `sql_migration` and
-   `db_roles`, both of which are real and can genuinely succeed against the
-   fresh Postgres).
+   pre-existing Syncthing-synced checkout, this step genuinely fails and the
+   all-or-nothing pack install stops there. `sql_migration` and `db_roles`,
+   the two steps ordered before it, both genuinely succeeded first --
+   `OpsSchemaPresent` reads `True` in the evidence above, derived from a real
+   `to_regclass('ops.wiki_nodes')` query against the real migrated schema,
+   not an assumption.
 2. Independent of (1): `skbrain operator observe`'s `CmdbDriftBounded` and
    `KedbCanonCovered` conditions are hardcoded `"Unknown"` literals in
    `src/skos/brain/ops/cli.py` (`operator_observe()`), never derived from any
-   check. Even a fully successful install cannot turn these `"True"`, so the
-   4-condition gate (`operator observe` reporting all `status == "True"`)
+   check. Even a fully successful install could not turn these `"True"`, so
+   the 4-condition gate (`operator observe` reporting all `status == "True"`)
    cannot pass until those are wired to real evidence.
 
 This is the correct, useful result the audit was looking for: it demonstrates
 the gate exists, runs for real, and correctly reports the current state as
 not-yet-provable rather than fabricating a green.
+
+## Fixes made while building this harness (not follow-ups -- already done)
+
+Two bugs blocked the harness from reaching any meaningful evidence at all;
+both are genuine gaps a truly fresh node would also hit, not harness
+scaffolding, so they were fixed rather than deferred:
+
+- **`pyproject.toml`: `packaging` was missing from `dependencies`.**
+  `skos.packs.planner` imports `packaging.specifiers`/`packaging.version` to
+  evaluate the pack requires-gate, but `packaging` was never declared --
+  every node this had previously run on happened to have it installed
+  transitively (pulled in by pip/hatchling/typer's own build-time deps),
+  masking the gap. `skos install skbrain` crashed with
+  `ModuleNotFoundError: No module named 'packaging'` on a genuinely minimal
+  fresh install. Added `"packaging>=23"`.
+- **`docker/fresh-node/Dockerfile`: pins `postgresql-client-17` via the
+  PGDG apt repo**, not Debian bookworm's default `postgresql-client`
+  (v15). `skmemory pg migrate`'s pre-dump step shells out to `pg_dump`,
+  which refuses to talk to a newer-major-version server
+  ("aborting because of server version mismatch") -- and skmem-pg runs
+  Postgres 17. A node whose client toolchain doesn't track skmem-pg's
+  server version can't even take the pre-migration safety dump.
+- **`docker/fresh-node/00-pre-schemas.sql`: pre-creates the `paradedb` and
+  `ag_catalog` schemas** before skmemory's own
+  `deploy/skmem-pg/initdb/00-run-init.sh` runs. This is harness-side glue
+  (a file in this repo, mounted alongside skmemory's init script), not a
+  change to the skmemory repo -- see Follow-ups for the underlying gap it
+  works around.
 
 ## Follow-ups identified, deliberately not done here
 

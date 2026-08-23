@@ -24,8 +24,22 @@
 # never activated). See docs/runbooks/skbrain-fresh-node-gate.md.
 FROM python:3.12-slim-bookworm
 
+# postgresql-client-17, NOT Debian bookworm's default postgresql-client
+# (v15): found by running this gate for real -- `pg_dump` refuses to talk to
+# a newer major-version server ("aborting because of server version
+# mismatch"), and skmem-pg runs Postgres 17. A node whose toolchain doesn't
+# track skmem-pg's server version cannot even pre-dump before a migration.
+# Pull it from the PGDG apt repo (bookworm's own repos only carry v15).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client ca-certificates git \
+    && apt-get install -y --no-install-recommends ca-certificates git curl gnupg \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+       https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+       > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-17 \
+    && apt-get purge -y curl gnupg && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 ENV HOME=/root \

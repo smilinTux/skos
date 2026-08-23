@@ -99,9 +99,17 @@ docker build -q -t "$NODE_IMAGE_TAG" -f "$REPO_ROOT/docker/fresh-node/Dockerfile
     || { echo "FATAL: docker build failed" >&2; exit 2; }
 
 log "booting an ephemeral, fresh skmem-pg ($PG_CONTAINER, fresh volume, not the host's real skmem-pg)"
+# NOTE (real finding, see docs/runbooks/skbrain-fresh-node-gate.md
+# "Follow-ups"): on a genuinely empty data volume, schema.sql's
+# `CREATE EXTENSION ... WITH SCHEMA paradedb/ag_catalog` fails because
+# Postgres 17 does not auto-create those target schemas even though the
+# extensions declare them as fixed. docker/fresh-node/00-pre-schemas.sql is
+# OUR harness's own bootstrap glue (not a change to the skmemory repo) that
+# pre-creates them so the REAL skmemory init script can run to completion.
 docker run -d --rm --name "$PG_CONTAINER" \
     -e POSTGRES_DB=skmemory \
     -e POSTGRES_PASSWORD="$PG_PASSWORD" \
+    -v "$REPO_ROOT/docker/fresh-node/00-pre-schemas.sql:/docker-entrypoint-initdb.d/00-pre-schemas.sql:ro" \
     -v "$SKMEMORY_REPO/deploy/skmem-pg/initdb/00-run-init.sh:/docker-entrypoint-initdb.d/00-run-init.sh:ro" \
     -v "$SKMEMORY_REPO/deploy/skmem-pg:/skmem-initdb-src:ro" \
     "$SKMEM_PG_IMAGE" postgres -c shared_preload_libraries=pg_search,age >/dev/null \
