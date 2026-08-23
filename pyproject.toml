@@ -19,6 +19,12 @@ classifiers = [
 # yield a working CLI. See docs/gtd-ingest-SOP.md troubleshooting.
 # ruamel.yaml preserves registry comments on `skmodels set` / `/model` toggle
 # write-back (models/__init__.py); plain-yaml fallback would silently strip them.
+# packaging: parses pack manifest version specifiers (skos.packs.planner uses
+# packaging.specifiers/version for the requires gate). Found missing here by
+# the fresh-node E2E gate (card d17892ae): `skos install skbrain` crashed with
+# ModuleNotFoundError on a genuinely fresh venv, because `packaging` was only
+# ever present transitively (pulled in by pip/hatchling/typer's own build-time
+# deps) on every node this had previously been run on, never declared here.
 dependencies = [
     "typer>=0.12,<0.13",
     "click>=8.1,<8.2",
@@ -28,6 +34,7 @@ dependencies = [
     "ruamel.yaml>=0.18",
     "requests>=2.32",
     "psycopg[binary]>=3.2",
+    "packaging>=23",
 ]
 
 [project.scripts]
