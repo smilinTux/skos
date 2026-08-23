@@ -10,6 +10,7 @@ import typer
 
 from skos.brain.ops.doctor import checks_json, run_checks
 from skos.brain.ops.embed import MxbaiEmbedder
+from skos.brain.ops.kedb_coverage import compute_kedb_coverage
 from skos.brain.ops.parser import walk_pages
 from skos.brain.ops.postgres import PostgresWriterBackend, dsn_from_env
 from skos.brain.ops.read_api import OpsReader
@@ -19,6 +20,19 @@ from skos.brain.ops.writer import project
 app = typer.Typer(help="Project and retrieve the private operations brain.")
 operator_app = typer.Typer(help="ATLAS out-of-process operator contract.")
 app.add_typer(operator_app, name="operator")
+
+#: The single source of truth for the ATLAS operator condition set. Both
+#: `operator_explain` and `operator_observe` derive their condition list from
+#: this ONE tuple, so the two verbs can no longer silently diverge (card
+#: 105315b6): explain lists these names directly, and observe builds a dict
+#: keyed by name and re-projects it through this same order. Mirrors the
+#: signed manifest's `operator.conditions` (skos/packs/skbrain/skworld.module.json).
+_CONDITIONS: tuple[str, ...] = (
+    "OpsSchemaPresent",
+    "ProjectorFresh",
+    "CmdbDriftBounded",
+    "KedbCanonCovered",
+)
 
 
 def _canon(path: Path | None) -> Path:
@@ -85,7 +99,7 @@ def operator_explain(json_output: bool = typer.Option(False, "--json")) -> None:
     payload = {
         "application": "skbrain",
         "read_only": True,
-        "conditions": ["OpsSchemaPresent", "ProjectorFresh", "KedbCanonCovered"],
+        "conditions": list(_CONDITIONS),
     }
     typer.echo(json.dumps(payload, sort_keys=True) if json_output else str(payload))
 
@@ -95,7 +109,8 @@ def operator_observe(
     json_output: bool = typer.Option(False, "--json"), canon: Path | None = typer.Option(None)
 ) -> None:
     """Emit fail-closed ATLAS conditions from doctor evidence."""
-    checks = run_checks(canon=_canon(canon), reader_dsn=os.environ.get("SKBRAIN_PG_READER_DSN"))
+    canon_path = _canon(canon)
+    checks = run_checks(canon=canon_path, reader_dsn=os.environ.get("SKBRAIN_PG_READER_DSN"))
     by_name = {c.name: c for c in checks}
 
     def condition(name: str, checks_: tuple[str, ...]) -> dict[str, object]:
@@ -106,22 +121,34 @@ def operator_observe(
             "reason": "; ".join(x.detail for x in relevant) or "evidence unavailable",
         }
 
+    kedb = compute_kedb_coverage(canon_path)
+
+    # Every condition dict is built here, keyed by name, then re-projected
+    # through `_CONDITIONS` below -- the single ordered source of truth this
+    # module and `operator_explain` both derive from (card 105315b6).
+    by_condition: dict[str, dict[str, object]] = {
+        "OpsSchemaPresent": condition("OpsSchemaPresent", ("skbrain:schema", "skbrain:grants")),
+        "ProjectorFresh": condition("ProjectorFresh", ("skbrain:projector",)),
+        "CmdbDriftBounded": {
+            "type": "CmdbDriftBounded",
+            "status": "Unknown",
+            "reason": "CMDB evidence is owned by the CMDB adapter",
+        },
+        "KedbCanonCovered": {
+            "type": "KedbCanonCovered",
+            "status": kedb.status,
+            "reason": kedb.reason,
+            # Coverage gaps are enumerable, not just a boolean (card 8c6e05e3).
+            "gaps": {
+                "missing_from_canon": list(kedb.missing_from_canon),
+                "dangling_canon_refs": list(kedb.dangling_canon_refs),
+            },
+        },
+    }
+
     payload = {
         "application": "skbrain",
-        "conditions": [
-            condition("OpsSchemaPresent", ("skbrain:schema", "skbrain:grants")),
-            condition("ProjectorFresh", ("skbrain:projector",)),
-            {
-                "type": "CmdbDriftBounded",
-                "status": "Unknown",
-                "reason": "CMDB evidence is owned by the CMDB adapter",
-            },
-            {
-                "type": "KedbCanonCovered",
-                "status": "Unknown",
-                "reason": "authoritative KEDB fold is unavailable to this read-only adapter",
-            },
-        ],
+        "conditions": [by_condition[name] for name in _CONDITIONS],
     }
     typer.echo(json.dumps(payload, sort_keys=True) if json_output else str(payload))
 

@@ -61,6 +61,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 - **`wrap_command()` carries a `-` (ignore-failure) prefix ahead of the runner** instead
   of leaving it in argument position, where systemd would have passed it to the job as a
   literal argument.
+- **`operator_explain()` and `operator_observe()` now derive their condition list from
+  one ordered constant (`_CONDITIONS`)**, so `CmdbDriftBounded` (or any other condition)
+  can never again be declared by `observe` but omitted from `explain` (card `105315b6`).
+  Added `tests/test_ops_operator_cli.py` asserting the two verbs emit an identical,
+  identically-ordered condition-type list.
+- **`skbrain doctor`'s `run_checks()` now implements all 7 checks the signed manifest
+  declares**, not just 5 (card `105315b6`). Added `skbrain:kedb` (reuses
+  `compute_kedb_coverage`), `skbrain:adapter` (verifies the manifest's own
+  `knowledge.retriever` actually imports/resolves), and `skbrain:cron` (verifies the
+  pack's fleet CronJob objects are installed under `<SKCAPSTONE_HOME>/fleet/objects/`
+  and byte-identical to the shipped templates). No manifest bytes were changed. Added
+  `test_doctor_implements_every_manifest_declared_check`, which fails if the manifest
+  ever again declares a check with no implementation.
 
 ### Changed
 - **`plan_wraps()` and `apply_wraps()` take an `effective` parameter**, defaulting to
@@ -69,6 +82,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
   unaffected.
 
 ### Added
+- **`skos.brain.ops.kedb_coverage`: real `KedbCanonCovered` implementation** (card
+  `8c6e05e3`). Cross-references SKBrain canon known-error pages (`state_refs.kedb`)
+  against the authoritative KEDB fold owned by `skcoord.itil.ITILManager` (re-exported
+  as `skcapstone.itil`), read via the manager's public `search_kedb("")`. Reports real
+  `True`/`False` with enumerable, bidirectional gaps (`missing_from_canon`,
+  `dangling_canon_refs`) in `operator observe --json`'s `KedbCanonCovered.gaps`, and
+  degrades to `Unknown` only when the authoritative fold is genuinely unreachable
+  (optional skcapstone/skcoord sibling absent, ITIL dirs never initialized, or a
+  permission error), always with an explicit reason. Previously this condition was
+  hardcoded and never reflected real coverage.
 - **Licence: GPL-3.0-or-later.** Full verbatim GPLv3 text in `LICENSE`, plus
   `license = {text = "GPL-3.0-or-later"}` and the OSI classifier in `pyproject.toml`.
   The project previously declared no licence field at all. Fleet-wide decision,
