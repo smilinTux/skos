@@ -8,6 +8,7 @@ import pytest
 from skos.brain.ops.doctor import run_checks
 from skos.brain.ops.read_api import OpsReader, build_retriever
 from skos.brain.ops.secrets import lint_text, lint_tree
+from skos.packs.loader import load_manifest_dict
 
 
 class Cursor:
@@ -95,4 +96,78 @@ def test_doctor_checks_schema_grants_and_population(tmp_path: Path):
         [[("ops.wiki_nodes", "ops.wiki_chunks", "ops.links")], [(True, True)], [(3, 60)]]
     )
     checks = run_checks(canon=tmp_path, reader_dsn="redacted", connect=lambda dsn: conn)
-    assert all(c.ok for c in checks)
+    by_name = {c.name: c for c in checks}
+    assert by_name["skbrain:schema"].ok
+    assert by_name["skbrain:grants"].ok
+    assert by_name["skbrain:projector"].ok
+
+
+def test_doctor_all_checks_green_when_every_dependency_is_healthy(tmp_path: Path):
+    """A fully hermetic "everything is green" scenario: an injected kedb_loader
+    stands in for the optional skcapstone/skcoord sibling (absent in CI), so
+    skbrain:kedb, like every other check here, is exercised without touching a
+    real ~/.skcapstone or requiring the sibling package to be installed."""
+    conn = Connection(
+        [[("ops.wiki_nodes", "ops.wiki_chunks", "ops.links")], [(True, True)], [(3, 60)]]
+    )
+    checks = run_checks(
+        canon=tmp_path,
+        reader_dsn="redacted",
+        connect=lambda dsn: conn,
+        kedb_loader=lambda home: [],  # vacuous: no authoritative entries to cover
+    )
+    by_name = {c.name: c for c in checks}
+    assert by_name["skbrain:kedb"].ok, by_name["skbrain:kedb"].detail
+    assert by_name["skbrain:adapter"].ok, by_name["skbrain:adapter"].detail
+    # skbrain:cron reflects real host fleet-object state (not injectable the
+    # way DB/kedb are: it reads installed files, not a live connection), so it
+    # is asserted for shape, not a fixed verdict, here.
+    assert isinstance(by_name["skbrain:cron"].ok, bool)
+
+
+# ---------------------------------------------------------------------------
+# Manifest <-> doctor contract (card 105315b6, task 2b)
+# ---------------------------------------------------------------------------
+#
+# The signed manifest's `doctor` install step (skos/packs/skbrain/
+# skworld.module.json) declares the check NAMES a fully provisioned skbrain
+# pack promises to run. Before this card, 3 of the 7 declared names
+# (skbrain:kedb, skbrain:adapter, skbrain:cron) had no implementation at all
+# -- `skbrain doctor` could never report on them, so "doctor green" could not
+# reflect their health. This test locks in the fix in the direction that
+# actually caused the bug: every check the manifest DECLARES must have a real
+# implementation. It intentionally does NOT require the reverse (every
+# IMPLEMENTED check must be declared): skbrain:secret-lint is implemented but
+# not declared, which is harmless (doctor simply runs one more check than
+# ATLAS requires) and predates this card / is out of its scope.
+
+
+def test_doctor_implements_every_manifest_declared_check(tmp_path: Path):
+    declared = {
+        check
+        for step in load_manifest_dict("skbrain")["install"]["steps"]
+        if step.get("kind") == "doctor"
+        for check in step.get("checks", [])
+    }
+    assert declared, "sanity: the manifest's doctor step declares at least one check"
+
+    conn = Connection(
+        [[("ops.wiki_nodes", "ops.wiki_chunks", "ops.links")], [(True, True)], [(3, 60)]]
+    )
+    implemented = {
+        c.name
+        for c in run_checks(
+            canon=tmp_path,
+            reader_dsn="redacted",
+            connect=lambda dsn: conn,
+            kedb_loader=lambda home: [],
+        )
+    }
+
+    missing = declared - implemented
+    assert not missing, (
+        f"the manifest declares doctor check(s) {sorted(missing)} that "
+        "skos.brain.ops.doctor.run_checks() never emits -- ATLAS can never see "
+        "their health. Either implement them or remove them from "
+        "skos/packs/skbrain/skworld.module.json."
+    )
