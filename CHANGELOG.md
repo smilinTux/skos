@@ -87,6 +87,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 - **`CONTRIBUTING.md`** and **`CODE_OF_CONDUCT.md`** (Contributor Covenant 2.1).
 - **`.github/workflows/docs-check.yml`**: the sk-standards docs freshness gate at
   tiers 1 and 2.
+- **Fresh-node E2E gate for skbrain** (card `d17892ae`). `scripts/fresh-node-gate.sh`
+  builds a genuinely clean-node container (fresh `$HOME`, no `~/.skcapstone`/
+  `~/.skenv`, editable-installs skos + skmemory from staged repo copies), boots a
+  separate ephemeral `skmem-pg` instance, and runs the real, unmocked
+  `skos install skbrain` -> `skbrain doctor` -> `skbrain operator observe` path,
+  captured by `tests/test_fresh_node_gate_it.py` (opt-in via `RUN_FRESH_NODE_GATE=1`;
+  skipped by default since it needs docker + the skmem-pg image). Card f3cb6231 said
+  this completion gate did not exist anywhere in the fleet; only a mocked-`Effects`
+  unit test did. Evidence from a real run is captured in
+  `docs/evidence/skbrain-fresh-node-gate-2026-08-23.json` and
+  `docs/runbooks/skbrain-fresh-node-gate.md`. On this host the harness itself passes
+  but the gate it runs correctly reports `gate_pass: false`: `content_repo` fails (no
+  git remote configured in the pack manifest) and `CmdbDriftBounded`/
+  `KedbCanonCovered` are still hardcoded `"Unknown"` in `src/skos/brain/ops/cli.py`.
+  That is the accurate state of an unfinished feature, not a harness bug, and this PR
+  does not weaken the gate to make it pass.
+- Added `packaging` to `pyproject.toml` dependencies and documented that a fresh
+  node needs `postgresql-client-17` (not Debian bookworm's default v15) to talk to
+  the v17 skmem-pg server — both real gaps the fresh-node gate surfaced.
 
 ### Documented (no code change)
 - **The `timer_wrap` base-file read**, its blast radius and its detection method, in SOP
