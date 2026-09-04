@@ -31,11 +31,11 @@ a **port**; every concrete tool (postgres, ollama, matrix, …) is a swappable
 
 ```bash
 pip install -e .                         # into the ~/.skenv venv
-skos setup                               # create the data-root tree + recommended personal capability set
+skos init --profile local                # create the data-root tree + show the recommended capability set
 skos capabilities                        # list the 4-C capability catalog
-skos plan --profile personal             # show the resolved install plan (capability → adapter)
-skos install --profile personal          # apply: data-root tree + record capabilities
-skos path memory                         # print an abs path under $SK_DATA_ROOT
+skos plan --profile local                # show the resolved install plan (capability → adapter)
+skos up --profile local                  # apply: data-root tree + record capabilities
+skos path data                           # print an abs path under $SK_DATA_ROOT (apps src data secrets config state cache registry)
 ```
 
 ## Where it lives in SKStack v2
@@ -46,7 +46,7 @@ is deployed through.
 
 ```mermaid
 flowchart TD
-    OP["operator / agent"] -->|"skos install --profile"| SKOS
+    OP["operator / agent"] -->|"skos up --profile"| SKOS
     subgraph SKOS["**skos** - sovereign agent OS"]
       RES["resolver<br/>(capability → adapter, per profile)"]
       DESC["app.yaml descriptor + renderers<br/>(compose / k8s / nomad)"]
