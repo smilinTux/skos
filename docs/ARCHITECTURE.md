@@ -26,7 +26,7 @@ Swap a profile, get a different deployment — same descriptor.
 ```mermaid
 sequenceDiagram
     participant Op as operator/agent
-    participant Setup as skos setup
+    participant Setup as skos init
     participant Plan as skos plan
     participant Inst as skos install
     participant Reg as registry
@@ -41,7 +41,7 @@ sequenceDiagram
 ```
 
 CLI surface: `skos {path, profile, descriptor, list, materialize, capabilities,
-resolve, render, setup, plan, install}` plus the brain/surface commands below.
+resolve, render, init, plan, up, install}` plus the brain/surface commands below.
 
 ## The data-root abstraction
 

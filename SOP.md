@@ -247,10 +247,10 @@ The GTD store is six JSON files: `inbox.json`, `next-actions.json`, `projects.js
 Common usage:
 
 ```bash
-skos setup                      # create the data-root tree
-skos path memory                # resolve an absolute path under $SK_DATA_ROOT
+skos init --profile local       # create the data-root tree
+skos path data                  # resolve an absolute path under $SK_DATA_ROOT
 skos capabilities               # the 4-C catalog
-skos plan --profile personal    # resolved install plan, changes nothing
+skos plan --profile local       # resolved install plan, changes nothing
 skos status all                 # live self-report across every surface
 skos status --json gtd
 skos operator observe           # JSON conditions for the operator seat
