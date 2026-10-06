@@ -82,9 +82,11 @@ def list_threads(account: str, query: str, maxn: int = 100) -> list[dict]:
         })
     return rows
 
-# 2026-07-03: rerouted off .100:8082 (Q3_K garble cliff) → chiap08 BeeLlama Q4_K_M (:11436). Override via GTD_LLM_URL.
-LLM_URL = os.environ.get("GTD_LLM_URL", "http://100.81.238.58:11436/v1/chat/completions")
-LLM_MODEL = os.environ.get("GTD_LLM_MODEL", "ornith-1.0-9b")
+# 2026-07-03: rerouted off .100:8082 (Q3_K garble cliff) → chiap08 BeeLlama Q4_K_M (:11436).
+# 2026-10-06: chiap08 down (conn refused) → routed through skgateway (127.0.0.1:18780),
+# Sonnet for now. Override via GTD_LLM_URL / GTD_LLM_MODEL.
+LLM_URL = os.environ.get("GTD_LLM_URL", "http://127.0.0.1:18780/v1/chat/completions")
+LLM_MODEL = os.environ.get("GTD_LLM_MODEL", "claude-sonnet-5-5")
 BUCKET2LABEL = {
     "action": "1 Action", "waiting": "2 Waiting", "read": "3 Read", "someday": "4 Someday",
     "legal": "Areas/Legal-Trust", "people": "Areas/People", "finance": "Areas/Finance",
@@ -107,12 +109,18 @@ _TRIAGE_SYS = (
     'Return ONLY a JSON array of bucket strings, one per email, in order. No prose.'
 )
 
-def classify_batch(emails: list[dict]) -> list[str]:
-    """Return a bucket per email via the local abliterated LLM. Falls back to 'read'."""
+def classify_batch(emails: list[dict]) -> list[str | None] | None:
+    """Return a bucket per email via the local LLM.
+
+    Fail-safe: returns None if the classifier is unreachable or its reply is
+    unusable, and None for any individual email it could not classify. Callers
+    must leave those emails in the inbox — never guess a label.
+    """
     listing = "\n".join(f"[{i}] from={e['from'][:50]} subject={e['subject'][:90]}"
                         for i, e in enumerate(emails))
     payload = {
-        "model": LLM_MODEL, "temperature": 0, "max_tokens": 20 * len(emails) + 50,
+        # reasoning model: ~65 tok/email observed incl. thinking; budget generously
+        "model": LLM_MODEL, "temperature": 0, "max_tokens": 150 * len(emails) + 1024,
         "messages": [{"role": "system", "content": _TRIAGE_SYS},
                      {"role": "user", "content": f"Classify these {len(emails)} emails:\n{listing}"}],
     }
@@ -120,19 +128,20 @@ def classify_batch(emails: list[dict]) -> list[str]:
         import urllib.request
         req = urllib.request.Request(LLM_URL, data=json.dumps(payload).encode(),
                                      headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=120) as r:
-            content = json.loads(r.read())["choices"][0]["message"]["content"]
+        with urllib.request.urlopen(req, timeout=300) as r:
+            choice = json.loads(r.read())["choices"][0]
+        if choice.get("finish_reason") == "length":
+            raise ValueError("reply truncated (max_tokens) — not trusting partial output")
+        content = choice["message"]["content"]
         s = content[content.index("["): content.rindex("]") + 1]
-        buckets = json.loads(s)
-        buckets = [str(b).strip().lower() for b in buckets]
-        # normalize / pad
-        buckets = [b if b in BUCKET2LABEL else "read" for b in buckets]
-        if len(buckets) < len(emails):
-            buckets += ["read"] * (len(emails) - len(buckets))
-        return buckets[:len(emails)]
+        buckets = [str(b).strip().lower() for b in json.loads(s)]
+        if len(buckets) != len(emails):
+            raise ValueError(f"got {len(buckets)} buckets for {len(emails)} emails")
+        # unknown bucket → None (stays in inbox), never a guessed label
+        return [b if b in BUCKET2LABEL else None for b in buckets]
     except Exception as e:
-        print(f"  classify_batch fallback (read): {e}", file=sys.stderr)
-        return ["read"] * len(emails)
+        print(f"  classify_batch FAILED — leaving batch in inbox: {e}", file=sys.stderr)
+        return None
 
 def _labels_modify(account: str, thread_ids: list[str], label: str) -> None:
     for i in range(0, len(thread_ids), 100):
@@ -151,10 +160,16 @@ def cmd_triage(cap_per_account: int = 200) -> None:
             if not rows:
                 break
             buckets = classify_batch(rows)
+            if buckets is None:
+                print(f"  {acct}: classifier unavailable — stopping, inbox untouched",
+                      file=sys.stderr)
+                break
             by_label: dict[str, list[str]] = {}
             for r, b in zip(rows, buckets):
-                if r["id"]:
-                    by_label.setdefault(BUCKET2LABEL.get(b, "3 Read"), []).append(r["id"])
+                if r["id"] and b is not None:
+                    by_label.setdefault(BUCKET2LABEL[b], []).append(r["id"])
+            if not by_label:
+                break  # nothing classifiable; re-listing would loop on the same rows
             for label, ids in by_label.items():
                 _labels_modify(acct, ids, label)
                 grand[label] = grand.get(label, 0) + len(ids)

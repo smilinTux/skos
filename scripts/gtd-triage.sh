@@ -19,7 +19,17 @@ SKOS_ENV_FILE="${SKOS_SCHEDULE_ENV:-$HOME/.skcapstone/skos-schedule.env}"
 [ -f "$SKOS_ENV_FILE" ] && set -a && . "$SKOS_ENV_FILE" && set +a
 : "${GOG_KEYRING_PASSWORD:?set GOG_KEYRING_PASSWORD in $SKOS_ENV_FILE or the environment}"
 export GOG_KEYRING_PASSWORD
-GOG="${GOG:-/home/linuxbrew/.linuxbrew/bin/gog}"
+# Resolve gog the same way skos.gogbin does: GOG override, then PATH, then known
+# install locations. The old hardcoded Homebrew default no longer exists on
+# this box, so every gog call failed silently (2>/dev/null) and "swept 0".
+if [ -z "${GOG:-}" ]; then
+  GOG="$(command -v gog 2>/dev/null || true)"
+  for c in "$HOME/.local/bin/gog" "$HOME/.skenv/bin/gog" /usr/local/bin/gog /home/linuxbrew/.linuxbrew/bin/gog; do
+    [ -n "$GOG" ] && break
+    [ -x "$c" ] && GOG="$c"
+  done
+fi
+[ -n "$GOG" ] && [ -x "$GOG" ] || { echo "gtd-triage: gog binary not found (set GOG or install gogcli)" >&2; exit 2; }
 
 # Operator Gmail boxes: GTD_MAIL_ACCOUNTS (comma-separated) from the env file.
 IFS=',' read -r -a DEFAULT_ACCTS <<< "${GTD_MAIL_ACCOUNTS:-}"
@@ -29,6 +39,12 @@ LOG="$LOGDIR/gtd-triage.log"
 DRY=""; ACCTS=()
 for a in "$@"; do [ "$a" = "--dry-run" ] && DRY="--dry-run" || ACCTS+=("$a"); done
 [ ${#ACCTS[@]} -eq 0 ] && ACCTS=("${DEFAULT_ACCTS[@]}")
+# Fail loudly: an empty list used to "succeed" as "swept 0 across 0 accounts"
+# for ~10 weeks after GTD_MAIL_ACCOUNTS went missing from the env file.
+if [ ${#ACCTS[@]} -eq 0 ]; then
+  echo "$(ts 2>/dev/null || date '+%F %T') gtd-triage: no accounts (set GTD_MAIL_ACCOUNTS in $SKOS_ENV_FILE)" | tee -a "$LOG" >&2
+  exit 3
+fi
 
 # Categories swept to "3 Read" + archived. Exclude starred/important so nothing
 # the user (or Gmail) flagged as significant is moved.
