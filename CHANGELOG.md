@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 ## [Unreleased]
 
 ### Fixed
+- **The GTD spool now carries list mutations, not just captures.** On a
+  non-owner host, `spool_mutation()` queues a clarify/move/done/reopen of an
+  item (target list, allowed source lists, field patch, dropped fields) and
+  `spool_append()` queues a whole built item (dreaming-engine someday-maybe
+  entries), so the skcapstone GTD tools stop rewriting the lists there. The
+  owner applies each op onto its current copy of the item on drain. Replay is
+  a logged no-op: a missing item, an item outside the expected source lists,
+  one whose mutation stamp is at or after the op's `ts`, or an append whose id
+  is already stored is skipped. Unknown or malformed records are logged and
+  skipped instead of being misread as captures.
 - **`deploy/systemd/skos-gtd-drain.{service,timer}`**: the owner host's
   10-minute `skos gtd drain-spool`, so spooled captures land even when the
   owner itself is quiet.
