@@ -311,8 +311,13 @@ def _read_spool(path: Path, offset: int = 0) -> tuple[list[dict], int]:
 
 def _spool(op: str, c: GtdCapture, item_id: str) -> None:
     """Append one op to this host's spool. Single writer per file, so no merge."""
-    rec = {"v": 1, "op": op, "id": item_id, "host": _hostname(),
-           "ts": datetime.now(timezone.utc).isoformat(), "capture": asdict(c)}
+    _spool_record({"v": 1, "op": op, "id": item_id, "host": _hostname(),
+                   "ts": datetime.now(timezone.utc).isoformat(), "capture": asdict(c)})
+
+
+def _spool_record(rec: dict) -> None:
+    """Append one complete record (one line) to this host's spool, fsynced."""
+    op, item_id = rec.get("op"), rec.get("id")
     path = _spool_path()
     with open(path, "a", encoding="utf-8") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
@@ -332,6 +337,143 @@ def _spooled_refs() -> set[tuple[str, str]]:
         if rec.get("op") == "capture" and cap.get("source_ref"):
             refs.add((cap.get("source"), cap["source_ref"]))
     return refs
+
+
+# ── spooled mutations (clarify / move / done / reopen) and raw appends ───────
+# capture/upsert are not the only whole-file rewrites: the skcapstone GTD tools
+# move items between lists and the dreaming engine appends to someday-maybe. On
+# a non-owner host those spool too. A mutation record says "put item <id> in
+# list <to>, after applying <patch> and dropping <drop>, if it is currently in
+# one of <src>" and the owner applies it onto ITS current copy of the item, so
+# fields changed elsewhere in the meantime survive.
+#
+#   {"v": 1, "op": "done", "id": "<item id>", "host": "...", "ts": "<iso>",
+#    "mutation": {"to": "archive", "src": ["inbox", ...] | null,
+#                 "patch": {"status": "done", "completed_at": "<iso>"},
+#                 "drop": []}}
+#   {"v": 1, "op": "append", "id": "<item id>", "host": "...", "ts": "<iso>",
+#    "to": "someday-maybe", "item": {...full item...}}
+#
+# Lists are named by file stem (inbox, next-actions, projects, waiting-for,
+# someday-maybe, archive). Replay is safe: a mutation is skipped (logged, never
+# raised) when the item is missing, is outside ``src``, already sits in ``to``
+# with the same patch, or carries a mutation stamp at or after the record's
+# ``ts`` (it was applied already, or the owner changed it later and wins). An
+# append is skipped when its id is already anywhere in the store.
+MUTATION_OPS = ("clarify", "move", "done", "reopen")
+LIST_NAMES = tuple(f[: -len(".json")] for f in _ALL_FILES)
+# Every timestamp a GTD mutation stamps on an item; the newest is its "last touched".
+_MUTATION_STAMPS = ("clarified_at", "moved_at", "completed_at", "reopened_at", "updated_at")
+
+
+def _list_file(name: str) -> str:
+    if name not in LIST_NAMES:
+        raise ValueError(f"unknown GTD list {name!r} (valid: {', '.join(LIST_NAMES)})")
+    return f"{name}.json"
+
+
+def spool_mutation(action: str, item_id: str, *, to: str, src: list[str] | None = None,
+                   patch: dict | None = None, drop: list[str] | tuple = (),
+                   ts: str | None = None) -> dict:
+    """Non-owner hosts: queue a clarify/move/done/reopen of ``item_id`` for the
+    owner. ``ts`` should be the same instant the caller stamped into ``patch``
+    (e.g. ``completed_at``) so a replay recognises the op as already applied.
+    Returns the record written."""
+    if action not in MUTATION_OPS:
+        raise ValueError(f"unknown GTD mutation {action!r} (valid: {', '.join(MUTATION_OPS)})")
+    _list_file(to)
+    for name in src or ():
+        _list_file(name)
+    rec = {"v": 1, "op": action, "id": item_id, "host": _hostname(),
+           "ts": ts or datetime.now(timezone.utc).isoformat(),
+           "mutation": {"to": to, "src": list(src) if src is not None else None,
+                        "patch": dict(patch or {}), "drop": list(drop)}}
+    _spool_record(rec)
+    return rec
+
+
+def spool_append(item: dict, to: str) -> dict:
+    """Non-owner hosts: queue a whole, already-built item for the owner to append
+    to list ``to`` (e.g. dreaming-engine items into someday-maybe). The item
+    must carry its final ``id``. Returns the record written."""
+    _list_file(to)
+    if not item.get("id"):
+        raise ValueError("spool_append needs an item with an id")
+    rec = {"v": 1, "op": "append", "id": item["id"], "host": _hostname(),
+           "ts": datetime.now(timezone.utc).isoformat(), "to": to, "item": dict(item)}
+    _spool_record(rec)
+    return rec
+
+
+def _last_touched(item: dict) -> str:
+    return max((str(item.get(k)) for k in _MUTATION_STAMPS if item.get(k)), default="")
+
+
+def _locate(item_id: str) -> tuple[str | None, int | None, dict | None, list | None]:
+    """(list name, index, item, items) for ``item_id``; live lists shadow archive."""
+    for fname in _ALL_FILES:
+        items = _load(fname)
+        for idx, it in enumerate(items):
+            if it.get("id") == item_id:
+                return fname[: -len(".json")], idx, it, items
+    return None, None, None, None
+
+
+def _apply_mutation_locked(rec: dict) -> int:
+    """Apply one spooled mutation; caller holds the store lock. 1 if it landed,
+    0 if it was skipped (every skip is logged, none raises)."""
+    action, item_id, ts = rec.get("op"), rec.get("id"), str(rec.get("ts") or "")
+    m = rec.get("mutation") or {}
+    to, src = m.get("to"), m.get("src")
+    patch, drop = m.get("patch") or {}, m.get("drop") or []
+    if not item_id or to not in LIST_NAMES or not isinstance(patch, dict):
+        log.error("gtd spool: malformed %s record for %r, skipped", action, item_id)
+        return 0
+    cur, idx, item, items = _locate(item_id)
+    if item is None:
+        log.warning("gtd spool: %s %s skipped: item not in the store", action, item_id)
+        return 0
+    if src is not None and cur not in src:
+        log.warning("gtd spool: %s %s skipped: item is in %s, op expected %s",
+                    action, item_id, cur, src)
+        return 0
+    if ts and _last_touched(item) >= ts:
+        log.info("gtd spool: %s %s skipped: already applied or superseded (%s >= %s)",
+                 action, item_id, _last_touched(item), ts)
+        return 0
+    updated = {**item, **patch}
+    for k in drop:
+        updated.pop(k, None)
+    if cur == to and updated == item:
+        log.info("gtd spool: %s %s skipped: already in %s", action, item_id, to)
+        return 0
+    if cur == to:
+        items[idx] = updated
+        _save(_list_file(to), items)
+    else:
+        # write-then-delete, as everywhere else: a crash can only duplicate.
+        dest = [it for it in _load(_list_file(to)) if it.get("id") != item_id]
+        dest.append(updated)
+        _save(_list_file(to), dest)
+        items.pop(idx)
+        _save(_list_file(cur), items)
+    log.info("gtd spool: applied %s %s (%s -> %s) from %s", action, item_id, cur, to,
+             rec.get("host"))
+    return 1
+
+
+def _apply_append_locked(rec: dict) -> int:
+    """Apply one spooled append; caller holds the store lock. Idempotent by id."""
+    item, to = rec.get("item"), rec.get("to")
+    if not isinstance(item, dict) or not item.get("id") or to not in LIST_NAMES:
+        log.error("gtd spool: malformed append record %r, skipped", rec.get("id"))
+        return 0
+    if item["id"] in _all_ids():
+        return 0
+    items = _load(_list_file(to))
+    items.append(item)
+    _save(_list_file(to), items)
+    return 1
 
 
 def _offsets_path() -> Path:
@@ -370,6 +512,16 @@ def _drain_spool_locked() -> int:
             continue
         records, end = _read_spool(path, start)
         for rec in records:
+            op = rec.get("op")
+            if op in MUTATION_OPS:
+                applied += _apply_mutation_locked(rec)
+                continue
+            if op == "append":
+                applied += _apply_append_locked(rec)
+                continue
+            if op not in ("capture", "upsert"):
+                log.error("gtd spool: unknown op %r (%s) in %s, skipped", op, rec.get("id"), path)
+                continue
             try:
                 cap = GtdCapture(**(rec.get("capture") or {}))
             except TypeError:
