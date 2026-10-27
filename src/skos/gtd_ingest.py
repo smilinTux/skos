@@ -24,10 +24,11 @@ import fcntl
 import json
 import logging
 import os
+import socket
 import tempfile
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -229,27 +230,218 @@ def _seen_refs() -> set[tuple[str, str]]:
     return seen
 
 
+# ── single-owner writes (the Syncthing collision fix) ────────────────────────
+# The store is a set of WHOLE-FILE JSON lists in a Syncthing-shared folder.
+# flock and atomic rename only serialize writers on ONE host. When two hosts each
+# load-modify-save inbox.json inside the sync window, Syncthing keeps one version
+# and parks the other as a .sync-conflict copy, so every item only the loser had
+# vanishes from the store (2026-10-27: noroc2027 and .41 both captured cron
+# failures just after local midnight, 6 items survived only in conflict copies).
+#
+# Fix: one OWNER host writes the lists. Every other host appends its captures to
+# its own ``spool/<host>.jsonl`` (one writer per file, append-only, so a sync is
+# a plain copy and can never conflict), and the owner folds the spools in under
+# the store lock. The owner is named in the synced ``OWNER`` file beside the
+# lists (or ``SK_GTD_OWNER_HOST``); with neither set every host writes directly,
+# which is the old behavior and stays correct for a single-host store.
+OWNER_FILENAME = "OWNER"
+SPOOL_DIRNAME = "spool"
+
+
+def _hostname() -> str:
+    return os.environ.get("SK_GTD_HOST") or socket.gethostname()
+
+
+def owner_host() -> str | None:
+    """The one host allowed to rewrite the store lists, or None (any host)."""
+    env = (os.environ.get("SK_GTD_OWNER_HOST") or "").strip()
+    if env:
+        return env
+    try:
+        raw = (gtd_dir() / OWNER_FILENAME).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in raw.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            return line
+    return None
+
+
+def is_owner() -> bool:
+    """True when this host may write the store lists directly."""
+    owner = owner_host()
+    if owner is None:
+        return True
+    me = _hostname()
+    return me == owner or me.split(".", 1)[0] == owner.split(".", 1)[0]
+
+
+def _spool_path(host: str | None = None) -> Path:
+    d = gtd_dir() / SPOOL_DIRNAME
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"{(host or _hostname()).replace('/', '-')}.jsonl"
+
+
+def _read_spool(path: Path, offset: int = 0) -> tuple[list[dict], int]:
+    """Complete records from ``offset`` on, plus the offset after the last one.
+    A trailing line without a newline is a write still in flight (or a partial
+    sync) and is left for the next pass."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(offset)
+            data = f.read()
+    except OSError:
+        return [], offset
+    records: list[dict] = []
+    consumed = 0
+    for line in data.splitlines(keepends=True):
+        if not line.endswith(b"\n"):
+            break
+        consumed += len(line)
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            log.error("gtd spool: skipping unparseable line in %s", path)
+            continue
+        if isinstance(rec, dict):
+            records.append(rec)
+    return records, offset + consumed
+
+
+def _spool(op: str, c: GtdCapture, item_id: str) -> None:
+    """Append one op to this host's spool. Single writer per file, so no merge."""
+    rec = {"v": 1, "op": op, "id": item_id, "host": _hostname(),
+           "ts": datetime.now(timezone.utc).isoformat(), "capture": asdict(c)}
+    path = _spool_path()
+    with open(path, "a", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+    log.info("gtd store: %s spooled %s for owner %s", op, item_id, owner_host())
+
+
+def _spooled_refs() -> set[tuple[str, str]]:
+    refs: set[tuple[str, str]] = set()
+    for rec in _read_spool(_spool_path())[0]:
+        cap = rec.get("capture") or {}
+        if rec.get("op") == "capture" and cap.get("source_ref"):
+            refs.add((cap.get("source"), cap["source_ref"]))
+    return refs
+
+
+def _offsets_path() -> Path:
+    """Per-host, NOT synced: how far the owner has applied each spool."""
+    base = os.environ.get("SK_GTD_SPOOL_STATE")
+    if base:
+        return Path(base).expanduser()
+    state = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state")))
+    return state / "skos" / "gtd-spool-offsets.json"
+
+
+def _drain_spool_locked() -> int:
+    """Apply every non-owner spool record; caller holds the store lock.
+    Idempotent: a capture whose id or (source, source_ref) is already in the
+    store is skipped, so a lost offsets file only costs a re-scan."""
+    d = gtd_dir() / SPOOL_DIRNAME
+    if not d.is_dir():
+        return 0
+    op_path = _offsets_path()
+    try:
+        offsets = json.loads(op_path.read_text(encoding="utf-8"))
+        if not isinstance(offsets, dict):
+            offsets = {}
+    except (OSError, json.JSONDecodeError):
+        offsets = {}
+    applied = 0
+    changed = False
+    for path in sorted(d.glob("*.jsonl")):
+        if ".sync-conflict-" in path.name:
+            continue
+        start = int(offsets.get(path.name, 0))
+        try:
+            if path.stat().st_size < start:   # rotated or replaced: rescan
+                start = 0
+        except OSError:
+            continue
+        records, end = _read_spool(path, start)
+        for rec in records:
+            try:
+                cap = GtdCapture(**(rec.get("capture") or {}))
+            except TypeError:
+                log.error("gtd spool: bad capture record %s in %s", rec.get("id"), path)
+                continue
+            if rec.get("op") == "upsert":
+                _, action = _upsert_locked(cap, item_id=rec.get("id"))
+                applied += action != "unchanged"
+            elif _capture_locked(cap, item_id=rec.get("id")):
+                applied += 1
+        if end != start:
+            offsets[path.name] = end
+            changed = True
+    if changed:
+        op_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = op_path.with_name(op_path.name + ".tmp")
+        tmp.write_text(json.dumps(offsets, indent=2), encoding="utf-8")
+        os.replace(tmp, op_path)
+    if applied:
+        log.info("gtd store: applied %d spooled op(s)", applied)
+    return applied
+
+
+def drain_spool() -> int:
+    """Owner only: fold the other hosts' spools into the lists. 0 elsewhere."""
+    if not is_owner():
+        return 0
+    from .coldstart import guard_store  # local import avoids an import cycle
+    with _store_lock():
+        guard_store("drain-spool")
+        return _drain_spool_locked()
+
+
 def capture(c: GtdCapture) -> str | None:
     """The single sink. Dedupe by (source, source_ref); normalize; append to the
     unified store. Returns the new item id, or None if it was a duplicate.
     The whole load-modify-save cycle runs under the store lock.
 
+    On a non-owner host (see :func:`owner_host`) the capture goes to this host's
+    spool instead, with its id assigned now, and the owner lands it.
+
     Before emitting, the cold-start guard refuses to write when this node is
     initialized but the store is empty (cold-start-before-restore), so an
     un-restored node cannot replicate empty state fleet-wide. See skos.coldstart.
     """
+    if not is_owner():
+        if c.source_ref and ((c.source, c.source_ref) in _seen_refs()
+                             or (c.source, c.source_ref) in _spooled_refs()):
+            return None
+        item_id = uuid.uuid4().hex[:12]
+        _spool("capture", c, item_id)
+        return item_id
     from .coldstart import guard_store  # local import avoids an import cycle
     with _store_lock():
         guard_store("capture")
+        _drain_spool_locked()
         return _capture_locked(c)
 
 
-def _capture_locked(c: GtdCapture) -> str | None:
-    """capture() body; caller must hold the store lock."""
+def _all_ids() -> set[str]:
+    return {it.get("id") for fname in _ALL_FILES for it in _load(fname)}
+
+
+def _capture_locked(c: GtdCapture, item_id: str | None = None) -> str | None:
+    """capture() body; caller must hold the store lock. ``item_id`` is the id a
+    non-owner host already handed out; a repeat of it is a no-op."""
     if c.source_ref and (c.source, c.source_ref) in _seen_refs():
         return None
+    if item_id and item_id in _all_ids():
+        return None
     item = {
-        "id": uuid.uuid4().hex[:12],
+        "id": item_id or uuid.uuid4().hex[:12],
         "text": c.text,
         "source": c.source,
         "source_ref": c.source_ref,
@@ -292,7 +484,8 @@ def upsert(c: GtdCapture) -> tuple[str, str]:
     with overwrite (the adapter supplies the fresh state, e.g. the new order state).
 
     Returns ``(item_id, action)`` with ``action`` in
-    ``{created, unchanged, updated, completed}``. On ``unchanged`` it performs **no
+    ``{created, unchanged, updated, completed}``, or ``spooled`` on a non-owner
+    host (the owner applies it on its next drain). On ``unchanged`` it performs **no
     write**, the property that keeps polling idempotent and notifications quiet.
 
     The whole reconcile (find + patch + move) runs under the store lock, and a
@@ -304,19 +497,25 @@ def upsert(c: GtdCapture) -> tuple[str, str]:
     un-restored node (initialized marker present, store empty) cannot emit and
     replicate empty state. See skos.coldstart.
     """
+    if not is_owner():
+        _, _, existing, _ = _find_item(c.source, c.source_ref) if c.source_ref else (None,) * 4
+        item_id = existing["id"] if existing else uuid.uuid4().hex[:12]
+        _spool("upsert", c, item_id)
+        return item_id, "spooled"
     from .coldstart import guard_store  # local import avoids an import cycle
     with _store_lock():
         guard_store("upsert")
+        _drain_spool_locked()
         return _upsert_locked(c)
 
 
-def _upsert_locked(c: GtdCapture) -> tuple[str, str]:
+def _upsert_locked(c: GtdCapture, item_id: str | None = None) -> tuple[str, str]:
     if not c.source_ref:
-        return (_capture_locked(c) or ""), "created"
+        return (_capture_locked(c, item_id) or item_id or ""), "created"
 
     fname, idx, existing, items = _find_item(c.source, c.source_ref)
     if existing is None:
-        return _capture_locked(c), "created"
+        return (_capture_locked(c, item_id) or item_id or ""), "created"
 
     updated = dict(existing)
     changed = False

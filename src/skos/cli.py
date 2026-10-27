@@ -140,8 +140,11 @@ def gtd_capture(
     from skos.gtd_ingest import capture as _capture
     iid = _capture(_gtd_capture_obj(text, source, source_ref, context, priority,
                                     privacy, status, delegate_to, meta))
+    from skos.gtd_ingest import is_owner, owner_host
     if iid is None:
         typer.echo(f"duplicate: ({source}, {source_ref}) already in store")
+    elif not is_owner():
+        typer.echo(f"spooled {iid} (owner {owner_host()} applies it)")
     else:
         typer.echo(f"captured {iid}")
 
@@ -163,6 +166,18 @@ def gtd_upsert(
     iid, action = _upsert(_gtd_capture_obj(text, source, source_ref, context, priority,
                                            privacy, status, delegate_to, meta))
     typer.echo(f"{action} {iid}")
+
+
+@gtd_app.command("drain-spool")
+def gtd_drain_spool():
+    """Owner host only: fold the other hosts' spooled captures into the store.
+    capture/upsert on the owner already drain first; a timer runs this so a
+    quiet owner still lands them. A no-op on any other host."""
+    from skos.gtd_ingest import drain_spool, is_owner, owner_host
+    if not is_owner():
+        typer.echo(f"not the owner (owner is {owner_host()}): nothing to drain here")
+        return
+    typer.echo(f"applied {drain_spool()} spooled op(s)")
 
 
 @gtd_app.command("replay-errors")
