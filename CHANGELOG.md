@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 ## [Unreleased]
 
 ### Fixed
+- **Only one host rewrites the GTD store lists; every other host spools.** The
+  lists are whole-file JSON in a Syncthing-shared folder, so two hosts saving
+  `inbox.json` inside the sync window made Syncthing park one version as a
+  `.sync-conflict` copy and its items vanished (six on 2026-10-27, noroc2027
+  vs .41). A synced `OWNER` file (or `SK_GTD_OWNER_HOST`) names the owner;
+  `capture()`/`upsert()` elsewhere append to `spool/<host>.jsonl`, and the
+  owner folds the spools in under the store lock (`skos gtd drain-spool`).
 - **The skbrain credential drop-in now exports the DSN names consumed by the
   projector and reader** (`SKBRAIN_PG_PROJECTOR_DSN` and
   `SKBRAIN_PG_READER_DSN`). The former doubled the `SKBRAIN_` prefix, leaving a
