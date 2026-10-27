@@ -1,0 +1,23 @@
+# skos-gtd-drain.service: fold the other hosts' GTD spools into the store.
+#
+# Install on the GTD OWNER host ONLY (the host named in
+# <gtd store>/OWNER, noroc2027 for the nor estate). Elsewhere it is a harmless
+# no-op, but there is no reason to run it. See skos#35: whole-file JSON lists in
+# a Syncthing folder must have exactly one writer host; every other host appends
+# to spool/<host>.jsonl and this job lands those records.
+#
+# systemd USER unit. NOT applied live by this repo. Install with:
+#   cp deploy/systemd/skos-gtd-drain.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now skos-gtd-drain.timer
+#
+# capture()/upsert() on the owner already drain first; this timer covers a quiet
+# owner. Runs through sk-cron-run.sh, so a failure is ledgered and alerted.
+
+[Unit]
+Description=Fold other hosts' GTD spools into the store (owner host only, skos#35)
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.skenv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/clawd/skos/scripts/sk-cron-run.sh gtd-drain-spool %h/.skenv/bin/skos gtd drain-spool
