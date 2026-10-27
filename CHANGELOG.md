@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 ## [Unreleased]
 
 ### Fixed
+- **`deploy/systemd/skos-gtd-drain.{service,timer}`**: the owner host's
+  10-minute `skos gtd drain-spool`, so spooled captures land even when the
+  owner itself is quiet.
 - **Only one host rewrites the GTD store lists; every other host spools.** The
   lists are whole-file JSON in a Syncthing-shared folder, so two hosts saving
   `inbox.json` inside the sync window made Syncthing park one version as a
