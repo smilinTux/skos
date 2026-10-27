@@ -95,6 +95,73 @@ log = logging.getLogger("skos.gtd_ingest")
 corrupt_alert_hook: Callable[[Path, Path, Exception], None] | None = None
 
 
+# ── estate guard: one GTD store per estate ───────────────────────────────────
+# Chef's estate (nor) and Casey's cluster (chi) each own a GTD store on their
+# own Syncthing ring. A store may carry an ``ESTATE`` file naming its estate;
+# a host whose own estate differs refuses to write it (lists or spool), so a
+# mounted, copied or mis-shared store can never collect the other estate's
+# items. Cross-estate items travel as skmail to the other estate's agent and
+# are captured THERE, by a host of that estate. No ESTATE file = no check.
+#
+# Host estate: ``SKWORLD_ESTATE`` > hostname prefix (``nor*``/``chi*``). A host
+# with neither (bare names like ``ollama``, ``ziowk01``) is unknown and allowed
+# with a warning, so the guard never strands a writer it cannot place.
+ESTATE_FILENAME = "ESTATE"
+# naming-standard labels are aliases of the legacy prefixes
+_ESTATE_ALIASES = {"chef": "nor", "cakjr": "chi"}
+
+
+class EstateMismatchError(RuntimeError):
+    """This host belongs to a different estate than the GTD store it tried to write."""
+
+
+def _norm_estate(name: str | None) -> str | None:
+    name = (name or "").strip().lower()
+    return _ESTATE_ALIASES.get(name, name) or None
+
+
+def store_estate(d: Path | None = None) -> str | None:
+    """Estate named in the store's ESTATE file (first non-comment line), or None."""
+    try:
+        raw = ((d or gtd_dir()) / ESTATE_FILENAME).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in raw.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            return _norm_estate(line)
+    return None
+
+
+def host_estate() -> str | None:
+    """This host's estate: SKWORLD_ESTATE, else the nor/chi hostname prefix, else None."""
+    env = _norm_estate(os.environ.get("SKWORLD_ESTATE"))
+    if env:
+        return env
+    host = _hostname().lower()
+    for prefix in ("nor", "chi"):
+        if host.startswith(prefix):
+            return prefix
+    return None
+
+
+def guard_estate(d: Path | None = None) -> None:
+    """Raise :class:`EstateMismatchError` if this host may not write store ``d``."""
+    want = store_estate(d)
+    if want is None:
+        return
+    have = host_estate()
+    if have is None:
+        log.warning("gtd store: estate of host %s unknown (set SKWORLD_ESTATE); "
+                    "writing %s store unchecked", _hostname(), want)
+        return
+    if have != want:
+        raise EstateMismatchError(
+            f"gtd store {d or gtd_dir()} belongs to estate {want!r}; host {_hostname()} "
+            f"is estate {have!r}. Send the item to that estate's agent over skmail "
+            f"instead of writing its store.")
+
+
 @contextmanager
 def _store_lock():
     """Advisory flock over the whole store, held across every
@@ -197,6 +264,7 @@ def _save(fname: str, items: list[dict]) -> None:
     os.replace over the target, then fsync the directory. The target is
     never truncated in place; a crash leaves either the old or new file."""
     d = gtd_dir()
+    guard_estate(d)
     target = d / fname
     payload = json.dumps(items, indent=2, ensure_ascii=False, default=str)
     fd, tmp = tempfile.mkstemp(prefix=f".{fname}.", suffix=".tmp", dir=str(d))
@@ -278,6 +346,7 @@ def is_owner() -> bool:
 
 
 def _spool_path(host: str | None = None) -> Path:
+    guard_estate(gtd_dir())
     d = gtd_dir() / SPOOL_DIRNAME
     d.mkdir(parents=True, exist_ok=True)
     return d / f"{(host or _hostname()).replace('/', '-')}.jsonl"
