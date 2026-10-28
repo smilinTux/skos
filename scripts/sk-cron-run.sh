@@ -48,6 +48,14 @@ if [ -z "${SK_ALERT_BIN:-}" ]; then
   else SK_ALERT_BIN="$(command -v sk-alert || true)"; fi
 fi
 mkdir -p "$(dirname "$LEDGER")"
+# Incident state for alerting. One file per failing job, host-local on purpose
+# (never under a Syncthing-shared tree: an incident on nor is not one on .41).
+# The file exists exactly while the job is in a failure streak.
+#   SK_CRON_STATE_DIR       where incident files live
+#   SK_CRON_ALERT_REPEAT_S  re-alert interval while still failing (default 6h)
+SK_CRON_STATE_DIR="${SK_CRON_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sk-cron-run}"
+SK_CRON_ALERT_REPEAT_S="${SK_CRON_ALERT_REPEAT_S:-21600}"
+case "$SK_CRON_ALERT_REPEAT_S" in ''|*[!0-9]*) SK_CRON_ALERT_REPEAT_S=21600;; esac
 
 start_iso=$(date -Iseconds); start_s=$(date +%s)
 out="$("$@" 2>&1)"; rc=$?
@@ -83,17 +91,67 @@ capture(GtdCapture(text=os.environ["SK_GTD_TEXT"], source="cron",
                    context="@ops", priority="high"))
 PY
   fi
+fi
+
+# 3) realtime alert, once per INCIDENT, not once per key forever.
+#
+# This used to call `sk-alert -k cron-$JOB` with no -t. sk-alert's documented
+# semantics for a key without a ttl are "once EVER", so each job alerted on its
+# first failure in history and never again: nor's lumina sync last alerted
+# 2026-09-19 while failing every 3h for weeks. sk-alert is right; the caller
+# asked for the wrong thing. Now sk-cron-run owns the incident:
+#   first failure of a streak  -> alert
+#   still failing              -> re-alert at most every SK_CRON_ALERT_REPEAT_S
+#   first success after a streak -> one recovery notice, streak closed
+# No dedupe key is passed to sk-alert, so its legacy once-ever stamps no longer
+# matter.
+job_safe="$(printf '%s' "$JOB" | tr -c 'A-Za-z0-9_.-' '_')"
+incident="$SK_CRON_STATE_DIR/$job_safe.incident"
+now_s=$(date +%s)
+sk_cron_alert() {  # level message...
+  local lvl="$1"; shift
   if [ -n "${SK_ALERT_BIN:-}" ] && [ -x "$SK_ALERT_BIN" ]; then
     # The message is an ARGUMENT, not stdin. sk-alert does not read stdin: it
-    # exits 2 with "sk_alert: empty message", and the `|| true` below then
-    # swallowed that, so a piped alert looked sent and never was. Two silent
-    # failures were stacked on this one line: unreachable binary, wrong
-    # calling convention.
-    "$SK_ALERT_BIN" -l crit -k "cron-$JOB" \
-      "cron FAILED: ${JOB} (exit ${rc}) - ${tail}" >/dev/null 2>&1 || true
-  else
-    printf 'sk-cron-run: no sk-alert binary found; %s failure was not alerted\n' "$JOB" >&2
+    # exits 2 with "sk_alert: empty message". Its exit code is the only proof
+    # of delivery, so return it rather than swallowing it.
+    "$SK_ALERT_BIN" -l "$lvl" "$*" >/dev/null 2>&1
+    return $?
   fi
+  printf 'sk-cron-run: no sk-alert binary found; %s was not alerted\n' "$JOB" >&2
+  return 1
+}
+write_incident() {  # first_s last_alert_s fails
+  mkdir -p "$SK_CRON_STATE_DIR" 2>/dev/null || return 0
+  printf '%s %s %s\n' "$1" "$2" "$3" > "$incident.tmp.$$" && mv -f "$incident.tmp.$$" "$incident"
+}
+inc_first=""; inc_last=0; inc_fails=0
+if [ -f "$incident" ]; then
+  read -r inc_first inc_last inc_fails < "$incident" || true
+  case "$inc_first" in ''|*[!0-9]*) inc_first="$now_s";; esac
+  case "$inc_last" in ''|*[!0-9]*) inc_last=0;; esac
+  case "$inc_fails" in ''|*[!0-9]*) inc_fails=1;; esac
+fi
+if [ "$rc" -ne 0 ]; then
+  if [ ! -f "$incident" ]; then
+    inc_first="$now_s"; inc_fails=1
+    msg="cron FAILED on ${SK_CRON_HOST}: ${JOB} (exit ${rc}) - ${tail}"
+    due=1
+  else
+    inc_fails=$((inc_fails + 1))
+    since="$(date -d "@$inc_first" '+%F %H:%M' 2>/dev/null || printf '%s' "$inc_first")"
+    msg="cron STILL FAILING on ${SK_CRON_HOST}: ${JOB} (exit ${rc}, ${inc_fails} failed runs since ${since}) - ${tail}"
+    due=0; [ $((now_s - inc_last)) -ge "$SK_CRON_ALERT_REPEAT_S" ] && due=1
+  fi
+  if [ "$due" -eq 1 ] && sk_cron_alert crit "$msg"; then
+    inc_last="$now_s"   # only a DELIVERED alert resets the clock
+  fi
+  write_incident "$inc_first" "$inc_last" "$inc_fails"
+elif [ -f "$incident" ]; then
+  since="$(date -d "@$inc_first" '+%F %H:%M' 2>/dev/null || printf '%s' "$inc_first")"
+  # Exactly one recovery notice: the streak is closed whether or not it lands,
+  # so a broken alert path cannot turn every later success into a retry.
+  sk_cron_alert info "cron RECOVERED on ${SK_CRON_HOST}: ${JOB} ok again after ${inc_fails} failed run(s) since ${since}" || true
+  rm -f "$incident"
 fi
 
 printf '%s\n' "$out"

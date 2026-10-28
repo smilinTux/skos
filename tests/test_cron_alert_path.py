@@ -55,6 +55,7 @@ def scheduler_env(tmp_path, monkeypatch):
     # The scheduler's PATH: no ~/.skenv/bin anywhere in it.
     env["PATH"] = "/usr/bin:/bin"
     env["PY"] = "/usr/bin/python3"
+    env["SK_CRON_STATE_DIR"] = str(tmp_path / "cron-state")
     return env, receipt
 
 
@@ -101,6 +102,7 @@ def test_a_missing_sk_alert_does_not_break_the_wrapper(tmp_path):
     env["SKOS_BIN"] = "/nonexistent/skos"
     env["PATH"] = "/usr/bin:/bin"
     env["PY"] = "/usr/bin/python3"
+    env["SK_CRON_STATE_DIR"] = str(tmp_path / "cron-state")
     (tmp_path / "empty-home").mkdir()
 
     proc = subprocess.run(
