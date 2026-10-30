@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 
 ## [Unreleased]
 
+### Fixed
+- **Task triggers reach the whole backlog.** Tasks held back by the per-cycle
+  or hourly option limit (or a model failure) are now retried, up to 8 per list
+  per cycle with held-back picks first; before, a list's first sync gave
+  options to the first 6 tasks only.
+
 ### Added
 - **`skos ops sync`**: feeds three Nextcloud Tables for the SK Ops app
   (`skops_tables.py`): SK Fleet Hosts (fleet tree status + heartbeat), SK Jobs

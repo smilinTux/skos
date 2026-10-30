@@ -62,6 +62,7 @@ RUNS_PER_HOUR = 12
 MAX_INFLIGHT_RUNS = 2
 LOG_KEEP = 8
 POLL_SECONDS = 45
+PENDING_PER_CYCLE = 8  # held-back tasks re-read per list per cycle (picks first)
 
 NS = {"d": "DAV:", "c": "urn:ietf:params:xml:ns:caldav"}
 
@@ -543,8 +544,9 @@ class Worker:
             new_token, changed, removed = self.dav.sync(lst["href"], token)
             for h in removed:
                 self.state["tasks"].pop(h, None)
-            pending = [h for h, r in self.state["tasks"].items()
-                       if r.get("pending") and r.get("list") == lst["href"] and h not in changed]
+            pending = sorted((h for h, r in self.state["tasks"].items()
+                              if r.get("pending") and r.get("list") == lst["href"] and h not in changed),
+                             key=lambda h: self.state["tasks"][h]["pending"] != "go")[:PENDING_PER_CYCLE]
             for h in changed + pending:  # pending = a pick deferred by a limit last time
                 stats["seen"] += 1
                 opt_left -= self._handle(lst, h, stats, opt_left)
@@ -589,20 +591,24 @@ class Worker:
             rec.pop("opts_for", None)
         want_opts = (not lst["someday"] or (cmd and cmd["kind"] == "options"))
         if want_opts and rec.get("opts_for") != h and not (cmd and cmd["kind"] == "go"):
-            if opt_left > 0 and self._budget("options", OPTIONS_PER_HOUR):
+            if opt_left <= 0 or not self._budget("options", OPTIONS_PER_HOUR):
+                rec["pending"] = "options"  # over the limit: options come on a later cycle
+            else:
                 ctx = chef2 + ("\n\nProgress so far:\n" + "\n".join(log[-3:]) if log else "")
                 new = self.propose(summary2, ctx, lst["name"], todo.get("DUE") or "")
                 used = 1
                 if new:
                     options, rec["options"], rec["opts_for"] = new, new, h
                     dirty = True
+                else:
+                    rec["pending"] = "options"  # model unavailable: retry later
 
         if cmd and cmd["kind"] == "go":
             inflight = sum(1 for r in self.state["tasks"].values() if r.get("run_id"))
             if rec.get("run_id"):
                 log.append(f"- {_stamp()} already working on this; command ignored")
             elif inflight >= MAX_INFLIGHT_RUNS or not self.hermes or not self._budget("run", RUNS_PER_HOUR):
-                rec["pending"] = True  # leave the command in place; retried every cycle
+                rec["pending"] = "go"  # leave the command in place; retried every cycle
                 return used
             else:
                 choice = cmd["choice"]
