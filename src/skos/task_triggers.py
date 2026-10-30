@@ -72,6 +72,9 @@ _TITLE_GO = re.compile(r"^\s*go\s*([1-3])\s*[:.\-]?\s+", re.I)
 _TITLE_AT = re.compile(r"^\s*@lumina\b[\s:,]*", re.I)
 _CAT_CMDS = {"GO": "", "GO-1": "1", "GO-2": "2", "GO-3": "3", "LUMINA": ""}
 _STATUS_LINE = re.compile(r"TASK_STATUS\s*(\{.*\})", re.S)
+_THREAD_LINK = re.compile(r"/call/([a-z0-9]{4,32})#message_(\d+)")
+CLOSED_MARK = "\u2705 "  # nctalk's closed-thread title prefix
+NOTIFY_DEFAULT, NOTIFY_NEVER = 0, 3  # Talk thread follow levels (nctalk uses NEVER as "closed")
 
 
 # --------------------------------------------------------------- iCalendar bits
@@ -188,8 +191,10 @@ def block_log(block: str) -> list[str]:
     return [ln.strip() for ln in tail.splitlines() if ln.strip().startswith("- ")]
 
 
-def render_block(options: list[str], log: list[str]) -> str:
+def render_block(options: list[str], log: list[str], thread_link: str = "") -> str:
     out = [BLOCK_START]
+    if thread_link:
+        out.append(f"Talk thread: {thread_link}")
     if options:
         out.append("Next steps:")
         out += [f"{n}) {o}" for n, o in enumerate(options, 1)]
@@ -199,6 +204,12 @@ def render_block(options: list[str], log: list[str]) -> str:
         out += log[-LOG_KEEP:]
     out.append(BLOCK_END)
     return "\n".join(out)
+
+
+def block_thread(block: str) -> dict | None:
+    """The Talk thread recorded in the block (survives a lost state file)."""
+    m = _THREAD_LINK.search(block or "")
+    return {"room": m.group(1), "id": m.group(2), "seen": int(m.group(2))} if m else None
 
 
 def join_notes(chef: str, block: str) -> str:
@@ -299,6 +310,35 @@ class Dav:
         r.raise_for_status()
         return r.text, r.headers.get("ETag", "")
 
+    def _ocs(self, method: str, path: str, **kw) -> tuple[int, dict | list | None]:
+        r = self.s.request(method, f"{self.base}/ocs/v2.php/apps/spreed/api/v1{path}", timeout=30,
+                           headers={"OCS-APIRequest": "true", "Accept": "application/json"}, **kw)
+        try:
+            return r.status_code, r.json().get("ocs", {}).get("data")
+        except Exception:
+            return r.status_code, None
+
+    def talk_post(self, room: str, message: str, *, thread_id: str = "", title: str = "") -> str | None:
+        """Post as the agent; a title starts a new thread. Returns the message id."""
+        body: dict = {"message": message}
+        if title:
+            body["threadTitle"] = title[:200]
+        if thread_id:
+            body["threadId"] = int(thread_id)
+        code, data = self._ocs("POST", f"/chat/{room}", json=body)
+        return str(data.get("id")) if code < 300 and isinstance(data, dict) and data.get("id") else None
+
+    def thread_info(self, room: str, thread_id: str) -> dict:
+        code, data = self._ocs("GET", f"/chat/{room}/threads/{thread_id}")
+        return data if code < 300 and isinstance(data, dict) else {}
+
+    def thread_set(self, room: str, thread_id: str, *, title: str | None = None,
+                   level: int | None = None) -> None:
+        if title is not None:
+            self._ocs("PUT", f"/chat/{room}/threads/{thread_id}", json={"threadTitle": title[:200]})
+        if level is not None:
+            self._ocs("POST", f"/chat/{room}/threads/{thread_id}/notify", json={"level": level})
+
     def thread_messages(self, room: str, thread_id: str, after: int) -> list[dict]:
         """Messages in one Talk thread newer than ``after`` (oldest first)."""
         r = self.s.get(f"{self.base}/ocs/v2.php/apps/spreed/api/v1/chat/{room}", timeout=30,
@@ -359,6 +399,28 @@ def propose_options(summary: str, notes: str, list_name: str, due: str) -> list[
     return clean if all(clean) else None
 
 
+def propose_plan(summary: str, notes: str, option: str) -> str:
+    """Two or three short plan lines for the picked step (skgateway), with a plain fallback."""
+    url = os.environ.get("SKGATEWAY_URL", "http://localhost:18780/v1")
+    model = os.environ.get("SKGATEWAY_MODEL", "sk-default")
+    prompt = (
+        "Write a short plan (2 or 3 numbered lines, under 60 words total) for how Lumina, Chef's "
+        "AI agent, will carry out this step of his task. Plain text, no preamble, never em or "
+        f"en dashes.\nTask: {summary}\nNotes: {notes[:800] or '(none)'}\nStep: {option}")
+    try:
+        r = requests.post(f"{url}/chat/completions", timeout=90, json={
+            "model": model, "temperature": 0.2, "max_tokens": 1024,
+            "messages": [{"role": "user", "content": prompt}]})
+        text = r.json()["choices"][0]["message"]["content"]
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+        text = text.replace("\u2014", ",").replace("\u2013", "-")
+        if text:
+            return text[:600]
+    except Exception:
+        pass
+    return "Work the step now, post progress and any question here, then write the result back to the task."
+
+
 class Hermes:
     def __init__(self, url: str, key: str):
         self.url = url.rstrip("/")
@@ -380,9 +442,18 @@ class Hermes:
         return r.json()
 
 
-def run_prompt(task: dict, option: str, extra: str, room: str) -> str:
-    where = (f"Talk room {room} (Chef's direct message with you; pass room=\"{room}\")"
-             if room else "no Talk room is configured for this list, so do not post to Talk")
+def run_prompt(task: dict, option: str, extra: str, room: str, thread_id: str = "") -> str:
+    if room and thread_id:
+        where = (f"the Talk thread for this task: thread_id {thread_id} in room {room} (Chef's "
+                 f"direct message with you). Post with talk_thread_reply(room=\"{room}\", "
+                 f"thread_id=\"{thread_id}\"). The pick, the plan and the task link are already "
+                 "its latest message. Post your progress, any question (a poll for a choice, a "
+                 "one-line yes/no question he answers with a reaction) and the result there. Do "
+                 "not open another thread; his replies there reach you in that thread")
+    elif room:
+        where = f"Talk room {room} (Chef's direct message with you; pass room=\"{room}\")"
+    else:
+        where = "no Talk room is configured for this list, so do not post to Talk"
     return (
         "[Task trigger from Nextcloud Tasks] Chef asked you to work on one of his GTD tasks.\n"
         f"Task: {task['summary']}\nList: {task['list']}\nDue: {task.get('due') or 'none'}\n"
@@ -392,17 +463,14 @@ def run_prompt(task: dict, option: str, extra: str, room: str) -> str:
         + (f"Chef's extra instructions: {extra}\n" if extra else "")
         + "\nDo the step now if you can with your tools, following your normal approval rules: "
         "anything irreversible, outward-facing or costly needs Chef's OK first. "
-        f"Where to talk to Chef: {where}. If you need him, or the work is more than a quick "
-        "step, open a Talk thread there with talk_thread_start titled with the task, put your "
-        "progress and any question in it (a poll for a choice, a one-line question he can answer "
-        "with a reaction for yes or no). Do not message him when nothing is needed.\n"
+        f"Where to talk to Chef: {where}.\n"
         "Do not edit or delete the task itself; this trigger writes your status back.\n"
         "state is \"done\" only when the whole task is finished, not just this step; after a "
         "step that leaves more to do, use \"working\" with a rough percent and say what is next. "
         "Put the useful result itself in the note (names, numbers, links), not just \"done\".\n"
         "End your reply with exactly one line:\n"
         'TASK_STATUS {"state": "done|working|needs_chef|blocked", "percent": 0-100, '
-        '"note": "one short line for the task log", "thread_id": "the Talk thread id if you opened one, else empty"}')
+        '"note": "one short line for the task log"}')
 
 
 def parse_status(output: str) -> dict:
@@ -415,11 +483,7 @@ def parse_status(output: str) -> dict:
             state = st.get("state") if st.get("state") in ("done", "working", "needs_chef", "blocked") else "working"
             pct = max(0, min(100, int(st.get("percent", 0))))
             note = re.sub(r"\s+", " ", str(st.get("note", ""))).strip()[:280]
-            tid = str(st.get("thread_id") or "").strip()
-            out = {"state": state, "percent": pct, "note": note}
-            if tid.isdigit():
-                out["thread_id"] = tid
-            return out
+            return {"state": state, "percent": pct, "note": note}
         except Exception:
             pass
     tail = re.sub(r"\s+", " ", (output or "").strip())[-140:]
@@ -430,9 +494,10 @@ def parse_status(output: str) -> dict:
 
 class Worker:
     def __init__(self, dav: Dav, hermes: Hermes | None, state_path: Path, *,
-                 rooms: dict[str, str], only: list[str] | None = None, proposer=propose_options):
+                 rooms: dict[str, str], only: list[str] | None = None, proposer=propose_options,
+                 planner=propose_plan):
         self.dav, self.hermes, self.path = dav, hermes, state_path
-        self.rooms, self.only, self.propose = rooms, only, proposer
+        self.rooms, self.only, self.propose, self.plan = rooms, only, proposer, planner
         self.state = self._load()
 
     def _load(self) -> dict:
@@ -504,6 +569,9 @@ class Worker:
         rec = self.state["tasks"].setdefault(href, {"uid": uid})
         summary = todo.text("SUMMARY")
         chef, block = split_notes(todo.text("DESCRIPTION"))
+        if not rec.get("thread") and block_thread(block):
+            rec["thread"] = block_thread(block)
+        rec["link"] = self.task_link(lst, href)
         cats = todo.categories()
         cmd, summary2, chef2, cats2 = parse_command(summary, chef, cats)
         log = block_log(block)
@@ -543,13 +611,19 @@ class Worker:
                 task = {"uid": uid, "summary": summary2, "notes": chef2, "list": lst["name"],
                         "due": todo.get("DUE") or ""}
                 room = self.rooms.get(lst["owner"], "")
-                run_id = self.hermes.start(f"task-{uid}", run_prompt(task, option, cmd["extra"], room))
+                label = f"option {choice}" if option else "go (Lumina picks the step)"
+                tid = self._open_thread(rec, room, summary2, chef2, label, option, cmd["extra"])
+                run_id = self.hermes.start(f"task-{uid}",
+                                           run_prompt(task, option, cmd["extra"], room, tid))
                 if not run_id:
                     log.append(f"- {_stamp()} could not start: agent API unavailable")
+                    if tid:
+                        self.dav.talk_post(room, "I could not start: my agent API is unavailable. "
+                                           "Write go on the task again to retry.", thread_id=tid)
                 else:
                     rec["run_id"], rec["room"] = run_id, room
-                    label = f"option {choice}" if option else "my pick"
-                    log.append(f"- {_stamp()} started {label}")
+                    log.append(f"- {_stamp()} started {'option ' + choice if option else 'my pick'}"
+                               + ("" if tid else " (no Talk thread: no room for this list)"))
                     todo.set("STATUS", "IN-PROCESS", raw=True)
                     todo.set("PERCENT-COMPLETE", str(max(10, int(todo.get("PERCENT-COMPLETE") or 0))), raw=True)
                     stats["runs"] += 1
@@ -563,13 +637,48 @@ class Worker:
             todo.set_categories(cats)
             dirty = True
         if dirty:
-            if self._write(href, todo, chef, render_block(options, log), etag):
+            if self._write(href, todo, chef, render_block(options, log, self.thread_link(rec)), etag):
                 stats["writes"] += 1
             else:
                 stats["conflicts"] += 1  # retried next cycle; a started run keeps its run_id
         if used:
             stats["options"] += 1
         return used
+
+    def task_link(self, lst: dict, href: str) -> str:
+        """Web link to the task in the owner's Nextcloud Tasks app."""
+        cal = lst["slug"].split("_shared_by_", 1)[0]
+        return f"{self.dav.base}/apps/tasks/calendars/{cal}/tasks/{href.rstrip('/').rsplit('/', 1)[-1]}"
+
+    def thread_link(self, rec: dict) -> str:
+        th = rec.get("thread") or {}
+        return f"{self.dav.base}/call/{th['room']}#message_{th['id']}" if th.get("id") else ""
+
+    def _open_thread(self, rec: dict, room: str, summary: str, notes: str, label: str,
+                     option: str, extra: str) -> str:
+        """Reuse the task's Talk thread (reopening it) or start "Task: <title>". Returns its id."""
+        if not room:
+            return ""
+        plan = self.plan(summary, notes, option or extra or "Lumina picks the best next step")
+        first = (f"You picked {label}" + (f": {option}" if option else "") + "\n"
+                 + (f"Your note: {extra}\n" if extra else "")
+                 + f"Plan:\n{plan}\nTask: {rec.get('link', '')}")
+        th = rec.get("thread") or {}
+        if th.get("id") and th.get("room") == room:
+            info = self.dav.thread_info(room, th["id"])
+            title = ((info.get("thread") or {}).get("title") or "")
+            if title.startswith(CLOSED_MARK):
+                self.dav.thread_set(room, th["id"], title=title[len(CLOSED_MARK):])
+            self.dav.thread_set(room, th["id"], level=NOTIFY_DEFAULT)
+            mid = self.dav.talk_post(room, first, thread_id=th["id"])
+            if mid:
+                th["seen"] = int(mid)
+                return th["id"]
+        mid = self.dav.talk_post(room, first, title=f"Task: {summary}")
+        if not mid:
+            return ""
+        rec["thread"] = {"room": room, "id": mid, "seen": int(mid)}
+        return mid
 
     def _write(self, href: str, todo: Todo, chef: str, block: str, etag: str) -> bool:
         todo.set("DESCRIPTION", join_notes(chef, block))
@@ -609,18 +718,32 @@ class Worker:
                 todo.set("COMPLETED", _utc(), raw=True)
             elif res["percent"]:
                 todo.set("PERCENT-COMPLETE", str(res["percent"]), raw=True)
-            if self._write(href, todo, chef, render_block(rec.get("options") or [], log), etag):
+            if self._write(href, todo, chef, render_block(rec.get("options") or [], log, self.thread_link(rec)), etag):
                 rec.pop("run_id", None)
                 rec["last_result"] = res
-                if res.get("thread_id"):
-                    rec["thread"] = {"room": rec.get("room", ""), "id": res["thread_id"],
-                                     "seen": int(res["thread_id"])}
+                th = rec.get("thread") or {}
+                if th.get("id"):
+                    later = self.dav.thread_messages(th["room"], th["id"], int(th.get("seen", 0)))
+                    if later:
+                        th["seen"] = int(later[-1]["id"])
+                    if res["state"] == "done":
+                        self._close_thread(th, f"Done: {res['note']}\nI marked the task complete. "
+                                               "Write here or pick a step on the task to pick it back up.")
                 if res["state"] != "done":
                     rec.pop("opts_for", None)  # fresh options for the next step on the next cycle
                 stats["finished"] += 1
             else:
                 stats["conflicts"] += 1
 
+
+    def _close_thread(self, th: dict, message: str) -> None:
+        mid = self.dav.talk_post(th["room"], message, thread_id=th["id"])
+        if mid:
+            th["seen"] = int(mid)
+        title = ((self.dav.thread_info(th["room"], th["id"]).get("thread") or {}).get("title") or "")
+        if title and not title.startswith(CLOSED_MARK):
+            self.dav.thread_set(th["room"], th["id"], title=CLOSED_MARK + title)
+        self.dav.thread_set(th["room"], th["id"], level=NOTIFY_NEVER)
 
     def _follow_threads(self, stats: dict) -> None:
         """When Chef answers in a task's Talk thread, log Lumina's follow-up on the task."""
@@ -643,15 +766,31 @@ class Worker:
                 continue
             ics, etag = got
             todo = Todo(ics)
-            if (todo.get("STATUS") or "").upper() in ("COMPLETED", "CANCELLED"):
-                rec.pop("thread", None)
+            status = (todo.get("STATUS") or "").upper()
+            if status == "CANCELLED":
                 continue
             first = re.sub(r"[*_`#|]+", "", replies[-1].get("message", ""))
             first = re.sub(r"\s+", " ", first).strip()[:240]
             chef, block = split_notes(todo.text("DESCRIPTION"))
-            log = block_log(block) + [f"- {_stamp()} you answered in Talk. Lumina: {first}"]
+            log = block_log(block)
+            title = ((self.dav.thread_info(th["room"], th["id"]).get("thread") or {}).get("title") or "")
+            if status == "COMPLETED" and not title.startswith(CLOSED_MARK):
+                # Chef wrote in the thread of a finished task: the work is open again
+                todo.set("STATUS", "IN-PROCESS", raw=True)
+                todo.set("COMPLETED", None)
+                log.append(f"- {_stamp()} reopened in Talk. Lumina: {first}")
+            elif status != "COMPLETED" and title.startswith(CLOSED_MARK):
+                # Lumina closed the thread after working it with Chef: the task is done
+                todo.set("STATUS", "COMPLETED", raw=True)
+                todo.set("PERCENT-COMPLETE", "100", raw=True)
+                todo.set("COMPLETED", _utc(), raw=True)
+                log.append(f"- {_stamp()} done in Talk: {first}")
+            elif status == "COMPLETED":
+                continue
+            else:
+                log.append(f"- {_stamp()} you answered in Talk. Lumina: {first}")
             rec.pop("opts_for", None)  # next steps change once Chef has answered
-            if self._write(href, todo, chef, render_block(rec.get("options") or [], log), etag):
+            if self._write(href, todo, chef, render_block(rec.get("options") or [], log, self.thread_link(rec)), etag):
                 stats["writes"] += 1
             else:
                 th["seen"] = int(msgs[0]["id"]) - 1  # retry next cycle

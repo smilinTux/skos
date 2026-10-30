@@ -22,6 +22,7 @@ class FakeDav:
         self.tags = {}
         self.changed = {h: set(lst_["objs"]) for h, lst_ in lists.items()}
         self.conflict_next = False
+        self.threads, self.msgs = {}, []
 
     def lists(self):
         return [{"href": h, "name": lst_["name"]} for h, lst_ in self.lists_.items()]
@@ -48,6 +49,34 @@ class FakeDav:
                 self.tags[href] = f"e{self.etag}"
                 self.changed[h].add(href)
         return True
+
+    # Talk (same account)
+    def talk_post(self, room, message, *, thread_id="", title=""):
+        self.mid = getattr(self, "mid", 1000) + 1
+        if title:
+            self.threads[str(self.mid)] = {"title": title, "level": 0, "room": room}
+            thread_id = str(self.mid)
+        self.msgs.append({"id": self.mid, "actorId": "lumina", "message": message,
+                          "threadId": int(thread_id), "room": room})
+        return str(self.mid)
+
+    def thread_info(self, room, tid):
+        t = self.threads.get(str(tid))
+        return {"thread": {"title": t["title"]}, "attendee": {"notificationLevel": t["level"]}} if t else {}
+
+    def thread_set(self, room, tid, *, title=None, level=None):
+        t = self.threads[str(tid)]
+        if title is not None:
+            t["title"] = title
+        if level is not None:
+            t["level"] = level
+
+    def thread_messages(self, room, tid, after):
+        return [m for m in self.msgs if str(m["threadId"]) == str(tid) and m["id"] > after]
+
+    def chef_says(self, tid, text):
+        self.mid = max([getattr(self, "mid", 1000)] + [m["id"] for m in self.msgs]) + 1
+        self.msgs.append({"id": self.mid, "actorId": "dknestri", "message": text, "threadId": int(tid)})
 
     def edit(self, href, fn):
         for h, lst_ in self.lists_.items():
@@ -83,8 +112,9 @@ def worker(tmp_path, objs=None, someday=None, proposer=None):
     dav = FakeDav({L: {"name": "GTD Next (chef)", "objs": {T: mk()} if objs is None else objs},
                    S: {"name": "GTD Someday (chef)", "objs": someday or {}}})
     h = FakeHermes()
+    dav.base = "https://hub"
     w = tt.Worker(dav, h, tmp_path / "s.json", rooms={"dknestri": "gaquurgh"},
-                  proposer=proposer or prop)
+                  proposer=proposer or prop, planner=lambda s, n, o: "1. look it up\n2. report")
     return w, dav, h, calls
 
 
@@ -231,21 +261,75 @@ def test_step_done_but_task_not_refreshes_options_with_progress(tmp_path):
     assert len(seen) == 2 and "fee is $85" in seen[1]
 
 
-def test_chef_answer_in_thread_is_logged(tmp_path):
+def test_every_go_opens_or_reuses_the_task_thread(tmp_path):
     w, dav, h, calls = worker(tmp_path)
-    msgs = []
-    dav.thread_messages = lambda room, tid, after: [m for m in msgs if m["id"] > after]
+    w.cycle()
+    dav.edit(T, lambda ics: ics.replace("DESCRIPTION:", "DESCRIPTION:go 2\\n"))
+    w.cycle()
+    (tid, th), = dav.threads.items()
+    assert th["title"] == "Task: Renew car registration"
+    first = dav.msgs[0]["message"]
+    assert "You picked option 2: Call the DMV" in first and "Plan:\n1. look it up" in first
+    assert "Task: https://hub/apps/tasks/calendars/gtd-next/tasks/t1.ics" in first
+    assert f'thread_id=\\"{tid}\\"'.replace("\\\\", "\\") in h.started[0][1] or f'thread_id="{tid}"' in h.started[0][1]
+    assert f"Talk thread: https://hub/call/gaquurgh#message_{tid}" in desc_of(dav)
+    # the work finishes: task completed, thread closed with a check mark
+    h.result = {"status": "completed", "output": 'TASK_STATUS {"state": "done", "percent": 100, "note": "booked for Tue"}'}
+    w.cycle()
+    assert th["title"] == "\u2705 Task: Renew car registration" and th["level"] == 3
+    assert "Done: booked for Tue" in dav.msgs[-1]["message"]
+    assert tt.Todo(dav.get(T)[0]).get("STATUS") == "COMPLETED"
+    # Chef writes in the closed thread: nctalk reopens it (title), the task reopens
+    th["title"] = "Task: Renew car registration"
+    dav.chef_says(tid, "actually make it Wednesday")
+    dav.msgs.append({"id": 9000, "actorId": "lumina", "message": "Moved to Wednesday.", "threadId": int(tid)})
+    w.cycle()
+    t = tt.Todo(dav.get(T)[0])
+    assert t.get("STATUS") == "IN-PROCESS" and t.get("COMPLETED") is None
+    assert "reopened in Talk. Lumina: Moved to Wednesday." in t.text("DESCRIPTION")
+    # a later pick reuses the same thread (no second thread)
+    h.result = None
+    dav.edit(T, lambda ics: ics.replace("DESCRIPTION:", "DESCRIPTION:go 1\\n"))
+    w.cycle()
+    assert len(dav.threads) == 1 and len(h.started) == 2
+    assert "You picked option 1" in dav.msgs[-1]["message"] and str(dav.msgs[-1]["threadId"]) == tid
+
+
+def test_chef_steers_in_thread_and_lumina_closes_it(tmp_path):
+    w, dav, h, calls = worker(tmp_path)
     w.cycle()
     dav.edit(T, lambda ics: ics.replace("DESCRIPTION:", "DESCRIPTION:go\\n"))
     w.cycle()
-    h.result = {"status": "completed", "output":
-                'TASK_STATUS {"state": "needs_chef", "percent": 30, "note": "poll posted", "thread_id": "500"}'}
+    (tid, th), = dav.threads.items()
+    h.result = {"status": "completed", "output": 'TASK_STATUS {"state": "needs_chef", "percent": 30, "note": "poll posted"}'}
     w.cycle()
-    rec = next(iter(w.state["tasks"].values()))
-    assert rec["thread"] == {"room": "gaquurgh", "id": "500", "seen": 500}
-    msgs += [{"id": 501, "actorId": "dknestri", "message": "2"},
-             {"id": 502, "actorId": "lumina", "message": "**Done**, you picked YMCA."}]
+    assert th["level"] == 0  # still open
+    dav.chef_says(tid, "2")
+    dav.msgs.append({"id": 9001, "actorId": "lumina", "message": "**Done**, you picked YMCA.", "threadId": int(tid)})
     w.cycle()
     assert "you answered in Talk. Lumina: Done, you picked YMCA." in desc_of(dav)
-    w.cycle()  # nothing new: no second log line
+    w.cycle()
     assert desc_of(dav).count("you answered in Talk") == 1
+    # Lumina closes the thread from the thread session after more steering
+    dav.chef_says(tid, "great, wrap it up")
+    th["title"] = "\u2705 " + th["title"]
+    dav.msgs.append({"id": dav.mid + 1, "actorId": "lumina", "message": "Signed up, all done.", "threadId": int(tid)})
+    w.cycle()
+    t = tt.Todo(dav.get(T)[0])
+    assert t.get("STATUS") == "COMPLETED" and "done in Talk: Signed up, all done." in t.text("DESCRIPTION")
+
+
+def test_thread_recovered_from_block_when_state_is_lost(tmp_path):
+    w, dav, h, calls = worker(tmp_path)
+    w.cycle()
+    dav.edit(T, lambda ics: ics.replace("DESCRIPTION:", "DESCRIPTION:go\\n"))
+    w.cycle()
+    tid = next(iter(dav.threads))
+    h.result = {"status": "completed", "output": 'TASK_STATUS {"state": "working", "percent": 20, "note": "x"}'}
+    w.cycle()
+    w2 = tt.Worker(dav, h, tmp_path / "fresh.json", rooms={"dknestri": "gaquurgh"},
+                   proposer=lambda *a: ["a", "b", "c"], planner=lambda *a: "p")
+    h.result = None
+    dav.edit(T, lambda ics: ics.replace("DESCRIPTION:", "DESCRIPTION:go\\n"))
+    w2.cycle()
+    assert len(dav.threads) == 1 and str(dav.msgs[-1]["threadId"]) == tid
