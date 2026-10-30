@@ -1,0 +1,32 @@
+# skos-ops-sync.service: feed SK Ops tables in Nextcloud Tables (fleet hosts,
+# sk-cron-run jobs, daily token spend). Part of moving the SK dashboard into
+# Nextcloud; the standalone skdashboard keeps running until each panel has a
+# Nextcloud home at parity.
+#
+# Install on the estate's control host (noroc2027 for nor): it reads the fleet
+# tree, the local cron ledger (plus SKOPS_JOB_HOSTS over ssh) and the SKCounter
+# collector store. Credentials: an app password for the agent account that owns
+# the tables, in ~/.config/skos/skops.env (mode 600, never in git):
+#   NEXTCLOUD_HOST=https://skhub.example
+#   NEXTCLOUD_USERNAME=lumina
+#   NEXTCLOUD_PASSWORD=<app password>
+#   SKOPS_ESTATE=nor
+#   SKOPS_JOB_HOSTS=192.168.0.41
+#
+# systemd USER unit. Install with:
+#   cp deploy/systemd/skos-ops-sync.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now skos-ops-sync.timer
+
+[Unit]
+Description=Feed SK Ops tables in Nextcloud (fleet, jobs, token spend)
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.skenv/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=%h/.config/skos/skops.env
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=50%
+TimeoutStartSec=30min
+ExecStart=%h/clawd/skos/scripts/sk-cron-run.sh skops-sync %h/.skenv/bin/skos ops sync
