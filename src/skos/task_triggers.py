@@ -409,7 +409,7 @@ def propose_plan(summary: str, notes: str, option: str) -> str:
         f"en dashes.\nTask: {summary}\nNotes: {notes[:800] or '(none)'}\nStep: {option}")
     try:
         r = requests.post(f"{url}/chat/completions", timeout=90, json={
-            "model": model, "temperature": 0.2, "max_tokens": 1024,
+            "model": model, "temperature": 0.2, "max_tokens": 2048,
             "messages": [{"role": "user", "content": prompt}]})
         text = r.json()["choices"][0]["message"]["content"]
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
