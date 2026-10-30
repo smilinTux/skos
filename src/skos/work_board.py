@@ -176,7 +176,9 @@ class Deck:
             "duedate": card.get("duedate")})
 
     def move(self, bid: int, card: dict, sid: int) -> None:
-        self._api("PUT", f"/boards/{bid}/stacks/{card['stackId']}/cards/{card['id']}/reorder",
+        # The stack in the URL wins over the body's stackId, so it must be the TARGET
+        # stack; with the card's current stack there the call returns 200 and moves nothing.
+        self._api("PUT", f"/boards/{bid}/stacks/{sid}/cards/{card['id']}/reorder",
                   json={"order": 0, "stackId": sid})
         card["stackId"] = sid
 
@@ -398,6 +400,8 @@ class BoardWorker:
                 return used
             self._start(card, rec, chef2, labels, prod, cmd, log, origin)
             stats["runs"] += 1
+        elif stack == TRIAGE and not busy and rec.get("opts_for") == h and rec.get("options"):
+            self._move(card, rec, OPTIONS)  # options are written but the card sits in Triage
         return used
 
     # ------------------------------------------------------------ runs

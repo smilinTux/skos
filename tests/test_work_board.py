@@ -379,3 +379,13 @@ def test_migrate_puts_recent_open_coord_cards_on_the_board():
 @pytest.mark.parametrize("block,want", [("- [x] 2. do it (dry-run)", "2"), ("- [ ] 1. a", ""), ("* [X] 3) b", "3")])
 def test_ticked(block, want):
     assert wb.ticked(block) == want
+
+
+def test_card_left_in_triage_with_current_options_moves_on():
+    w, deck, *_ = make()
+    cid = deck.add("Card")
+    w.cycle()
+    deck.cards[cid]["stackId"] = deck.sid("Triage")  # a move that did not land
+    w.cycle()
+    w.cycle()
+    assert deck.stack_of(cid) == "Options ready"
