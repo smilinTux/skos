@@ -386,6 +386,9 @@ def run_prompt(task: dict, option: str, extra: str, room: str) -> str:
         "progress and any question in it (a poll for a choice, a one-line question he can answer "
         "with a reaction for yes or no). Do not message him when nothing is needed.\n"
         "Do not edit or delete the task itself; this trigger writes your status back.\n"
+        "state is \"done\" only when the whole task is finished, not just this step; after a "
+        "step that leaves more to do, use \"working\" with a rough percent and say what is next. "
+        "Put the useful result itself in the note (names, numbers, links), not just \"done\".\n"
         "End your reply with exactly one line:\n"
         'TASK_STATUS {"state": "done|working|needs_chef|blocked", "percent": 0-100, '
         '"note": "one short line for the task log"}')
@@ -400,7 +403,7 @@ def parse_status(output: str) -> dict:
             st = json.loads(m.group(1).splitlines()[0])
             state = st.get("state") if st.get("state") in ("done", "working", "needs_chef", "blocked") else "working"
             pct = max(0, min(100, int(st.get("percent", 0))))
-            note = re.sub(r"\s+", " ", str(st.get("note", ""))).strip()[:140]
+            note = re.sub(r"\s+", " ", str(st.get("note", ""))).strip()[:280]
             return {"state": state, "percent": pct, "note": note}
         except Exception:
             pass
@@ -499,7 +502,8 @@ class Worker:
         want_opts = (not lst["someday"] or (cmd and cmd["kind"] == "options"))
         if want_opts and rec.get("opts_for") != h and not (cmd and cmd["kind"] == "go"):
             if opt_left > 0 and self._budget("options", OPTIONS_PER_HOUR):
-                new = self.propose(summary2, chef2, lst["name"], todo.get("DUE") or "")
+                ctx = chef2 + ("\n\nProgress so far:\n" + "\n".join(log[-3:]) if log else "")
+                new = self.propose(summary2, ctx, lst["name"], todo.get("DUE") or "")
                 used = 1
                 if new:
                     options, rec["options"], rec["opts_for"] = new, new, h
@@ -513,6 +517,12 @@ class Worker:
                 return used  # leave the command in place; picked up on a later cycle
             else:
                 choice = cmd["choice"]
+                if choice and len(options) < int(choice) and self._budget("options", OPTIONS_PER_HOUR):
+                    # "go 2" before any options existed: make them now so 2 means something
+                    new = self.propose(summary2, chef2, lst["name"], todo.get("DUE") or "")
+                    used = 1
+                    if new:
+                        options, rec["options"], rec["opts_for"] = new, new, h
                 option = options[int(choice) - 1] if choice and len(options) >= int(choice) else ""
                 task = {"uid": uid, "summary": summary2, "notes": chef2, "list": lst["name"],
                         "due": todo.get("DUE") or ""}
@@ -586,6 +596,8 @@ class Worker:
             if self._write(href, todo, chef, render_block(rec.get("options") or [], log), etag):
                 rec.pop("run_id", None)
                 rec["last_result"] = res
+                if res["state"] != "done":
+                    rec.pop("opts_for", None)  # fresh options for the next step on the next cycle
                 stats["finished"] += 1
             else:
                 stats["conflicts"] += 1

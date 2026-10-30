@@ -203,3 +203,29 @@ def test_parse_status_fallback():
     assert tt.parse_status("no line here")["state"] == "working"
     assert tt.parse_status('x TASK_STATUS {"state": "needs_chef", "percent": 40, "note": "need ok"}') == {
         "state": "needs_chef", "percent": 40, "note": "need ok"}
+
+
+def test_go_n_without_options_generates_first(tmp_path):
+    w, dav, h, calls = worker(tmp_path, objs={T: mk(summary="go 3 Renew car registration")})
+    w.cycle()
+    assert calls == ["Renew car registration"]
+    assert "Chosen next step: Ask Casey to drop it off" in h.started[0][1]
+
+
+def test_step_done_but_task_not_refreshes_options_with_progress(tmp_path):
+    seen = []
+
+    def prop(summary, notes, name, due):
+        seen.append(notes)
+        return ["a", "b", "c"]
+
+    w, dav, h, calls = worker(tmp_path, proposer=prop)
+    w.cycle()
+    dav.edit(T, lambda ics: ics.replace("DESCRIPTION:", "DESCRIPTION:go 1\\n"))
+    w.cycle()
+    h.result = {"status": "completed", "output": 'TASK_STATUS {"state": "working", "percent": 40, "note": "fee is $85"}'}
+    w.cycle()
+    w.cycle()
+    t = tt.Todo(dav.get(T)[0])
+    assert t.get("STATUS") == "IN-PROCESS" and t.get("PERCENT-COMPLETE") == "40"
+    assert len(seen) == 2 and "fee is $85" in seen[1]
