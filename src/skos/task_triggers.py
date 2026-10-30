@@ -827,8 +827,17 @@ def build_worker() -> Worker:
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     w = build_worker()
+    board = None
+    try:  # the SK Work Deck board rides the same loop (skos.work_board)
+        from skos.work_board import build as build_board
+        board = build_board(w.dav, w.hermes, w.state)
+    except Exception as exc:  # noqa: BLE001 - Tasks keep working without the board
+        print(f"board disabled: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
     if "--once" in argv:
         print(json.dumps(w.cycle()))
+        if board:
+            print(json.dumps(board.cycle()))
+            w.save()
         return 0
     while True:
         try:
@@ -837,6 +846,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(st), flush=True)
         except Exception as exc:  # network blips: log and keep going
             print(f"cycle failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        if board:
+            try:
+                bs = board.cycle()
+                w.save()
+                if any(v for k, v in bs.items() if k != "cards"):
+                    print(json.dumps({"board": bs}), flush=True)
+            except Exception as exc:  # noqa: BLE001
+                print(f"board cycle failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
         time.sleep(POLL_SECONDS)
 
 
