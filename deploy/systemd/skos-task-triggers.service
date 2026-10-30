@@ -1,0 +1,22 @@
+# Lumina proposes next steps on Chef's Nextcloud GTD tasks and runs the one he picks.
+# Polls the shared GTD task lists every 45s (CalDAV sync-collection; one tiny REPORT
+# per list when nothing changed). See src/skos/task_triggers.py.
+[Unit]
+Description=skos task triggers (Nextcloud Tasks next steps for Lumina)
+After=network-online.target hermes-gateway.service
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.hermes/.env
+Environment=SKOS_TT_ROOMS=dknestri=gaquurgh
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/.skenv/bin/python -m skos.task_triggers
+Restart=always
+RestartSec=30
+Nice=10
+CPUQuota=25%
+MemoryMax=300M
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target

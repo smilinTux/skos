@@ -21,6 +21,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
   reported as `pending_writeback`; writes use If-Match / If-None-Match so a
   concurrent edit is a skipped conflict, not a lost write. Units:
   `deploy/systemd/skos-gtd-tasks-mirror.{service,timer}` (every 15 min).
+- **Task triggers: Lumina proposes next steps on Nextcloud Tasks and works the
+  one Chef picks** (`skos.task_triggers`, unit
+  `deploy/systemd/skos-task-triggers.service`). Every open task in the GTD
+  lists shared with her gets three next steps in a block she owns at the end of
+  the notes. A plain-text pick (`go`, `go 2`, `options`, `@lumina ...`, a
+  `go 2` title prefix, or a `GO-n` category) starts the work: a Talk thread
+  "Task: <title>" in Chef's DM with the pick, a plan and a link to the task, and
+  a Hermes run that posts progress and the result there. Status goes back to
+  the task; a finished task closes its thread, and later picks reuse it.
 
 ### Fixed
 - **The GTD spool now carries list mutations, not just captures.** On a
