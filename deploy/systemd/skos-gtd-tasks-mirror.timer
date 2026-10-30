@@ -1,0 +1,11 @@
+# See skos-gtd-tasks-mirror.service.
+[Unit]
+Description=Mirror GTD into Nextcloud Tasks every 15 minutes (pilot)
+
+[Timer]
+OnCalendar=*:0/15
+RandomizedDelaySec=60
+Persistent=true
+
+[Install]
+WantedBy=timers.target

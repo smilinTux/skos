@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 
 ## [Unreleased]
 
+### Added
+- **`skos gtd mirror-tasks`** (pilot): one-way mirror of next actions,
+  waiting-fors and projects into Nextcloud Tasks over CalDAV
+  (`gtd_tasks_mirror.py`). Deterministic UIDs (`skgtd-<id>`) make reruns
+  upserts; a task is rewritten only when its GTD item changed, so edits made
+  in Tasks survive; a task completed in Tasks while still open in GTD is
+  reported as `pending_writeback`; writes use If-Match / If-None-Match so a
+  concurrent edit is a skipped conflict, not a lost write. Units:
+  `deploy/systemd/skos-gtd-tasks-mirror.{service,timer}` (every 15 min).
+
 ### Fixed
 - **The GTD spool now carries list mutations, not just captures.** On a
   non-owner host, `spool_mutation()` queues a clarify/move/done/reopen of an
