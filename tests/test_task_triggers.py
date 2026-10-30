@@ -229,3 +229,23 @@ def test_step_done_but_task_not_refreshes_options_with_progress(tmp_path):
     t = tt.Todo(dav.get(T)[0])
     assert t.get("STATUS") == "IN-PROCESS" and t.get("PERCENT-COMPLETE") == "40"
     assert len(seen) == 2 and "fee is $85" in seen[1]
+
+
+def test_chef_answer_in_thread_is_logged(tmp_path):
+    w, dav, h, calls = worker(tmp_path)
+    msgs = []
+    dav.thread_messages = lambda room, tid, after: [m for m in msgs if m["id"] > after]
+    w.cycle()
+    dav.edit(T, lambda ics: ics.replace("DESCRIPTION:", "DESCRIPTION:go\\n"))
+    w.cycle()
+    h.result = {"status": "completed", "output":
+                'TASK_STATUS {"state": "needs_chef", "percent": 30, "note": "poll posted", "thread_id": "500"}'}
+    w.cycle()
+    rec = next(iter(w.state["tasks"].values()))
+    assert rec["thread"] == {"room": "gaquurgh", "id": "500", "seen": 500}
+    msgs += [{"id": 501, "actorId": "dknestri", "message": "2"},
+             {"id": 502, "actorId": "lumina", "message": "**Done**, you picked YMCA."}]
+    w.cycle()
+    assert "you answered in Talk. Lumina: Done, you picked YMCA." in desc_of(dav)
+    w.cycle()  # nothing new: no second log line
+    assert desc_of(dav).count("you answered in Talk") == 1

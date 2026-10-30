@@ -300,6 +300,18 @@ class Dav:
         r.raise_for_status()
         return r.text, r.headers.get("ETag", "")
 
+    def thread_messages(self, room: str, thread_id: str, after: int) -> list[dict]:
+        """Messages in one Talk thread newer than ``after`` (oldest first)."""
+        r = self.s.get(f"{self.base}/ocs/v2.php/apps/spreed/api/v1/chat/{room}", timeout=30,
+                       params={"lookIntoFuture": 0, "limit": 100},
+                       headers={"OCS-APIRequest": "true", "Accept": "application/json"})
+        if r.status_code >= 300:
+            return []
+        msgs = r.json().get("ocs", {}).get("data") or []
+        return sorted((m for m in msgs if str(m.get("threadId")) == str(thread_id)
+                       and int(m.get("id", 0)) > after and m.get("messageType") == "comment"),
+                      key=lambda m: int(m["id"]))
+
     def put(self, href: str, ics: str, etag: str) -> bool:
         """False on a conflict (someone edited it since we read it); retried next cycle."""
         r = self._req("PUT", href, data=ics.encode("utf-8"),
@@ -391,7 +403,7 @@ def run_prompt(task: dict, option: str, extra: str, room: str) -> str:
         "Put the useful result itself in the note (names, numbers, links), not just \"done\".\n"
         "End your reply with exactly one line:\n"
         'TASK_STATUS {"state": "done|working|needs_chef|blocked", "percent": 0-100, '
-        '"note": "one short line for the task log"}')
+        '"note": "one short line for the task log", "thread_id": "the Talk thread id if you opened one, else empty"}')
 
 
 def parse_status(output: str) -> dict:
@@ -404,7 +416,11 @@ def parse_status(output: str) -> dict:
             state = st.get("state") if st.get("state") in ("done", "working", "needs_chef", "blocked") else "working"
             pct = max(0, min(100, int(st.get("percent", 0))))
             note = re.sub(r"\s+", " ", str(st.get("note", ""))).strip()[:280]
-            return {"state": state, "percent": pct, "note": note}
+            tid = str(st.get("thread_id") or "").strip()
+            out = {"state": state, "percent": pct, "note": note}
+            if tid.isdigit():
+                out["thread_id"] = tid
+            return out
         except Exception:
             pass
     tail = re.sub(r"\s+", " ", (output or "").strip())[-140:]
@@ -469,6 +485,7 @@ class Worker:
             self.state["lists"][lst["href"]] = new_token
             self.save()
         self._finish_runs(stats)
+        self._follow_threads(stats)
         self.save()
         return stats
 
@@ -531,7 +548,7 @@ class Worker:
                 if not run_id:
                     log.append(f"- {_stamp()} could not start: agent API unavailable")
                 else:
-                    rec["run_id"] = run_id
+                    rec["run_id"], rec["room"] = run_id, room
                     label = f"option {choice}" if option else "my pick"
                     log.append(f"- {_stamp()} started {label}")
                     todo.set("STATUS", "IN-PROCESS", raw=True)
@@ -596,10 +613,49 @@ class Worker:
             if self._write(href, todo, chef, render_block(rec.get("options") or [], log), etag):
                 rec.pop("run_id", None)
                 rec["last_result"] = res
+                if res.get("thread_id"):
+                    rec["thread"] = {"room": rec.get("room", ""), "id": res["thread_id"],
+                                     "seen": int(res["thread_id"])}
                 if res["state"] != "done":
                     rec.pop("opts_for", None)  # fresh options for the next step on the next cycle
                 stats["finished"] += 1
             else:
+                stats["conflicts"] += 1
+
+
+    def _follow_threads(self, stats: dict) -> None:
+        """When Chef answers in a task's Talk thread, log Lumina's follow-up on the task."""
+        me = self.dav.user
+        for href, rec in self.state["tasks"].items():
+            th = rec.get("thread")
+            if not th or not th.get("room") or rec.get("run_id"):
+                continue
+            msgs = self.dav.thread_messages(th["room"], th["id"], int(th.get("seen", 0)))
+            if not msgs:
+                continue
+            th["seen"] = int(msgs[-1]["id"])
+            chef_spoke = any(m.get("actorId") != me for m in msgs)
+            replies = [m for m in msgs if m.get("actorId") == me]
+            if not (chef_spoke and replies):
+                continue
+            got = self.dav.get(href)
+            if got is None:
+                rec.pop("thread", None)
+                continue
+            ics, etag = got
+            todo = Todo(ics)
+            if (todo.get("STATUS") or "").upper() in ("COMPLETED", "CANCELLED"):
+                rec.pop("thread", None)
+                continue
+            first = re.sub(r"[*_`#|]+", "", replies[-1].get("message", ""))
+            first = re.sub(r"\s+", " ", first).strip()[:240]
+            chef, block = split_notes(todo.text("DESCRIPTION"))
+            log = block_log(block) + [f"- {_stamp()} you answered in Talk. Lumina: {first}"]
+            rec.pop("opts_for", None)  # next steps change once Chef has answered
+            if self._write(href, todo, chef, render_block(rec.get("options") or [], log), etag):
+                stats["writes"] += 1
+            else:
+                th["seen"] = int(msgs[0]["id"]) - 1  # retry next cycle
                 stats["conflicts"] += 1
 
 
