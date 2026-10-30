@@ -333,3 +333,15 @@ def test_thread_recovered_from_block_when_state_is_lost(tmp_path):
     dav.edit(T, lambda ics: ics.replace("DESCRIPTION:", "DESCRIPTION:go\\n"))
     w2.cycle()
     assert len(dav.threads) == 1 and str(dav.msgs[-1]["threadId"]) == tid
+
+
+def test_pick_deferred_by_run_limit_is_retried(tmp_path, monkeypatch):
+    monkeypatch.setattr(tt, "RUNS_PER_HOUR", 0)
+    w, dav, h, calls = worker(tmp_path)
+    w.cycle()
+    dav.edit(T, lambda ics: ics.replace("DESCRIPTION:", "DESCRIPTION:go\\n"))
+    w.cycle()
+    assert h.started == [] and "go" in tt.split_notes(desc_of(dav))[0]
+    monkeypatch.setattr(tt, "RUNS_PER_HOUR", 6)
+    w.cycle()  # no new change notice, still picked up
+    assert len(h.started) == 1

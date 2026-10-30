@@ -58,7 +58,7 @@ PICK_HINT = ('Pick: put "go 1", "go 2" or "go 3" on its own line in these notes,
              'or "go" to let me choose.')
 OPTIONS_PER_CYCLE = 6
 OPTIONS_PER_HOUR = 60
-RUNS_PER_HOUR = 6
+RUNS_PER_HOUR = 12
 MAX_INFLIGHT_RUNS = 2
 LOG_KEEP = 8
 POLL_SECONDS = 45
@@ -543,7 +543,9 @@ class Worker:
             new_token, changed, removed = self.dav.sync(lst["href"], token)
             for h in removed:
                 self.state["tasks"].pop(h, None)
-            for h in changed:
+            pending = [h for h, r in self.state["tasks"].items()
+                       if r.get("pending") and r.get("list") == lst["href"] and h not in changed]
+            for h in changed + pending:  # pending = a pick deferred by a limit last time
                 stats["seen"] += 1
                 opt_left -= self._handle(lst, h, stats, opt_left)
             self.state["lists"][lst["href"]] = new_token
@@ -572,6 +574,8 @@ class Worker:
         if not rec.get("thread") and block_thread(block):
             rec["thread"] = block_thread(block)
         rec["link"] = self.task_link(lst, href)
+        rec["list"] = lst["href"]
+        rec.pop("pending", None)
         cats = todo.categories()
         cmd, summary2, chef2, cats2 = parse_command(summary, chef, cats)
         log = block_log(block)
@@ -598,7 +602,8 @@ class Worker:
             if rec.get("run_id"):
                 log.append(f"- {_stamp()} already working on this; command ignored")
             elif inflight >= MAX_INFLIGHT_RUNS or not self.hermes or not self._budget("run", RUNS_PER_HOUR):
-                return used  # leave the command in place; picked up on a later cycle
+                rec["pending"] = True  # leave the command in place; retried every cycle
+                return used
             else:
                 choice = cmd["choice"]
                 if choice and len(options) < int(choice) and self._budget("options", OPTIONS_PER_HOUR):
