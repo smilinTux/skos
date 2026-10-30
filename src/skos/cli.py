@@ -180,6 +180,19 @@ def gtd_drain_spool():
     typer.echo(f"applied {drain_spool()} spooled op(s)")
 
 
+@gtd_app.command("mirror-tasks")
+def gtd_mirror_tasks():
+    """Pilot: one-way mirror of next actions, waiting-fors and projects into
+    Nextcloud Tasks (CalDAV). The GTD store stays the source of truth. Needs
+    NEXTCLOUD_HOST / NEXTCLOUD_USERNAME / NEXTCLOUD_PASSWORD / SKGTD_TASKS_OWNER."""
+    import json as _json
+    from skos.gtd_tasks_mirror import run
+    rep = run()
+    typer.echo(_json.dumps(rep.as_dict()))
+    if rep.errors:
+        raise typer.Exit(1)
+
+
 @gtd_app.command("replay-errors")
 def gtd_replay_errors():
     """Replay the sink's error-recovery queue: move each quarantined

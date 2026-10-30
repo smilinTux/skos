@@ -1,0 +1,26 @@
+# skos-gtd-tasks-mirror.service: pilot one-way mirror of the unified GTD
+# (next actions, waiting-fors, projects) into Nextcloud Tasks via CalDAV.
+#
+# Install on the GTD OWNER host (noroc2027 for nor). The GTD store stays the
+# source of truth. Credentials: an app password for the agent account that the
+# owner's GTD task lists are shared to (group gtd-agents), in
+# ~/.config/skos/nextcloud-gtd.env (mode 600, never in git):
+#   NEXTCLOUD_HOST=https://skhub.example
+#   NEXTCLOUD_USERNAME=lumina
+#   NEXTCLOUD_PASSWORD=<app password>
+#   SKGTD_TASKS_OWNER=<calendar owner uid>
+#
+# systemd USER unit. Install with:
+#   cp deploy/systemd/skos-gtd-tasks-mirror.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now skos-gtd-tasks-mirror.timer
+
+[Unit]
+Description=Mirror GTD next/waiting/projects into Nextcloud Tasks (pilot)
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.skenv/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=%h/.config/skos/nextcloud-gtd.env
+Nice=10
+ExecStart=%h/clawd/skos/scripts/sk-cron-run.sh gtd-tasks-mirror %h/.skenv/bin/skos gtd mirror-tasks
