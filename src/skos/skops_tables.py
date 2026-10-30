@@ -45,7 +45,7 @@ FLEET_ROOT = HOME / ".skcapstone/fleet"
 LEDGER = HOME / ".skcapstone/logs/cron-ledger.jsonl"
 INCIDENT_DIR = HOME / ".local/state/sk-cron-run"
 STATE_DIR = HOME / ".local/state/skos"
-LEDGER_TAIL_BYTES = 4_000_000
+LEDGER_TAIL_BYTES = 12_000_000  # about 10 days on nor, so weekly jobs show
 STALE_AFTER = timedelta(minutes=30)
 LOW_DISK_GB = 10.0
 
@@ -260,7 +260,7 @@ def spend_rows(estate: str, *, root: Path = COLLECTOR_ROOT, cache_path: Path | N
                 "model": agg.get("model", ""), "messages": agg.get("message_count", 0),
                 "input": tok.get("input", 0), "output": tok.get("output", 0),
                 "cache_read": tok.get("cache_read", 0), "cache_write": tok.get("cache_write", 0),
-                "cost": round(float(cost.get("amount") or 0), 4),
+                "cost": round(float(cost.get("amount") or 0), 2)  # Tables stores 2 decimals,
             }
     cutoff = (now - timedelta(days=days)).date().isoformat()
     cache["buckets"] = {k: v for k, v in cache["buckets"].items() if v["date"] >= cutoff}
