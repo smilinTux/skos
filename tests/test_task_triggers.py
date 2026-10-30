@@ -20,11 +20,11 @@ class FakeDav:
         self.lists_ = lists  # {href: {"name":..., "objs": {href: ics}}}
         self.etag = 0
         self.tags = {}
-        self.changed = {h: set(l["objs"]) for h, l in lists.items()}
+        self.changed = {h: set(lst_["objs"]) for h, lst_ in lists.items()}
         self.conflict_next = False
 
     def lists(self):
-        return [{"href": h, "name": l["name"]} for h, l in self.lists_.items()]
+        return [{"href": h, "name": lst_["name"]} for h, lst_ in self.lists_.items()]
 
     def sync(self, href, token):
         ch = sorted(self.changed[href])
@@ -32,27 +32,27 @@ class FakeDav:
         return "tok", ch, []
 
     def get(self, href):
-        for l in self.lists_.values():
-            if href in l["objs"]:
-                return l["objs"][href], self.tags.get(href, "e0")
+        for lst_ in self.lists_.values():
+            if href in lst_["objs"]:
+                return lst_["objs"][href], self.tags.get(href, "e0")
         return None
 
     def put(self, href, ics, etag):
         if self.conflict_next:
             self.conflict_next = False
             return False
-        for h, l in self.lists_.items():
-            if href in l["objs"]:
-                l["objs"][href] = ics
+        for h, lst_ in self.lists_.items():
+            if href in lst_["objs"]:
+                lst_["objs"][href] = ics
                 self.etag += 1
                 self.tags[href] = f"e{self.etag}"
                 self.changed[h].add(href)
         return True
 
     def edit(self, href, fn):
-        for h, l in self.lists_.items():
-            if href in l["objs"]:
-                l["objs"][href] = fn(l["objs"][href])
+        for h, lst_ in self.lists_.items():
+            if href in lst_["objs"]:
+                lst_["objs"][href] = fn(lst_["objs"][href])
                 self.changed[h].add(href)
 
 
