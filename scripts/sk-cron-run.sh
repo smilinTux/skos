@@ -108,13 +108,27 @@ fi
 job_safe="$(printf '%s' "$JOB" | tr -c 'A-Za-z0-9_.-' '_')"
 incident="$SK_CRON_STATE_DIR/$job_safe.incident"
 now_s=$(date +%s)
-sk_cron_alert() {  # level message...
+# Each incident is one Talk thread, titled for the job, so the estate's agent
+# (who posts the alerts) owns it and Chef can reply in it ("analyse this").
+# Repeats land in the same thread and the recovery closes it. An sk-alert too
+# old to know --thread/--resolve would reject them as unknown flags and drop
+# the alert, so they are only passed when the binary has them.
+alert_group=()
+if [ -n "${SK_ALERT_BIN:-}" ] && grep -q -- '--resolve)' "$SK_ALERT_BIN" 2>/dev/null; then
+  alert_group=(--thread "cron/${SK_CRON_HOST}/${JOB}" --title "cron ${JOB} on ${SK_CRON_HOST}")
+fi
+sk_cron_alert() {  # level [--resolve] message...
   local lvl="$1"; shift
+  local extra=()
+  if [ "${1:-}" = "--resolve" ]; then
+    shift
+    [ "${#alert_group[@]}" -gt 0 ] && extra=(--resolve)
+  fi
   if [ -n "${SK_ALERT_BIN:-}" ] && [ -x "$SK_ALERT_BIN" ]; then
     # The message is an ARGUMENT, not stdin. sk-alert does not read stdin: it
     # exits 2 with "sk_alert: empty message". Its exit code is the only proof
     # of delivery, so return it rather than swallowing it.
-    "$SK_ALERT_BIN" -l "$lvl" "$*" >/dev/null 2>&1
+    "$SK_ALERT_BIN" -l "$lvl" ${alert_group[@]+"${alert_group[@]}"} ${extra[@]+"${extra[@]}"} "$*" >/dev/null 2>&1
     return $?
   fi
   printf 'sk-cron-run: no sk-alert binary found; %s was not alerted\n' "$JOB" >&2
@@ -150,7 +164,7 @@ elif [ -f "$incident" ]; then
   since="$(date -d "@$inc_first" '+%F %H:%M' 2>/dev/null || printf '%s' "$inc_first")"
   # Exactly one recovery notice: the streak is closed whether or not it lands,
   # so a broken alert path cannot turn every later success into a retry.
-  sk_cron_alert info "cron RECOVERED on ${SK_CRON_HOST}: ${JOB} ok again after ${inc_fails} failed run(s) since ${since}" || true
+  sk_cron_alert info --resolve "cron RECOVERED on ${SK_CRON_HOST}: ${JOB} ok again after ${inc_fails} failed run(s) since ${since}" || true
   rm -f "$incident"
 fi
 

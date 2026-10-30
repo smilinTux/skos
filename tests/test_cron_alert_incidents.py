@@ -129,3 +129,34 @@ def test_legacy_once_ever_key_is_not_passed(rig):
     run, alerts, _, _ = rig
     run(FAIL)
     assert "-k" not in alerts()[0].split()
+
+
+def _threaded(rig_alert: Path) -> None:
+    """Make the fake sk-alert look like one that knows --thread/--resolve."""
+    rig_alert.write_text(rig_alert.read_text() + "# case --resolve) --thread)\n", encoding="utf-8")
+
+
+def test_old_sk_alert_gets_no_thread_flags(rig):
+    """An sk-alert without --thread would reject it and drop the alert."""
+    run, alerts, _, _ = rig
+    run(FAIL)
+    run(OK)
+    got = alerts()
+    assert len(got) == 2, got
+    assert all("--thread" not in a and "--resolve" not in a for a in got), got
+
+
+def test_incident_is_one_thread_and_recovery_resolves_it(rig, tmp_path):
+    """Chef replies in the incident's thread; the recovery closes it."""
+    run, alerts, _, _ = rig
+    _threaded(tmp_path / "home" / ".skenv" / "bin" / "sk-alert")
+    run(FAIL, SK_CRON_ALERT_REPEAT_S="0")
+    run(FAIL, SK_CRON_ALERT_REPEAT_S="0")
+    run(OK)
+    got = alerts()
+    assert len(got) == 3, got
+    for a in got:
+        assert "--thread cron/testhost/flaky" in a, a
+        assert "--title cron flaky on testhost" in a, a
+    assert "--resolve" not in got[0] and "--resolve" not in got[1]
+    assert "--resolve" in got[2] and "RECOVERED" in got[2]
