@@ -12,6 +12,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
   options to the first 6 tasks only.
 
 ### Added
+- **SK Work board** (`work_board.py`): the Deck board "SK Work" driven by the
+  same skos-task-triggers loop. Triage cards get 3 next steps from the
+  skcapstone suggestion engine as tick boxes; a tick (or `go N`) queues an
+  AgentRun on the linked skcoord card and opens a Talk thread "Card: <title>";
+  results come back to the thread, a card comment and a report attachment.
+  Cards labelled `prod` stop at Needs approval: a check mark reaction or a move
+  to Approved by an approver (`SKOS_WB_APPROVERS`) is recorded on the coord
+  card, anyone else's move is put back. `python -m skos.work_board --migrate`
+  brings recently active coord cards onto the board.
 - **`skos ops sync`**: feeds three Nextcloud Tables for the SK Ops app
   (`skops_tables.py`): SK Fleet Hosts (fleet tree status + heartbeat), SK Jobs
   (sk-cron-run ledger tail, local and over ssh for `SKOPS_JOB_HOSTS`) and SK
