@@ -345,3 +345,16 @@ def test_pick_deferred_by_run_limit_is_retried(tmp_path, monkeypatch):
     monkeypatch.setattr(tt, "RUNS_PER_HOUR", 6)
     w.cycle()  # no new change notice, still picked up
     assert len(h.started) == 1
+
+
+def test_backlog_beyond_the_cycle_limit_gets_options_later(tmp_path, monkeypatch):
+    monkeypatch.setattr(tt, "OPTIONS_PER_CYCLE", 2)
+    objs = {f"{L}t{i}.ics": mk(f"t{i}", f"Task {i}") for i in range(5)}
+    w, dav, h, calls = worker(tmp_path, objs=objs)
+    w.cycle()
+    assert len(calls) == 2
+    w.cycle()
+    w.cycle()
+    assert sorted(calls) == [f"Task {i}" for i in range(5)]
+    w.cycle()
+    assert len(calls) == 5 and not any(r.get("pending") for r in w.state["tasks"].values())
