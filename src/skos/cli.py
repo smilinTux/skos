@@ -209,6 +209,22 @@ def gtd_replay_errors():
     typer.echo(f"({len(moved)} quarantined file(s) staged for reprocessing)")
 
 
+ops_app = typer.Typer(help="SK Ops: fleet, jobs and token spend fed into Nextcloud Tables")
+app.add_typer(ops_app, name="ops")
+
+
+@ops_app.command("sync")
+def ops_sync(only: str = typer.Option(None, help="fleet, jobs or spend (default: all)")):
+    """Upsert the SK Fleet Hosts, SK Jobs and SK Token Spend tables in Nextcloud
+    Tables. Needs NEXTCLOUD_HOST / NEXTCLOUD_USERNAME / NEXTCLOUD_PASSWORD."""
+    import json as _json
+    from skos.skops_tables import run
+    rep = run(only=only)
+    typer.echo(_json.dumps(rep.as_dict()))
+    if rep.errors:
+        raise typer.Exit(1)
+
+
 placement_app = typer.Typer(help="Storage-placement policy engine + blob catalog")
 app.add_typer(placement_app, name="placement")
 

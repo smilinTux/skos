@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 ## [Unreleased]
 
 ### Added
+- **`skos ops sync`**: feeds three Nextcloud Tables for the SK Ops app
+  (`skops_tables.py`): SK Fleet Hosts (fleet tree status + heartbeat), SK Jobs
+  (sk-cron-run ledger tail, local and over ssh for `SKOPS_JOB_HOSTS`) and SK
+  Token Spend (SKCounter collector `models` view, newest observation wins,
+  incremental parse with a local cache, 90-day window). Rows upsert on a Key
+  column and only changed values are written. Timer `skos-ops-sync` every 15
+  minutes with resource limits.
 - **`skos gtd mirror-tasks`** (pilot): one-way mirror of next actions,
   waiting-fors and projects into Nextcloud Tasks over CalDAV
   (`gtd_tasks_mirror.py`). Deterministic UIDs (`skgtd-<id>`) make reruns
