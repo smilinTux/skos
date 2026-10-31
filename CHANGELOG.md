@@ -5,6 +5,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 
 ## [Unreleased]
 
+### Added
+- **SK Ops dashboards data.** `skos ops sync` now also feeds "SK Work Flow"
+  (coord cards by kind and column, the SK Work Deck board by stack, GTD lists by
+  age bucket plus weekly added/done, ITIL tickets by type and status, memory
+  files per agent and tier) and "SK Open Tickets" (open incidents and problems,
+  changes awaiting approval). SK Token Spend gets a Month column, and SK Alerts
+  gets two derived columns (Opened day, Hours open); no existing value is touched.
+  The Analytics reports and panoramas that draw these live in Nextcloud.
+
 ### Fixed
 - **SK Work ticks were never seen.** Saving a card in Deck's editor rewrites
   `1.` as `1\.` and glues the next line onto the last option, so a ticked box

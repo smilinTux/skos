@@ -18,7 +18,17 @@ Three tables, each upserted by a stable key so reruns change only what moved:
   and on the hosts named in SKOPS_JOB_HOSTS (read over ssh). Jobs not seen for
   7 days are removed.
 
-The SK Alerts table is fed by the alert path itself, not by this module.
+- "SK Work Flow": counts for the work dashboards, one row per (area, group,
+  stage): coord cards by kind and column, the SK Work Deck board by stack, GTD
+  lists by age bucket plus weekly added/done, ITIL tickets by type and status,
+  and memory files per agent and tier. The coord count folds ~1500 cards from
+  disk (about a minute), so it is cached for an hour.
+- "SK Open Tickets": the open ITIL incidents and problems, and the changes
+  waiting for approval, one row each, with their age.
+
+The SK Alerts rows are written by the alert path itself. This module only adds
+two derived columns to them ("Opened day", "Hours open") so Analytics can chart
+alerts per day and time to resolve; it never changes the other columns.
 
 Config (env, e.g. ~/.config/skos/skops.env, mode 600, never in git):
   NEXTCLOUD_HOST, NEXTCLOUD_USERNAME, NEXTCLOUD_PASSWORD (app password)
@@ -55,7 +65,7 @@ SPEND_TABLE = ("SK Token Spend", "💸", [
     ("Provider", "line"), ("Model", "line"), ("Messages", "number"),
     ("Input tokens", "number"), ("Output tokens", "number"),
     ("Cache read tokens", "number"), ("Cache write tokens", "number"),
-    ("Cost USD", "number"), ("Key", "line"),
+    ("Cost USD", "number"), ("Key", "line"), ("Month", "line"),
 ])
 FLEET_TABLE = ("SK Fleet Hosts", "🖥️", [
     ("Host", "line"), ("Estate", "line"), ("Role", "line"), ("Status", "line"),
@@ -70,6 +80,17 @@ JOBS_TABLE = ("SK Jobs", "⏱️", [
     ("Failures 24h", "number"), ("Alerting", "line"), ("Last output", "line"),
     ("Key", "line"),
 ])
+WORK_TABLE = ("SK Work Flow", "🧭", [
+    ("Area", "line"), ("Group", "line"), ("Stage", "line"), ("Items", "number"),
+    ("Oldest days", "number"), ("Key", "line"),
+])
+TICKETS_TABLE = ("SK Open Tickets", "🎫", [
+    ("Type", "line"), ("Ticket", "line"), ("Title", "line"), ("Status", "line"),
+    ("Level", "line"), ("Opened", "datetime"), ("Age days", "number"), ("Key", "line"),
+])
+ALERTS_TITLE = "SK Alerts"  # fed elsewhere; only the two derived columns below are ours
+ALERTS_DERIVED = [("Opened day", "line"), ("Hours open", "number")]
+COORD_CACHE_S = 3600
 
 
 # ---------------------------------------------------------------- Tables API
@@ -274,7 +295,7 @@ def spend_rows(estate: str, *, root: Path = COLLECTOR_ROOT, cache_path: Path | N
         "Provider": b["provider"], "Model": b["model"], "Messages": b["messages"],
         "Input tokens": b["input"], "Output tokens": b["output"],
         "Cache read tokens": b["cache_read"], "Cache write tokens": b["cache_write"],
-        "Cost USD": b["cost"], "Key": key,
+        "Cost USD": b["cost"], "Key": key, "Month": b["date"][:7],
     } for key, b in sorted(cache["buckets"].items())]
 
 
@@ -372,6 +393,162 @@ def job_rows(records: Iterable[dict], incidents: set[str], *, now: datetime | No
     return rows
 
 
+# ---------------------------------------------------------------- work and tickets
+
+GTD_LISTS = ("inbox", "next-actions", "waiting-for", "projects", "someday-maybe")
+GTD_BUCKETS = ((7, "00-07 days"), (30, "08-30 days"), (90, "31-90 days"), (10**9, "91+ days"))
+MEMORY_TIERS = ("short-term", "mid-term", "long-term")
+CLOSED_INCIDENT = {"resolved", "closed"}
+OPEN_CHANGE = {"proposed", "reviewing"}
+
+
+def _days(iso: str | None, now: datetime) -> int:
+    """Whole days since an ISO timestamp (0 when missing or unreadable)."""
+    try:
+        return max(0, (now - _local(str(iso))).days)
+    except (ValueError, TypeError):
+        return 0
+
+
+def _val(x: Any) -> str:
+    return str(getattr(x, "value", x) or "")
+
+
+def _row(area: str, group: str, stage: str, items: int, oldest: int = 0) -> dict:
+    return {"Area": area, "Group": group, "Stage": stage, "Items": items,
+            "Oldest days": oldest, "Key": f"{area}|{group}|{stage}"}
+
+
+def coord_rows(now: datetime, *, home: Path | None = None, cache_path: Path | None = None,
+               max_age_s: int = COORD_CACHE_S) -> list[dict]:
+    """Active coord cards by kind and column. Folding the card store is slow, so cache it."""
+    cache_path = cache_path or STATE_DIR / "skops-coord-cache.json"
+    try:
+        cached = json.loads(cache_path.read_text())
+        if now.timestamp() - cached["at"] < max_age_s:
+            return cached["rows"]
+    except (OSError, ValueError, KeyError):
+        pass
+    from skcapstone.card_store import CardStore
+    counts: dict[tuple[str, str], list] = {}
+    for card in CardStore(home or HOME / ".skcapstone").list_cards():
+        if getattr(card, "archived", False):
+            continue
+        slot = counts.setdefault((_val(card.kind), _val(card.status)), [0, 0])
+        slot[0] += 1
+        slot[1] = max(slot[1], _days(card.created_at, now))
+    rows = [_row("coord", k, c, n, old) for (k, c), (n, old) in sorted(counts.items())]
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(json.dumps({"at": now.timestamp(), "rows": rows}))
+    return rows
+
+
+def deck_rows(deck, board_title: str, now: datetime) -> list[dict]:
+    bid = deck.find_board(board_title)
+    if bid is None:
+        raise LookupError(f"Deck board {board_title!r} not found")
+    rows = []
+    for stack in deck.stacks(bid):
+        cards = stack.get("cards") or []
+        oldest = max((max(0, int(now.timestamp() - c.get("createdAt", now.timestamp())) // 86400)
+                      for c in cards), default=0)
+        rows.append(_row("deck", board_title, stack["title"], len(cards), oldest))
+    return rows
+
+
+def gtd_rows(now: datetime, load: Callable[[str], list[dict]]) -> list[dict]:
+    """Open GTD items by list and age bucket, plus items added and done per week."""
+    rows = []
+    for name in GTD_LISTS:
+        buckets: dict[str, list] = {}
+        for item in load(f"{name}.json"):
+            age = _days(item.get("created_at"), now)
+            label = next(lbl for limit, lbl in GTD_BUCKETS if age <= limit)
+            slot = buckets.setdefault(label, [0, 0])
+            slot[0] += 1
+            slot[1] = max(slot[1], age)
+        rows += [_row("gtd", name, lbl, n, old) for lbl, (n, old) in sorted(buckets.items())]
+    flow: dict[tuple[str, str], int] = {}
+    cutoff = now - timedelta(weeks=12)
+    everything = [load(f"{n}.json") for n in GTD_LISTS] + [load("archive.json")]
+    for kind, field_name, items in (("added", "created_at", [i for lst in everything for i in lst]),
+                                    ("done", "completed_at", everything[-1])):
+        for item in items:
+            try:
+                when = _local(item[field_name])
+            except (KeyError, ValueError, TypeError):
+                continue
+            if when >= cutoff:
+                monday = (when - timedelta(days=when.weekday())).date().isoformat()
+                flow[(kind, monday)] = flow.get((kind, monday), 0) + 1
+    rows += [_row("gtd-flow", kind, week, n) for (kind, week), n in sorted(flow.items())]
+    return rows
+
+
+def itil_rows(now: datetime, mgr) -> tuple[list[dict], list[dict]]:
+    """(work-flow rows by type and status, open-ticket rows) from an ITILManager."""
+    counts: dict[tuple[str, str], list] = {}
+    tickets = []
+    for kind, items, stamp in (("incident", mgr.list_incidents(), "detected_at"),
+                               ("problem", mgr.list_problems(), "created_at"),
+                               ("change", mgr.list_changes(), "created_at")):
+        for t in items:
+            status, opened = _val(t.status), getattr(t, stamp, "") or ""
+            age = _days(opened, now)
+            slot = counts.setdefault((kind, status), [0, 0])
+            slot[0] += 1
+            slot[1] = max(slot[1], age)
+            is_open = ((kind == "incident" and status not in CLOSED_INCIDENT)
+                       or (kind == "problem" and status != "resolved")
+                       or (kind == "change" and status in OPEN_CHANGE))
+            if is_open:
+                level = _val(getattr(t, "severity", None)) if kind == "incident" else \
+                    _val(getattr(t, "risk", None))
+                tickets.append({
+                    "Type": kind, "Ticket": t.id, "Title": (t.title or "")[:200], "Status": status,
+                    "Level": level, "Opened": _fmt_dt(_local(opened)) if opened else None,
+                    "Age days": age, "Key": t.id})
+    return [_row("itil", k, s, n, old) for (k, s), (n, old) in sorted(counts.items())], tickets
+
+
+def memory_rows(now: datetime, root: Path | None = None) -> list[dict]:
+    """Flat memory files per agent and tier (the source of truth for skmemory)."""
+    root = root or HOME / ".skcapstone/agents"
+    rows = []
+    for agent in sorted(p for p in root.glob("*/memory") if p.is_dir()):
+        for tier in MEMORY_TIERS:
+            n, oldest = 0, now.timestamp()
+            try:
+                with os.scandir(agent / tier) as it:
+                    for e in it:
+                        if e.is_file():
+                            n += 1
+                            oldest = min(oldest, e.stat().st_mtime)
+            except OSError:
+                continue
+            if n:
+                rows.append(_row("memory", agent.parent.name, tier, n, int((now.timestamp() - oldest) // 86400)))
+    return rows
+
+
+def alert_derived(rows: list[dict], by_id: dict[int, str], now: datetime | None = None) -> list[dict]:
+    """Derived columns for SK Alerts rows (raw Tables rows in, upsert rows out)."""
+    now = (now or datetime.now()).replace(tzinfo=None)
+    out = []
+    for r in rows:
+        v = {by_id.get(c["columnId"], ""): _norm(c["value"]) for c in r.get("data", [])}
+        if not v.get("Key") or not v.get("First seen"):
+            continue
+        try:
+            first = datetime.strptime(v["First seen"][:16], "%Y-%m-%d %H:%M")
+            end = datetime.strptime(v["Resolved at"][:16], "%Y-%m-%d %H:%M") if v.get("Resolved at") else now
+        except ValueError:
+            continue
+        out.append({"Key": v["Key"], "Opened day": first.date().isoformat(),
+                    "Hours open": max(0, int((end - first).total_seconds() // 3600))})
+    return out
+
+
 # ---------------------------------------------------------------- run
 
 @dataclass
@@ -426,4 +603,54 @@ def run(only: str | None = None, client: TablesClient | None = None) -> OpsRepor
     days = int(os.environ.get("SKOPS_SPEND_DAYS", "90"))
     step("spend", SPEND_TABLE, lambda: spend_rows(estate, days=days),
          prune=lambda vals: vals.get("Date", "") < (datetime.now() - timedelta(days=days)).date().isoformat())
+
+    now = datetime.now(timezone.utc)
+    itil: list = []  # (flow rows, ticket rows), read once for both tables
+
+    def itil_once():
+        if not itil:
+            from skcoord.itil import ITILManager
+            itil.extend(itil_rows(now, ITILManager(HOME / ".skcapstone")))
+        return itil
+
+    refreshed: set[str] = set()
+
+    def work():
+        from skos.gtd_ingest import _load
+        sources = [
+            ("coord", {"coord"}, lambda: coord_rows(now)),
+            ("deck", {"deck"}, lambda: deck_rows(_deck(), os.environ.get("SKOPS_DECK_BOARD", "SK Work"), now)),
+            ("gtd", {"gtd", "gtd-flow"}, lambda: gtd_rows(now, _load)),
+            ("itil", {"itil"}, lambda: itil_once()[0]),
+            ("memory", {"memory"}, lambda: memory_rows(now)),
+        ]
+        rows: list[dict] = []
+        for name, areas, fn in sources:
+            try:
+                rows += fn()
+                refreshed.update(areas)
+            except Exception as exc:  # one source failing keeps its old rows
+                rep.errors.append(f"work: {name}: {type(exc).__name__}: {exc}")
+        return rows
+
+    def _deck():
+        from skos.work_board import Deck
+        return Deck(client.base, client.s.auth[0], client.s.auth[1])
+
+    step("work", WORK_TABLE, work, prune=lambda vals: vals.get("Area", "") in refreshed)
+    step("tickets", TICKETS_TABLE, lambda: itil_once()[1], prune=lambda vals: True)
+
+    if not only or only == "alerts":
+        try:
+            table = next((t for t in client.tables() if t["title"] == ALERTS_TITLE), None)
+            if table:
+                have = {c["title"]: c["id"] for c in client.columns(table["id"])}
+                for title, kind in ALERTS_DERIVED:
+                    if title not in have:
+                        have[title] = client.create_column(table["id"], title, kind)["id"]
+                derived = alert_derived(client.rows(table["id"]), {v: k for k, v in have.items()})
+                rep.tables[ALERTS_TITLE] = {"id": table["id"],
+                                            **upsert(client, table["id"], have, derived).as_dict()}
+        except Exception as exc:
+            rep.errors.append(f"alerts: {type(exc).__name__}: {exc}")
     return rep

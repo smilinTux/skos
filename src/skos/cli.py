@@ -214,9 +214,9 @@ app.add_typer(ops_app, name="ops")
 
 
 @ops_app.command("sync")
-def ops_sync(only: str = typer.Option(None, help="fleet, jobs or spend (default: all)")):
-    """Upsert the SK Fleet Hosts, SK Jobs and SK Token Spend tables in Nextcloud
-    Tables. Needs NEXTCLOUD_HOST / NEXTCLOUD_USERNAME / NEXTCLOUD_PASSWORD."""
+def ops_sync(only: str = typer.Option(None, help="fleet, jobs, spend, work, tickets or alerts (default: all)")):
+    """Upsert the SK Fleet Hosts, Jobs, Token Spend, Work Flow and Open Tickets
+    tables in Nextcloud Tables (and the derived columns of SK Alerts). Needs NEXTCLOUD_HOST / NEXTCLOUD_USERNAME / NEXTCLOUD_PASSWORD."""
     import json as _json
     from skos.skops_tables import run
     rep = run(only=only)
