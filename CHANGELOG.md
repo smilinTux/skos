@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 
 ## [Unreleased]
 
+### Fixed
+- **SK Work ticks were never seen.** Saving a card in Deck's editor rewrites
+  `1.` as `1\.` and glues the next line onto the last option, so a ticked box
+  did not match. The block is now normalized before parsing, and written with
+  blank lines so the editor keeps its lines apart.
+
 ### Changed
 - **SK Work approvals count as the CAB vote.** An approval by someone on the
   approvers list now also records their vote on the linked ITIL change

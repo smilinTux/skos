@@ -83,17 +83,41 @@ _COORD_LINE = re.compile(r"^Coord card:\s*(\S+)", re.M)
 # --------------------------------------------------------------- the block
 
 def render_block(coord_id: str, options: list[dict], log: list[str], thread_link: str = "") -> str:
-    out = [BLOCK_START, f"Coord card: {coord_id}"]
+    # Blank lines between parts so Deck's editor keeps them as separate
+    # paragraphs instead of gluing a line onto the list above it.
+    out = [BLOCK_START, "", f"Coord card: {coord_id}"]
     if thread_link:
-        out.append(f"Talk thread: {thread_link}")
+        out += ["", f"Talk thread: {thread_link}"]
     if options:
-        out.append("Next steps (tick one, or write go 2 on its own line above):")
+        out += ["", "Next steps (tick one, or write go 2 on its own line above):", ""]
         out += [f"- [ ] {n}. {o['text']} ({o['mode']})" for n, o in enumerate(options, 1)]
     if log:
-        out.append("Log:")
+        out += ["", "Log:", ""]
         out += log[-8:]
-    out.append(BLOCK_END)
+    out += ["", BLOCK_END]
     return "\n".join(out)
+
+
+_MD_ESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|>~])")
+
+
+def normalize_block(block: str) -> str:
+    """Undo what Deck's rich editor does to the block when Chef ticks a box.
+
+    Saving from the editor re-serializes the card as markdown: ``1.`` becomes
+    ``1\\.``, blank lines appear, and a plain line after the list is glued onto
+    the last option (``... (execute) Log:``, ``... ready == end ==``). Without
+    this the tick was never seen.
+    """
+    block = _MD_ESCAPE.sub(r"\1", block)
+    block = re.sub(r"[ \t]+(Log:|Talk thread:|Next steps|" + re.escape(BLOCK_END) + ")", r"\n\1", block)
+    return block
+
+
+def card_notes(desc: str) -> tuple[str, str]:
+    """(Chef's text, the agent's block normalized), see :func:`normalize_block`."""
+    chef, block = split_notes(desc)
+    return chef, normalize_block(block)
 
 
 def ticked(block: str) -> str:
@@ -358,7 +382,7 @@ class BoardWorker:
     def _handle(self, card: dict, stack: str, stats: dict, opt_left: int) -> int:
         cid = str(card["id"])
         rec = self.state["cards"].setdefault(cid, {})
-        chef, block = split_notes(card.get("description") or "")
+        chef, block = card_notes(card.get("description") or "")
         labels = [lb.get("title", "") for lb in card.get("labels") or []]
         prod = PROD_LABEL in labels
         if not rec.get("coord"):
@@ -512,7 +536,7 @@ class BoardWorker:
         if len(summary) > COMMENT_MAX - 60:
             self.deck.attach(self.bid, card, f"report-{rec['run_id']}.md",
                              f"# {card['title']}\n\n{summary}\n{extra}\n".encode())
-        chef, block = split_notes(card.get("description") or "")
+        chef, block = card_notes(card.get("description") or "")
         log = block_log(block) + [f"- {_stamp()} {'ready for review' if ok else 'failed'}: {summary[:120]}"]
         rec.pop("run_id", None)
         stats["finished"] += 1
@@ -546,7 +570,7 @@ class BoardWorker:
         stats["finished"] += 1
         if card:
             self.deck.comment(card["id"], f"Approved work: {res['state']}. {res['note']}"[:COMMENT_MAX])
-            chef, block = split_notes(card.get("description") or "")
+            chef, block = card_notes(card.get("description") or "")
             self._write(card, chef, rec, block_log(block) + [f"- {_stamp()} approved work {res['state']}: {res['note'][:120]}"])
         self._post(rec, f"Approved work finished ({res['state']}): {res['note']}\n"
                         "Move the card to Done when you are happy with it.")

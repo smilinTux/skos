@@ -389,3 +389,31 @@ def test_card_left_in_triage_with_current_options_moves_on():
     w.cycle()
     w.cycle()
     assert deck.stack_of(cid) == "Options ready"
+
+
+# A real card after Chef ticked option 1 in Deck's editor (2026-10-30).
+EDITOR_SAVED = ('Kind: incident, coord status: review\n\n== Lumina ==\nCoord card: inc-fe2c6910\n'
+                'Next steps (tick one, or write go 2 on its own line above):\n\n'
+                '- [x] 1\\. Analyze the service logs (propose)\n'
+                '- [ ] 2\\. Simulate the restart (dry-run)\n'
+                '- [ ] 3\\. Apply the fix and open a draft PR (execute) Log:\n\n'
+                '- Oct 30 17:35 moved here from the coord board\n'
+                '- Oct 30 17:41 next steps ready == end ==')
+
+
+def test_tick_survives_deck_editor_rewrite():
+    chef, block = wb.card_notes(EDITOR_SAVED)
+    assert chef.startswith("Kind: incident")
+    assert wb.ticked(block) == "1"
+    opts = wb.block_options(block)
+    assert [o["mode"] for o in opts] == ["propose", "dry-run", "execute"]
+    assert opts[2]["text"] == "Apply the fix and open a draft PR"
+    assert wb.block_log(block) == ["- Oct 30 17:35 moved here from the coord board",
+                                   "- Oct 30 17:41 next steps ready"]
+    assert wb.parse_pick(chef, block)[0] == {"kind": "go", "choice": "1", "extra": ""}
+
+
+def test_rendered_block_round_trips():
+    block = wb.render_block("inc-1", [{"text": "look", "mode": "propose"}], ["- x"])
+    assert "\n\nLog:\n\n" in block and block.endswith("\n\n== end ==")
+    assert wb.block_options(wb.normalize_block(block))[0]["text"] == "look"
