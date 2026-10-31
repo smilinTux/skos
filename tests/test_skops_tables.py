@@ -230,3 +230,12 @@ def test_upsert_never_deletes_rows_without_a_key():
     ops.upsert(fake, tid, cols, [{"Host": "a", "Key": "nor|a"}], prune=lambda v: True)
     hosts = sorted(c["value"] for r in fake.rows(tid) for c in r["data"] if c["columnId"] == cols["Host"])
     assert hosts == ["a", "x", "y"]
+
+
+def test_spend_period_labels_follow_the_calendar(tmp_path):
+    now = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
+    _obs(tmp_path, "n1", "a.json", "2026-11-02T10:00:00Z",
+         [_agg("2026-11-01", "m", 1, 1.0), _agg("2026-10-31", "m", 1, 1.0), _agg("2026-09-30", "m", 1, 1.0)], 100)
+    rows = {r["Date"]: r["Period"] for r in
+            ops.spend_rows("nor", root=tmp_path / "obs", cache_path=tmp_path / "c.json", now=now)}
+    assert rows == {"2026-11-01": "this month", "2026-10-31": "last month", "2026-09-30": "older"}
