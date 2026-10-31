@@ -120,8 +120,8 @@ def test_fleet_rows_status(tmp_path):
             "inventory": {"packages": {"skmemory": "0.11.73"}}}}))
         (d / "heartbeat.json").write_text(json.dumps({"ts": beat}))
     rows = {r["Host"]: r for r in ops.fleet_rows("nor", root=tmp_path, now=now)}
-    assert rows["a"]["Status"] == "ok" and rows["a"]["skmemory"] == "0.11.73"
-    assert rows["b"]["Status"] == "stale"
+    assert rows["a"]["Status"] == "ok" and rows["a"]["skmemory"] == "0.11.73" and rows["a"]["Down"] == 0
+    assert rows["b"]["Status"] == "stale" and rows["b"]["Down"] == 1
     assert rows["c"]["Status"] == "low disk"
 
 
@@ -178,15 +178,19 @@ def test_itil_rows_counts_and_open_tickets():
 
 
 def test_alert_derived_hours_open_for_open_and_resolved():
-    by_id = {1: "Key", 2: "First seen", 3: "Resolved at"}
+    by_id = {1: "Key", 2: "First seen", 3: "Resolved at", 4: "Status", 5: "Severity"}
     rows = [
-        {"data": [{"columnId": 1, "value": "a"}, {"columnId": 2, "value": "2026-10-31 06:00"}]},
+        {"data": [{"columnId": 1, "value": "a"}, {"columnId": 2, "value": "2026-10-31 06:00"},
+                  {"columnId": 4, "value": 0}, {"columnId": 5, "value": 2}]},
         {"data": [{"columnId": 1, "value": "b"}, {"columnId": 2, "value": "2026-10-30 06:00"},
-                  {"columnId": 3, "value": "2026-10-30 09:30"}]},
+                  {"columnId": 3, "value": "2026-10-30 09:30"}, {"columnId": 4, "value": 2},
+                  {"columnId": 5, "value": 2}]},
         {"data": [{"columnId": 1, "value": "c"}]},  # no First seen: skipped
     ]
     out = {r["Key"]: r for r in ops.alert_derived(rows, by_id, now=datetime(2026, 10, 31, 12, 0))}
     assert out["a"]["Hours open"] == 6 and out["a"]["Opened day"] == "2026-10-31"
+    assert (out["a"]["Active"], out["a"]["Active crit"]) == (1, 1)
+    assert (out["b"]["Active"], out["b"]["Active crit"]) == (0, 0)  # resolved
     assert out["b"]["Hours open"] == 3 and "c" not in out
 
 

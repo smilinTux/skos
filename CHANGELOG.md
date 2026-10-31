@@ -10,8 +10,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
   (coord cards by kind and column, the SK Work Deck board by stack, GTD lists by
   age bucket plus weekly added/done, ITIL tickets by type and status, memory
   files per agent and tier) and "SK Open Tickets" (open incidents and problems,
-  changes awaiting approval). SK Token Spend gets a Month column, and SK Alerts
-  gets two derived columns (Opened day, Hours open); no existing value is touched.
+  changes awaiting approval). SK Token Spend gets a Month column, SK Fleet Hosts a
+  Down flag, SK Jobs a Failing flag (so KPI sums show 0 instead of nothing), and SK Alerts
+  gets derived columns (Opened day, Hours open, Active, Active crit); no existing value is touched.
   The Analytics reports and panoramas that draw these live in Nextcloud.
 
 ### Fixed

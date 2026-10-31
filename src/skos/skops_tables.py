@@ -27,8 +27,8 @@ Three tables, each upserted by a stable key so reruns change only what moved:
   waiting for approval, one row each, with their age.
 
 The SK Alerts rows are written by the alert path itself. This module only adds
-two derived columns to them ("Opened day", "Hours open") so Analytics can chart
-alerts per day and time to resolve; it never changes the other columns.
+derived columns to them (Opened day, Hours open, Active, Active crit) so
+Analytics can chart alerts per day, time to resolve and always-present counts; it never changes the other columns.
 
 Config (env, e.g. ~/.config/skos/skops.env, mode 600, never in git):
   NEXTCLOUD_HOST, NEXTCLOUD_USERNAME, NEXTCLOUD_PASSWORD (app password)
@@ -71,14 +71,14 @@ FLEET_TABLE = ("SK Fleet Hosts", "🖥️", [
     ("Host", "line"), ("Estate", "line"), ("Role", "line"), ("Status", "line"),
     ("Last seen", "datetime"), ("skcapstone", "line"), ("skmemory", "line"),
     ("Cores", "number"), ("RAM GB", "number"), ("Disk free GB", "number"),
-    ("Key", "line"),
+    ("Key", "line"), ("Down", "number"),
 ])
 JOBS_TABLE = ("SK Jobs", "⏱️", [
     ("Host", "line"), ("Job", "line"), ("Last result", "line"),
     ("Last run", "datetime"), ("Last exit", "number"), ("Duration s", "number"),
     ("Consecutive failures", "number"), ("Runs 24h", "number"),
     ("Failures 24h", "number"), ("Alerting", "line"), ("Last output", "line"),
-    ("Key", "line"),
+    ("Key", "line"), ("Failing", "number"),
 ])
 WORK_TABLE = ("SK Work Flow", "🧭", [
     ("Area", "line"), ("Group", "line"), ("Stage", "line"), ("Items", "number"),
@@ -89,7 +89,8 @@ TICKETS_TABLE = ("SK Open Tickets", "🎫", [
     ("Level", "line"), ("Opened", "datetime"), ("Age days", "number"), ("Key", "line"),
 ])
 ALERTS_TITLE = "SK Alerts"  # fed elsewhere; only the two derived columns below are ours
-ALERTS_DERIVED = [("Opened day", "line"), ("Hours open", "number")]
+ALERTS_DERIVED = [("Opened day", "line"), ("Hours open", "number"),
+                  ("Active", "number"), ("Active crit", "number")]
 COORD_CACHE_S = 3600
 
 
@@ -336,6 +337,7 @@ def fleet_rows(estate: str, *, root: Path = FLEET_ROOT, now: datetime | None = N
             "skcapstone": (status.get("versions") or {}).get("skcapstone") or pkgs.get("skcapstone", ""),
             "skmemory": pkgs.get("skmemory", ""), "Cores": cap.get("cores"),
             "RAM GB": cap.get("ram_gb"), "Disk free GB": disk, "Key": f"{estate}|{host}",
+            "Down": 0 if state == "ok" else 1,
         })
     return rows
 
@@ -388,7 +390,7 @@ def job_rows(records: Iterable[dict], incidents: set[str], *, now: datetime | No
             "Runs 24h": len(day), "Failures 24h": sum(1 for r in day if not r.get("ok")),
             "Alerting": "yes" if (safe in incidents or job in incidents) else "no",
             "Last output": "" if last.get("ok") else (last.get("tail") or "")[-240:],
-            "Key": f"{host}|{job}",
+            "Key": f"{host}|{job}", "Failing": 0 if last.get("ok") else 1,
         })
     return rows
 
@@ -544,8 +546,10 @@ def alert_derived(rows: list[dict], by_id: dict[int, str], now: datetime | None 
             end = datetime.strptime(v["Resolved at"][:16], "%Y-%m-%d %H:%M") if v.get("Resolved at") else now
         except ValueError:
             continue
+        active = v.get("Status") in ("0", "1")  # open or ack; Tables hands selection ids back
         out.append({"Key": v["Key"], "Opened day": first.date().isoformat(),
-                    "Hours open": max(0, int((end - first).total_seconds() // 3600))})
+                    "Hours open": max(0, int((end - first).total_seconds() // 3600)),
+                    "Active": int(active), "Active crit": int(active and v.get("Severity") == "2")})
     return out
 
 
