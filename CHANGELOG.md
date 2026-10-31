@@ -13,7 +13,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
   changes awaiting approval). SK Token Spend gets a Month column, SK Fleet Hosts a
   Down flag, SK Jobs a Failing flag (so KPI sums show 0 instead of nothing), and SK Alerts
   gets derived columns (Opened day, Hours open, Active, Active crit); no existing value is touched.
-  The Analytics reports and panoramas that draw these live in Nextcloud.
+  Rows without a Key (sk-alert "fyi" rows) are never deduplicated or pruned by the
+  upsert. The Analytics reports and panoramas that draw these live in Nextcloud.
 
 ### Fixed
 - **SK Work ticks were never seen.** Saving a card in Deck's editor rewrites

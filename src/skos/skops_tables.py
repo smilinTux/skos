@@ -92,6 +92,7 @@ ALERTS_TITLE = "SK Alerts"  # fed elsewhere; only the two derived columns below 
 ALERTS_DERIVED = [("Opened day", "line"), ("Hours open", "number"),
                   ("Active", "number"), ("Active crit", "number")]
 COORD_CACHE_S = 3600
+COORD_FLOW = ("backlog", "ready", "doing", "review", "done")
 
 
 # ---------------------------------------------------------------- Tables API
@@ -201,6 +202,8 @@ def upsert(client: TablesClient, table_id: int, colmap: dict[str, int], rows: li
     for r in client.rows(table_id):
         vals = {by_id.get(c["columnId"], ""): _norm(c["value"]) for c in r.get("data", [])}
         key = vals.get("Key", "")
+        if not key:  # rows another writer left without a key (sk-alert "fyi" rows) are not ours
+            continue
         if key in existing:  # duplicate from an interrupted run: keep the first
             client.delete_row(r["id"])
             rep.deleted += 1
@@ -439,7 +442,9 @@ def coord_rows(now: datetime, *, home: Path | None = None, cache_path: Path | No
         slot = counts.setdefault((_val(card.kind), _val(card.status)), [0, 0])
         slot[0] += 1
         slot[1] = max(slot[1], _days(card.created_at, now))
-    rows = [_row("coord", k, c, n, old) for (k, c), (n, old) in sorted(counts.items())]
+    order = lambda c: COORD_FLOW.index(c) if c in COORD_FLOW else len(COORD_FLOW)  # noqa: E731
+    rows = [_row("coord", k, c, n, old)
+            for (k, c), (n, old) in sorted(counts.items(), key=lambda i: (i[0][0], order(i[0][1]), i[0][1]))]
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps({"at": now.timestamp(), "rows": rows}))
     return rows
@@ -497,7 +502,9 @@ def itil_rows(now: datetime, mgr) -> tuple[list[dict], list[dict]]:
         for t in items:
             status, opened = _val(t.status), getattr(t, stamp, "") or ""
             age = _days(opened, now)
-            slot = counts.setdefault((kind, status), [0, 0])
+            members = [m.value for m in type(t.status)] if hasattr(type(t.status), "__members__") else []
+            rank = members.index(status) if status in members else len(members)
+            slot = counts.setdefault((kind, rank, status), [0, 0])
             slot[0] += 1
             slot[1] = max(slot[1], age)
             is_open = ((kind == "incident" and status not in CLOSED_INCIDENT)
@@ -510,7 +517,7 @@ def itil_rows(now: datetime, mgr) -> tuple[list[dict], list[dict]]:
                     "Type": kind, "Ticket": t.id, "Title": (t.title or "")[:200], "Status": status,
                     "Level": level, "Opened": _fmt_dt(_local(opened)) if opened else None,
                     "Age days": age, "Key": t.id})
-    return [_row("itil", k, s, n, old) for (k, s), (n, old) in sorted(counts.items())], tickets
+    return [_row("itil", k, s, n, old) for (k, _, s), (n, old) in sorted(counts.items())], tickets
 
 
 def memory_rows(now: datetime, root: Path | None = None) -> list[dict]:

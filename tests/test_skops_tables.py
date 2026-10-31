@@ -220,3 +220,13 @@ def test_memory_rows_counts_per_agent_and_tier(tmp_path):
             (d / f"{i}.json").write_text("{}")
     rows = {r["Key"]: r["Items"] for r in ops.memory_rows(datetime.now(timezone.utc), root=tmp_path)}
     assert rows == {"memory|lumina|short-term": 3, "memory|lumina|long-term": 1, "memory|opus|mid-term": 2}
+
+
+def test_upsert_never_deletes_rows_without_a_key():
+    fake = FakeTables()
+    tid, cols = ops.ensure_table(fake, ops.FLEET_TABLE)
+    for host in ("x", "y"):  # two keyless rows, like sk-alert "fyi" rows
+        fake.create_row(tid, {cols["Host"]: host})
+    ops.upsert(fake, tid, cols, [{"Host": "a", "Key": "nor|a"}], prune=lambda v: True)
+    hosts = sorted(c["value"] for r in fake.rows(tid) for c in r["data"] if c["columnId"] == cols["Host"])
+    assert hosts == ["a", "x", "y"]
