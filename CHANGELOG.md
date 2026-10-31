@@ -5,7 +5,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 
 ## [Unreleased]
 
+### Changed
+- **SK Work approvals count as the CAB vote.** An approval by someone on the
+  approvers list now also records their vote on the linked ITIL change
+  (subject `nextcloud:<uid>`, role `approver`). On by default;
+  `SKOS_WB_CAB_BRIDGE=0` turns it off. The agent account can still never approve.
+
 ### Fixed
+- **Full reports in card threads.** "Ready for review" posts in Talk keep up to
+  30000 characters instead of the first 1500.
 - **Task triggers reach the whole backlog.** Tasks held back by the per-cycle
   or hourly option limit (or a model failure) are now retried, up to 8 per list
   per cycle with held-back picks first; before, a list's first sync gave
