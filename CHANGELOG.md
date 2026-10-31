@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 ## [Unreleased]
 
 ### Added
+- **SK Token Spend Period column** (this month, last month, older), so an Analytics
+  report can show month to date and last month without date maths.
+
+### Added
 - **SK Ops dashboards data.** `skos ops sync` now also feeds "SK Work Flow"
   (coord cards by kind and column, the SK Work Deck board by stack, GTD lists by
   age bucket plus weekly added/done, ITIL tickets by type and status, memory

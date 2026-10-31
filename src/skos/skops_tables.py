@@ -65,7 +65,7 @@ SPEND_TABLE = ("SK Token Spend", "💸", [
     ("Provider", "line"), ("Model", "line"), ("Messages", "number"),
     ("Input tokens", "number"), ("Output tokens", "number"),
     ("Cache read tokens", "number"), ("Cache write tokens", "number"),
-    ("Cost USD", "number"), ("Key", "line"), ("Month", "line"),
+    ("Cost USD", "number"), ("Key", "line"), ("Month", "line"), ("Period", "line"),
 ])
 FLEET_TABLE = ("SK Fleet Hosts", "🖥️", [
     ("Host", "line"), ("Estate", "line"), ("Role", "line"), ("Status", "line"),
@@ -294,12 +294,18 @@ def spend_rows(estate: str, *, root: Path = COLLECTOR_ROOT, cache_path: Path | N
     tmp = cache_path.with_suffix(".tmp")
     tmp.write_text(json.dumps(cache))
     tmp.replace(cache_path)
+    this_month = now.astimezone().strftime("%Y-%m")
+    prev_month = ((now.astimezone().replace(day=1)) - timedelta(days=1)).strftime("%Y-%m")
+
+    def period(day: str) -> str:  # lets a report ask for "this month" without date maths
+        return "this month" if day[:7] == this_month else "last month" if day[:7] == prev_month else "older"
+
     return [{
         "Date": b["date"], "Estate": estate, "Node": b["node"], "Client": b["client"],
         "Provider": b["provider"], "Model": b["model"], "Messages": b["messages"],
         "Input tokens": b["input"], "Output tokens": b["output"],
         "Cache read tokens": b["cache_read"], "Cache write tokens": b["cache_write"],
-        "Cost USD": b["cost"], "Key": key, "Month": b["date"][:7],
+        "Cost USD": b["cost"], "Key": key, "Month": b["date"][:7], "Period": period(b["date"]),
     } for key, b in sorted(cache["buckets"].items())]
 
 
