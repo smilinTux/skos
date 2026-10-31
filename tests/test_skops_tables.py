@@ -120,8 +120,8 @@ def test_fleet_rows_status(tmp_path):
             "inventory": {"packages": {"skmemory": "0.11.73"}}}}))
         (d / "heartbeat.json").write_text(json.dumps({"ts": beat}))
     rows = {r["Host"]: r for r in ops.fleet_rows("nor", root=tmp_path, now=now)}
-    assert rows["a"]["Status"] == "ok" and rows["a"]["skmemory"] == "0.11.73"
-    assert rows["b"]["Status"] == "stale"
+    assert rows["a"]["Status"] == "ok" and rows["a"]["skmemory"] == "0.11.73" and rows["a"]["Down"] == 0
+    assert rows["b"]["Status"] == "stale" and rows["b"]["Down"] == 1
     assert rows["c"]["Status"] == "low disk"
 
 
@@ -138,3 +138,95 @@ def test_job_rows_counts_consecutive_failures_and_alerting():
     assert (j["Last result"], j["Consecutive failures"], j["Runs 24h"], j["Failures 24h"]) == ("failed", 2, 3, 2)
     assert j["Alerting"] == "yes" and j["Last output"] == "boom2"
     assert rows["k"]["Runs 24h"] == 0 and rows["k"]["Alerting"] == "no"
+
+
+NOW = datetime(2026, 10, 31, 12, 0, tzinfo=timezone.utc)
+
+
+def test_gtd_rows_age_buckets_and_weekly_flow():
+    def ago(d):
+        return (NOW - __import__("datetime").timedelta(days=d)).isoformat()
+    lists = {
+        "inbox.json": [{"created_at": ago(2)}, {"created_at": ago(40)}, {"created_at": ago(200)}],
+        "next-actions.json": [{"created_at": ago(10)}],
+        "archive.json": [{"created_at": ago(9), "completed_at": ago(1)}],
+    }
+    rows = {r["Key"]: r for r in ops.gtd_rows(NOW, lambda name: lists.get(name, []))}
+    assert rows["gtd|inbox|00-07 days"]["Items"] == 1
+    assert rows["gtd|inbox|91+ days"]["Oldest days"] == 200
+    assert rows["gtd|next-actions|08-30 days"]["Items"] == 1
+    assert rows["gtd-flow|done|2026-10-26"]["Items"] == 1  # Friday the 30th belongs to Monday the 26th
+    assert sum(r["Items"] for k, r in rows.items() if k.startswith("gtd-flow|added")) == 4  # the 200 day old one is outside 12 weeks
+
+
+def test_itil_rows_counts_and_open_tickets():
+    from types import SimpleNamespace as NS
+    inc = lambda i, st, sev, d: NS(id=i, title="t " + i, status=NS(value=st), severity=NS(value=sev), detected_at=d)
+    chg = lambda i, st, d: NS(id=i, title="c " + i, status=NS(value=st), risk=NS(value="low"), created_at=d)
+    prb = lambda i, st, d: NS(id=i, title="p " + i, status=NS(value=st), created_at=d)
+    mgr = NS(list_incidents=lambda: [inc("i1", "detected", "sev2", "2026-10-29T12:00:00+00:00"),
+                                     inc("i2", "closed", "sev3", "2026-08-01T00:00:00+00:00")],
+             list_problems=lambda: [prb("p1", "identified", "2026-10-01T12:00:00+00:00"),
+                                    prb("p2", "resolved", "2026-09-01T00:00:00+00:00")],
+             list_changes=lambda: [chg("c1", "proposed", "2026-10-30T12:00:00+00:00"),
+                                   chg("c2", "approved", "2026-10-30T12:00:00+00:00")])
+    flow, tickets = ops.itil_rows(NOW, mgr)
+    keys = {r["Key"]: r["Items"] for r in flow}
+    assert keys["itil|incident|detected"] == 1 and keys["itil|change|approved"] == 1
+    assert sorted(t["Ticket"] for t in tickets) == ["c1", "i1", "p1"]  # approved/closed/resolved are not open
+    assert {t["Ticket"]: t["Age days"] for t in tickets}["i1"] == 2
+
+
+def test_alert_derived_hours_open_for_open_and_resolved():
+    by_id = {1: "Key", 2: "First seen", 3: "Resolved at", 4: "Status", 5: "Severity"}
+    rows = [
+        {"data": [{"columnId": 1, "value": "a"}, {"columnId": 2, "value": "2026-10-31 06:00"},
+                  {"columnId": 4, "value": 0}, {"columnId": 5, "value": 2}]},
+        {"data": [{"columnId": 1, "value": "b"}, {"columnId": 2, "value": "2026-10-30 06:00"},
+                  {"columnId": 3, "value": "2026-10-30 09:30"}, {"columnId": 4, "value": 2},
+                  {"columnId": 5, "value": 2}]},
+        {"data": [{"columnId": 1, "value": "c"}]},  # no First seen: skipped
+    ]
+    out = {r["Key"]: r for r in ops.alert_derived(rows, by_id, now=datetime(2026, 10, 31, 12, 0))}
+    assert out["a"]["Hours open"] == 6 and out["a"]["Opened day"] == "2026-10-31"
+    assert (out["a"]["Active"], out["a"]["Active crit"]) == (1, 1)
+    assert (out["b"]["Active"], out["b"]["Active crit"]) == (0, 0)  # resolved
+    assert out["b"]["Hours open"] == 3 and "c" not in out
+
+
+def test_coord_rows_cached_between_runs(tmp_path, monkeypatch):
+    import sys
+    from types import ModuleType, SimpleNamespace as NS
+    calls = []
+    card = lambda k, c: NS(kind=NS(value=k), status=NS(value=c), archived=False, created_at="2026-10-21T12:00:00+00:00")
+    cards = [card("task", "backlog"), card("task", "backlog"), card("change", "ready"),
+             NS(kind=NS(value="task"), status=NS(value="done"), archived=True, created_at="")]
+    mod = ModuleType("skcapstone.card_store")
+    mod.CardStore = lambda home: NS(list_cards=lambda: calls.append(1) or cards)
+    monkeypatch.setitem(sys.modules, "skcapstone.card_store", mod)
+    cache = tmp_path / "c.json"
+    rows = {r["Key"]: r for r in ops.coord_rows(NOW, home=tmp_path, cache_path=cache)}
+    assert rows["coord|task|backlog"]["Items"] == 2 and rows["coord|task|backlog"]["Oldest days"] == 10
+    assert "coord|task|done" not in rows
+    ops.coord_rows(NOW, home=tmp_path, cache_path=cache)
+    assert len(calls) == 1  # the second call came from the cache
+
+
+def test_memory_rows_counts_per_agent_and_tier(tmp_path):
+    for agent, tier, n in (("lumina", "short-term", 3), ("lumina", "long-term", 1), ("opus", "mid-term", 2)):
+        d = tmp_path / agent / "memory" / tier
+        d.mkdir(parents=True)
+        for i in range(n):
+            (d / f"{i}.json").write_text("{}")
+    rows = {r["Key"]: r["Items"] for r in ops.memory_rows(datetime.now(timezone.utc), root=tmp_path)}
+    assert rows == {"memory|lumina|short-term": 3, "memory|lumina|long-term": 1, "memory|opus|mid-term": 2}
+
+
+def test_upsert_never_deletes_rows_without_a_key():
+    fake = FakeTables()
+    tid, cols = ops.ensure_table(fake, ops.FLEET_TABLE)
+    for host in ("x", "y"):  # two keyless rows, like sk-alert "fyi" rows
+        fake.create_row(tid, {cols["Host"]: host})
+    ops.upsert(fake, tid, cols, [{"Host": "a", "Key": "nor|a"}], prune=lambda v: True)
+    hosts = sorted(c["value"] for r in fake.rows(tid) for c in r["data"] if c["columnId"] == cols["Host"])
+    assert hosts == ["a", "x", "y"]
