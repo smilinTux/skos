@@ -23,12 +23,12 @@ A card's life (stacks on the board):
   (agents included) are moved back with a note. After approval Lumina carries
   out the approved plan through her own tools; only a human moves it to Done.
 
-The CAB vote: an ITIL change only counts a human vote made through a CapAuth
-operator session or a signed grant. A Nextcloud identity is not one of those
-yet, so a card linked to a change records the approval on the card and says
-the change still needs its CAB vote. SKOS_WB_CAB_BRIDGE=1 would record the
-approver as an "approver" CAB subject; it is off until Chef accepts Nextcloud
-logins as a CAB identity.
+The CAB vote: Chef accepted a Nextcloud login on the approvers list as a CAB
+identity (2026-10-30), so an approval on a card linked to an ITIL change is
+also recorded as that person's vote on the change, with subject
+"nextcloud:<uid>" and role "approver". The agent account is always removed
+from the approvers list, so an agent still never approves. SKOS_WB_CAB_BRIDGE=0
+turns this off and leaves the change waiting for a dashboard or signed vote.
 
 Change detection: one GET of the board's stacks per cycle (the board ETag does
 not change when a card moves, so it cannot gate the scan). Who moved a card
@@ -38,7 +38,7 @@ Env: the task-trigger env plus
     SKOS_WB_BOARD       board title (default "SK Work"); empty disables the board
     SKOS_WB_ROOM        Talk room for card threads (default SKOS_TT_ROOMS[board owner])
     SKOS_WB_APPROVERS   comma list of Nextcloud uids (default "dknestri,caseyK")
-    SKOS_WB_CAB_BRIDGE  "1" to record approvals as CAB votes (default off)
+    SKOS_WB_CAB_BRIDGE  "0" to stop recording approvals as CAB votes (default on)
 """
 from __future__ import annotations
 
@@ -71,6 +71,7 @@ STACKS = ("Triage", "Options ready", "Agent queued", "Agent working",
 TRIAGE, OPTIONS, QUEUED, WORKING, NEEDS_APPROVAL, APPROVED, DONE = STACKS
 PROD_LABEL = "prod"
 COMMENT_MAX = 900  # Deck caps comments at 1000 characters
+TALK_MAX = 30000  # Talk caps messages at 32000 characters
 OPTIONS_PER_CYCLE = 4
 CHECK = "✅"
 _TICK = re.compile(r"^\s*[-*]\s*\[([ xX])\]\s*([1-3])[.)]\s*(.*?)\s*$")
@@ -505,7 +506,7 @@ class BoardWorker:
         extra = "".join(f"\n{k}: {v}" for k, v in links.items() if v)
         ok = state != "failed"
         head = "Ready for review." if ok else "The run failed."
-        self._post(rec, f"{head}\n{summary[:1500]}{extra}")
+        self._post(rec, f"{head}\n{summary[:TALK_MAX]}{extra}")
         short = summary if len(summary) <= COMMENT_MAX - 60 else summary[:COMMENT_MAX - 120] + " ... (full report attached)"
         self.deck.comment(card["id"], f"{head} {short}{extra}"[:COMMENT_MAX])
         if len(summary) > COMMENT_MAX - 60:
@@ -689,7 +690,7 @@ def build(dav, hermes, state: dict) -> BoardWorker | None:
     approvers = {u.strip() for u in e.get("SKOS_WB_APPROVERS", "dknestri,caseyK").split(",") if u.strip()}
     approvers.discard(deck.user)  # the agent account can never approve
     return BoardWorker(deck, dav, Engine(), state, board_title=title, room=room, approvers=approvers,
-                       hermes=hermes, cab_bridge=e.get("SKOS_WB_CAB_BRIDGE") == "1")
+                       hermes=hermes, cab_bridge=e.get("SKOS_WB_CAB_BRIDGE", "1") != "0")
 
 
 def main(argv: list[str] | None = None) -> int:
