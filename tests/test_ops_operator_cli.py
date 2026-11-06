@@ -65,18 +65,13 @@ def test_observe_kedb_canon_covered_is_unknown_when_fold_uninitialized(monkeypat
     assert kedb["reason"]  # non-empty, explicit
 
 
-def test_observe_cmdb_drift_bounded_is_untouched():
-    """CmdbDriftBounded stays owned by card 5dcf04d1 -- assert the literal is
-    byte-identical to what it was before this card, so a future edit here is a
-    loud, deliberate diff rather than an accidental drive-by change."""
-    result = runner.invoke(app, ["operator", "observe", "--json"])
-    payload = json.loads(result.output)
+def test_observe_cmdb_drift_bounded_is_unknown_without_evidence(monkeypatch, tmp_path):
+    # Empty home: nothing verifies, or the optional skcoord sibling is absent.
+    # Either way the answer is an explicit Unknown, never a guessed True.
+    payload = _invoke_json(monkeypatch, tmp_path, "observe", "--canon", str(tmp_path / "canon"))
     cmdb = next(c for c in payload["conditions"] if c["type"] == "CmdbDriftBounded")
-    assert cmdb == {
-        "type": "CmdbDriftBounded",
-        "status": "Unknown",
-        "reason": "CMDB evidence is owned by the CMDB adapter",
-    }
+    assert cmdb["status"] == "Unknown"
+    assert cmdb["reason"]
 
 
 def test_act_refuses_and_exits_nonzero():
