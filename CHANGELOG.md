@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 
 ## [Unreleased]
 
+### Added
+- **`CmdbDriftBounded` now reports real evidence** instead of a hardcoded
+  `Unknown` (card 5dcf04d1). It reads only checksum-verified reconcile artifacts,
+  and gates on `declared_not_observed` against the canon baseline
+  `baselines/cmdb-drift.json`.
+
 ### Changed
 - **The scheduler's runner is now `sk-cron-run`, an installed command.** The
   wrapper was written here but moved to skcapstone on 2026-11-06 and installs
