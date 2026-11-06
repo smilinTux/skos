@@ -1,172 +1,40 @@
 #!/usr/bin/env bash
-# sk-cron-run <job-name> <command...>
+# sk-cron-run.sh - compatibility shim. The runner itself lives in skcapstone.
 #
-# The "cron" gtd-ingest adapter (push): run any scheduled job with observability.
-#   1. append a run-ledger record (JSONL) for the daily ops report + skos status
-#   2. on failure -> capture a GTD item (source=cron) AND fire sk-alert (realtime)
-# Returns the wrapped command's exit code. Nothing fails silently.
+# sk-cron-run is the estate's scheduled-job observability wrapper. It was
+# written here, but on 2026-11-06 it moved to skcapstone and is now installed
+# as a command at ~/.skenv/bin/sk-cron-run (a pyproject `script-files` entry,
+# beside sk-alert). The move is the sk-alert move of 2026-10-30 repeated for
+# the same reason: the units that most need wrapping are skcapstone's
+# repo-shipped skfleet seats, which run on fleet nodes where skos is not
+# installed, so a runner shipped only by skos could never wrap them.
+#
+# This file stays because 31 systemd drop-ins and the managed crontab block
+# named it by absolute path. Deleting it would not degrade them quietly: an
+# ExecStart pointing at an absent binary fails the unit at activation. The
+# shim keeps every one of them working with no node change, and they migrate
+# to the direct path at leisure (`skos schedule wrap-timers`, `skos schedule
+# install`). It holds no logic of its own, so there is exactly one
+# implementation of the wrapper.
 set -uo pipefail
-# Load sovereign runtime configuration from one protected file. The crontab carries
-# only this path, never values. Refuse symlinks, foreign ownership, or group/world
-# access before sourcing because this file is executable shell syntax.
-SCHEDULE_ENV="${SKOS_SCHEDULE_ENV:-$HOME/.skcapstone/skos-schedule.env}"
-if [ -e "$SCHEDULE_ENV" ]; then
-  if [ -L "$SCHEDULE_ENV" ] || [ ! -f "$SCHEDULE_ENV" ]; then
-    printf 'sk-cron-run: refusing unsafe schedule env file\n' >&2; exit 78
-  fi
-  env_uid=$(stat -c '%u' "$SCHEDULE_ENV" 2>/dev/null || printf 'invalid')
-  env_mode=$(stat -c '%a' "$SCHEDULE_ENV" 2>/dev/null || printf 'invalid')
-  case "$env_mode" in 600|400) ;; *)
-    printf 'sk-cron-run: schedule env file must deny group/world access\n' >&2; exit 78;;
-  esac
-  if [ "$env_uid" != "$(id -u)" ]; then
-    printf 'sk-cron-run: schedule env file has foreign owner\n' >&2; exit 78
-  fi
-  set -a; . "$SCHEDULE_ENV"; set +a
-fi
-JOB="${1:?usage: sk-cron-run <job-name> <command...>}"; shift
-LEDGER="$HOME/.skcapstone/logs/cron-ledger.jsonl"
-# Interpreter + host derive from the environment (no machine-specific literals):
-#   PY            -> $HOME/.skenv/bin/python3 if present, else PATH python3
-#   SK_CRON_HOST  -> hostname (override for tests / alt nodes)
-if [ -z "${PY:-}" ]; then
-  if [ -x "$HOME/.skenv/bin/python3" ]; then PY="$HOME/.skenv/bin/python3"; else PY="$(command -v python3)"; fi
-fi
-SK_CRON_HOST="${SK_CRON_HOST:-$(hostname)}"
-SKOS_BIN="${SKOS_BIN:-$HOME/.skenv/bin/skos}"
-# sk-alert must be resolved by PATH-independent means, exactly like PY and
-# SKOS_BIN above. It lives in ~/.skenv/bin, which is on an interactive shell's
-# PATH and on NEITHER environment that runs scheduled jobs: a systemd user unit
-# (probed: not reachable) or cron (PATH=/usr/bin:/bin, and the crontab sets no
-# PATH). The old `command -v sk-alert` guard therefore evaluated false every
-# time and the realtime alert never fired for any scheduled job, while the GTD
-# capture kept working because it goes through $SKOS_BIN's absolute path.
-# Same class as the 2026-08-13 watchdog incident: cron's PATH lacked /usr/sbin,
-# so `qm` exited 127 while the `kill` builtin worked fine.
-if [ -z "${SK_ALERT_BIN:-}" ]; then
-  if [ -x "$HOME/.skenv/bin/sk-alert" ]; then SK_ALERT_BIN="$HOME/.skenv/bin/sk-alert"
-  else SK_ALERT_BIN="$(command -v sk-alert || true)"; fi
-fi
-mkdir -p "$(dirname "$LEDGER")"
-# Incident state for alerting. One file per failing job, host-local on purpose
-# (never under a Syncthing-shared tree: an incident on nor is not one on .41).
-# The file exists exactly while the job is in a failure streak.
-#   SK_CRON_STATE_DIR       where incident files live
-#   SK_CRON_ALERT_REPEAT_S  re-alert interval while still failing (default 6h)
-SK_CRON_STATE_DIR="${SK_CRON_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sk-cron-run}"
-SK_CRON_ALERT_REPEAT_S="${SK_CRON_ALERT_REPEAT_S:-21600}"
-case "$SK_CRON_ALERT_REPEAT_S" in ''|*[!0-9]*) SK_CRON_ALERT_REPEAT_S=21600;; esac
 
-start_iso=$(date -Iseconds); start_s=$(date +%s)
-out="$("$@" 2>&1)"; rc=$?
-dur=$(( $(date +%s) - start_s ))
-tail=$(printf '%s' "$out" | tail -6 | tr '\n' ' ' | cut -c1-500)
-
-# 1) ledger record
-"$PY" - "$JOB" "$start_iso" "$dur" "$rc" "$tail" "$SK_CRON_HOST" >> "$LEDGER" <<'PY'
-import json,sys
-job,start,dur,rc,tail,host=sys.argv[1:7]
-print(json.dumps({"job":job,"host":host,"start":start,"dur_s":int(dur),
-                  "exit":int(rc),"ok":rc=="0","tail":tail}))
-PY
-
-# 2) on failure -> GTD capture through the ONE locked skos sink (whole-store
-#    dedupe by (source, source_ref), atomic save) + sk-alert. No inline JSON
-#    manipulation here: sk-cron-run is just another gtd-ingest adapter.
-if [ "$rc" -ne 0 ]; then
-  ref="cron:${JOB}@$(date +%F)"
-  text="cron FAILED: ${JOB} (exit ${rc}) - $(printf '%s' "$tail" | cut -c1-160)"
-  if [ -x "$SKOS_BIN" ]; then
-    "$SKOS_BIN" gtd capture "$text" --source cron --source-ref "$ref" \
-      --context @ops --priority high >/dev/null \
-      || printf 'sk-cron-run: skos gtd capture failed for %s\n' "$ref" >&2
-  else
-    # fallback: same locked library path via python (no direct JSON writes)
-    SK_GTD_TEXT="$text" SK_GTD_REF="$ref" "$PY" - <<'PY' \
-      || printf 'sk-cron-run: library gtd capture failed for %s\n' "$ref" >&2
-import os
-from skos.gtd_ingest import GtdCapture, capture
-capture(GtdCapture(text=os.environ["SK_GTD_TEXT"], source="cron",
-                   source_ref=os.environ["SK_GTD_REF"],
-                   context="@ops", priority="high"))
-PY
-  fi
+if [ -n "${SK_CRON_RUN_BIN:-}" ] && [ -x "${SK_CRON_RUN_BIN}" ]; then
+  exec "$SK_CRON_RUN_BIN" "$@"
+fi
+if [ -x "$HOME/.skenv/bin/sk-cron-run" ]; then
+  exec "$HOME/.skenv/bin/sk-cron-run" "$@"
+fi
+# PATH last, and it is not expected to resolve: a systemd user unit and cron
+# both run with a PATH that excludes ~/.skenv/bin. Tried anyway so an estate
+# that installs the command elsewhere still works.
+if resolved="$(command -v sk-cron-run 2>/dev/null)" && [ -n "$resolved" ]; then
+  exec "$resolved" "$@"
 fi
 
-# 3) realtime alert, once per INCIDENT, not once per key forever.
-#
-# This used to call `sk-alert -k cron-$JOB` with no -t. sk-alert's documented
-# semantics for a key without a ttl are "once EVER", so each job alerted on its
-# first failure in history and never again: nor's lumina sync last alerted
-# 2026-09-19 while failing every 3h for weeks. sk-alert is right; the caller
-# asked for the wrong thing. Now sk-cron-run owns the incident:
-#   first failure of a streak  -> alert
-#   still failing              -> re-alert at most every SK_CRON_ALERT_REPEAT_S
-#   first success after a streak -> one recovery notice, streak closed
-# No dedupe key is passed to sk-alert, so its legacy once-ever stamps no longer
-# matter.
-job_safe="$(printf '%s' "$JOB" | tr -c 'A-Za-z0-9_.-' '_')"
-incident="$SK_CRON_STATE_DIR/$job_safe.incident"
-now_s=$(date +%s)
-# Each incident is one Talk thread, titled for the job, so the estate's agent
-# (who posts the alerts) owns it and Chef can reply in it ("analyse this").
-# Repeats land in the same thread and the recovery closes it. An sk-alert too
-# old to know --thread/--resolve would reject them as unknown flags and drop
-# the alert, so they are only passed when the binary has them.
-alert_group=()
-if [ -n "${SK_ALERT_BIN:-}" ] && grep -q -- '--resolve)' "$SK_ALERT_BIN" 2>/dev/null; then
-  alert_group=(--thread "cron/${SK_CRON_HOST}/${JOB}" --title "cron ${JOB} on ${SK_CRON_HOST}")
-fi
-sk_cron_alert() {  # level [--resolve] message...
-  local lvl="$1"; shift
-  local extra=()
-  if [ "${1:-}" = "--resolve" ]; then
-    shift
-    [ "${#alert_group[@]}" -gt 0 ] && extra=(--resolve)
-  fi
-  if [ -n "${SK_ALERT_BIN:-}" ] && [ -x "$SK_ALERT_BIN" ]; then
-    # The message is an ARGUMENT, not stdin. sk-alert does not read stdin: it
-    # exits 2 with "sk_alert: empty message". Its exit code is the only proof
-    # of delivery, so return it rather than swallowing it.
-    "$SK_ALERT_BIN" -l "$lvl" ${alert_group[@]+"${alert_group[@]}"} ${extra[@]+"${extra[@]}"} "$*" >/dev/null 2>&1
-    return $?
-  fi
-  printf 'sk-cron-run: no sk-alert binary found; %s was not alerted\n' "$JOB" >&2
-  return 1
-}
-write_incident() {  # first_s last_alert_s fails
-  mkdir -p "$SK_CRON_STATE_DIR" 2>/dev/null || return 0
-  printf '%s %s %s\n' "$1" "$2" "$3" > "$incident.tmp.$$" && mv -f "$incident.tmp.$$" "$incident"
-}
-inc_first=""; inc_last=0; inc_fails=0
-if [ -f "$incident" ]; then
-  read -r inc_first inc_last inc_fails < "$incident" || true
-  case "$inc_first" in ''|*[!0-9]*) inc_first="$now_s";; esac
-  case "$inc_last" in ''|*[!0-9]*) inc_last=0;; esac
-  case "$inc_fails" in ''|*[!0-9]*) inc_fails=1;; esac
-fi
-if [ "$rc" -ne 0 ]; then
-  if [ ! -f "$incident" ]; then
-    inc_first="$now_s"; inc_fails=1
-    msg="cron FAILED on ${SK_CRON_HOST}: ${JOB} (exit ${rc}) - ${tail}"
-    due=1
-  else
-    inc_fails=$((inc_fails + 1))
-    since="$(date -d "@$inc_first" '+%F %H:%M' 2>/dev/null || printf '%s' "$inc_first")"
-    msg="cron STILL FAILING on ${SK_CRON_HOST}: ${JOB} (exit ${rc}, ${inc_fails} failed runs since ${since}) - ${tail}"
-    due=0; [ $((now_s - inc_last)) -ge "$SK_CRON_ALERT_REPEAT_S" ] && due=1
-  fi
-  if [ "$due" -eq 1 ] && sk_cron_alert crit "$msg"; then
-    inc_last="$now_s"   # only a DELIVERED alert resets the clock
-  fi
-  write_incident "$inc_first" "$inc_last" "$inc_fails"
-elif [ -f "$incident" ]; then
-  since="$(date -d "@$inc_first" '+%F %H:%M' 2>/dev/null || printf '%s' "$inc_first")"
-  # Exactly one recovery notice: the streak is closed whether or not it lands,
-  # so a broken alert path cannot turn every later success into a retry.
-  sk_cron_alert info --resolve "cron RECOVERED on ${SK_CRON_HOST}: ${JOB} ok again after ${inc_fails} failed run(s) since ${since}" || true
-  rm -f "$incident"
-fi
-
-printf '%s\n' "$out"
-exit "$rc"
+# Exit 78 (EX_CONFIG) deliberately, and loudly. Returning the wrapped job's
+# own exit code here would be a lie: the job never ran.
+printf 'sk-cron-run.sh: sk-cron-run is not installed.\n' >&2
+printf '  expected: %s\n' "$HOME/.skenv/bin/sk-cron-run" >&2
+printf '  it ships with skcapstone: pip install -e ~/clawd/skcapstone-repos/skcapstone\n' >&2
+printf '  the wrapped job was NOT run: %s\n' "${1:-<no job named>}" >&2
+exit 78

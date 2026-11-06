@@ -1241,7 +1241,7 @@ def schedule_wrap_timers(
     if runner:
         runner_path = Path(runner).expanduser()
     else:
-        runner_path = _sched.runner_path_in_repo(_load_schedule(""))
+        runner_path = _sched.runner_target(_load_schedule(""))
     if not runner_path.exists():
         typer.echo(f"runner not found: {runner_path}", err=True)
         raise typer.Exit(2)

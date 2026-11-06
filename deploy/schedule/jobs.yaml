@@ -15,19 +15,24 @@
 #   deploy/systemd/ still ships the skos-backup timer for the one job that benefits
 #   from OnCalendar catch-up; the pipeline jobs stay on cron.
 #
-# PORTABILITY: every path is written with $HOME (and the repo via $SKOS_REPO) so the
-#   file is machine-independent. `skos schedule install` expands them for the host it
-#   runs on. No machine-specific absolute path (/home/<user>/...) is committed here.
+# PORTABILITY: every path is written with $HOME so the file is machine-independent.
+#   `skos schedule install` expands them for the host it runs on. No machine-specific
+#   absolute path (/home/<user>/...) is committed here. The runner was the last thing
+#   tying the rendered crontab to a checkout location ($SKOS_REPO); it is now an
+#   installed command, so relocating or worktree-ing the skos checkout no longer
+#   breaks all 13 jobs. None of the job commands referenced $SKOS_REPO.
 #
 # SECRETS: no secret value is committed. `secret_env` lists env var NAMES that are
 #   required at runtime. Crontab contains only SKOS_SCHEDULE_ENV=<protected-path>;
-#   values are loaded by sk-cron-run.sh and are never read by the installer.
+#   values are loaded by sk-cron-run and are never read by the installer.
 version: 1
 
 defaults:
-  # sk-cron-run.sh wrapper (relative to the repo root; $SKOS_REPO defaults to
-  # $HOME/clawd/skos). Every job runs as: <runner> <job-name> <command>.
-  runner: "$SKOS_REPO/scripts/sk-cron-run.sh"
+  # The sk-cron-run wrapper, which ships with skcapstone as an installed
+  # command (pyproject script-files, beside sk-alert). Every job runs as:
+  # <runner> <job-name> <command>. scripts/sk-cron-run.sh in this repo is a
+  # shim kept only so drop-ins and crontabs that still name it keep working.
+  runner: "$HOME/.skenv/bin/sk-cron-run"
   # PATH prepended to each line so cron finds the skenv console scripts + brew tools.
   path: "$HOME/.skenv/bin:$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin"
   # Env var NAMES (not values) to prepend to each line. Values come from the env file.

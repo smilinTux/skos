@@ -165,17 +165,47 @@ def load(path: str | os.PathLike | None = None) -> Schedule:
     return sched
 
 
-def runner_path_in_repo(sched: Schedule) -> Path:
-    """Resolve the runner to a concrete path inside THIS repo checkout (for the
-    'referenced command exists' consistency check), independent of $SKOS_REPO."""
-    rel = sched.runner.replace("$SKOS_REPO/", "").replace("${SKOS_REPO}/", "")
-    return repo_root() / rel
+def runner_target(sched: Schedule) -> Path:
+    """Resolve the manifest's runner to the concrete path a job will execute.
+
+    Named for what it returns, not for where it used to live. This was
+    ``runner_path_in_repo`` and resolved only ``$SKOS_REPO``, because the runner
+    was a script in this checkout. It is now ``sk-cron-run``, an installed
+    command that ships with skcapstone, so the manifest names it by
+    ``$HOME``. A function that claims "in repo" while returning an installed
+    path is the same lie that produced the per-host-artifact bug in skcapstone,
+    where callers guessed between the pip copy and the deployed copy and got
+    the right answer by luck. Both forms resolve here; neither is assumed.
+    """
+    raw = sched.runner
+    for token in ("$SKOS_REPO/", "${SKOS_REPO}/"):
+        if raw.startswith(token):
+            return repo_root() / raw[len(token):]
+    for token, root in (("$HOME/", "~/"), ("${HOME}/", "~/")):
+        if raw.startswith(token):
+            raw = root + raw[len(token):]
+            break
+    expanded = Path(raw).expanduser()
+    if expanded.is_absolute():
+        return expanded
+    # A bare relative runner stays repo-relative, which is what it meant before.
+    return repo_root() / raw
 
 
 def check_runner_exists(sched: Schedule) -> None:
-    rp = runner_path_in_repo(sched)
+    """Fail loudly when the manifest names a runner that is not on this host.
+
+    Strict on purpose. Accepting the in-repo shim as evidence that the
+    installed command exists would make this an instrument that cannot fail:
+    the shim resolves at render time and then exits 78 at run time, which is
+    the silence the runner exists to end, moved one layer down.
+    """
+    rp = runner_target(sched)
     if not rp.exists():
-        raise ScheduleError(f"runner script referenced by manifest not found in repo: {rp}")
+        raise ScheduleError(
+            f"runner referenced by manifest not found: {rp}"
+            " (sk-cron-run ships with skcapstone: pip install -e <skcapstone>)"
+        )
 
 
 # ------------------------------------------------------------------------- render
@@ -237,13 +267,35 @@ def render_block(sched: Schedule, **kw) -> str:
 
 # --------------------------------------------------------------------------- diff
 
+RUNNER_NAME = "sk-cron-run"
+
+
+def _is_runner_token(token: str) -> bool:
+    """Is this crontab token the sk-cron-run runner, by whatever path?
+
+    Matched by identity rather than by literal path, reusing timer_wrap's
+    ``_runner_key`` so the crontab half and the systemd half agree on what
+    counts as the same runner: basename, minus ``.sh``. That makes the
+    installed ``sk-cron-run`` and a legacy ``sk-cron-run.sh`` shim the same
+    runner here, which is what lets a host's managed block migrate from one
+    to the other without the splice seeing an unmanaged line.
+    """
+    from skos.timer_wrap import _runner_key
+
+    return _runner_key(token) == RUNNER_NAME
+
+
+def _has_runner_token(line: str) -> bool:
+    return any(_is_runner_token(token) for token in line.split())
+
+
 def _signature(line: str) -> tuple[str, str] | None:
-    """Return (job_name, normalized-command) for a sk-cron-run.sh crontab line, or
+    """Return (job_name, normalized-command) for a sk-cron-run crontab line, or
     None if the line is not one of our managed jobs. Strips the leading env
     assignments (so the secret VALUE is ignored) and collapses whitespace, then keys
-    on the job name (the token right after sk-cron-run.sh)."""
+    on the job name (the token right after the runner)."""
     line = line.strip()
-    if not line or line.startswith("#") or "sk-cron-run.sh" not in line:
+    if not line or line.startswith("#") or not _has_runner_token(line):
         return None
     fields = line.split()
     if len(fields) < 6:
@@ -256,7 +308,7 @@ def _signature(line: str) -> tuple[str, str] | None:
     if len(rest) < 2:
         return None
     try:
-        runner_idx = next(i for i, t in enumerate(rest) if t.endswith("sk-cron-run.sh"))
+        runner_idx = next(i for i, t in enumerate(rest) if _is_runner_token(t))
     except StopIteration:
         return None
     if runner_idx + 1 >= len(rest):
