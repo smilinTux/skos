@@ -8,7 +8,7 @@
 # WHY CRONTAB (not systemd user timers):
 #   The live pipeline already runs as a user crontab, and this whole subsystem is
 #   the reference implementation of OBSERVABILITY_AND_SCHEDULING_STANDARD where every
-#   job is wrapped in scripts/sk-cron-run.sh (run-ledger + failure->GTD + sk-alert).
+#   job is wrapped in sk-cron-run (run-ledger + failure->GTD + sk-alert).
 #   Rendering one ordered crontab block keeps the tight 04:45->07:45 daily sequence
 #   legible in one place and lets `skos schedule install` reproduce the live schedule
 #   byte-for-byte (clean diff / exact cutover) instead of 24 systemd unit files.
@@ -31,13 +31,18 @@ defaults:
   # The sk-cron-run wrapper, which ships with skcapstone as an installed
   # command (pyproject script-files, beside sk-alert). Every job runs as:
   # <runner> <job-name> <command>. scripts/sk-cron-run.sh in this repo is a
-  # shim kept only so drop-ins and crontabs that still name it keep working.
+  # compatibility shim for anything that still names that path.
   runner: "$HOME/.skenv/bin/sk-cron-run"
   # PATH prepended to each line so cron finds the skenv console scripts + brew tools.
   path: "$HOME/.skenv/bin:$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin"
   # Env var NAMES (not values) to prepend to each line. Values come from the env file.
   secret_env:
     - GOG_KEYRING_PASSWORD
+    # A PATH to a restic env file, not a credential. Declared here rather than
+    # as a per-job env in the manifest: sk-cron-run sources the protected file
+    # for every job, so this reaches skmem-pg-backup with no schema change and
+    # no value in the crontab. Same channel GTD_MAIL_ACCOUNTS already uses.
+    - SKMEM_BACKUP_OFFBOX
 
 jobs:
   - name: youtube-ingest
@@ -108,6 +113,83 @@ jobs:
     log: "$HOME/.skcapstone/logs/sk-ingest.log"
 
   - name: service-unit-audit
+    # SERVICE_UNIT_STANDARD regression gate (prb-bd79dd5f). Fails if any node has
+    # a unit whose start limiter can never engage: such a unit retries forever on
+    # a permanent fault and can hang the host (.100, 13h, twice).
     schedule: "40 6 * * *"
     command: "$HOME/clawd/scripts/fleet-service-unit-audit.sh"
     log: "$HOME/.skcapstone/logs/service-unit-audit.log"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Jobs that were live but undeclared until 2026-11-06.
+  #
+  # All eight ran under sk-cron-run from hand-written crontab lines OUTSIDE the
+  # managed block, so `skos schedule diff` reported `extra: 8` and exited 1 on
+  # every run. A drift gate that is permanently red cannot report drift: the one
+  # signal that would show a job going missing was already saturated. Declaring
+  # them is what makes the gate mean something again.
+  #
+  # Each entry reproduces the live schedule and command verbatim. Three of them
+  # (yt-priority, yt-transcripts-backup, yt-transcripts-skhub-sync) had NO log
+  # redirect at all, so their output went only to cron's mail; they now get a log
+  # file, which is additive. PATH is deliberately left to the shared default:
+  # the live lines carried four different PATHs, and the only one that differed
+  # materially was skmem-pg-backup's /usr/local/bin, which was checked and holds
+  # nothing it uses (restic, docker and pg_dump are all in /usr/bin).
+  # skmem-pg-backup's SKMEM_BACKUP_OFFBOX is declared in secret_env above, so it
+  # arrives through the protected env file rather than as a crontab value.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  - name: skmem-pg-backup
+    # skmem-pg dump, part of the skmem-pg group added 2026-07-06. 2026-10-20: now
+    # ships OFF-SITE via restic to B2 (encrypted, dedup), and runs under
+    # sk-cron-run so a failure fires sk-alert + a GTD item. Before that the dump
+    # stayed on the box it protects and the script's own nightly warning reached
+    # nobody, because this was the one backup job not wrapped.
+    schedule: "15 3 * * *"
+    command: "/bin/bash $HOME/.skcapstone/scripts/skmem-pg-backup.sh"
+    log: "$HOME/.skcapstone/logs/skmem-pg-backup.log"
+
+  - name: swarm-replica-watch
+    # Prod swarm services below desired / restart loops -> sk-alert.
+    # PR smilinTux/skstack01-prod#67, 2026-09-28.
+    schedule: "*/10 * * * *"
+    command: "/usr/bin/python3 $HOME/.local/lib/swarm-replica-watch/swarm_replica_watch.py --cluster skstack01 --manager skuser@norap1001:1713 --manager skuser@norap1011:1713 --manager skuser@norap1021:1713 --ssh /usr/bin/ssh --alert-cmd $HOME/.skenv/bin/sk-alert --state $HOME/.local/state/swarm-replica-watch/skstack01.json"
+    log: "$HOME/.skcapstone/logs/swarm-replica-watch.log"
+
+  - name: skbackup-check
+    # NAS backup staleness (sanoid 2h, skbak 26h, restic 36h) + pool health ->
+    # sk-alert. PR skstack01-prod feat/skbackup-host-tiers, 2026-09-28.
+    schedule: "17 * * * *"
+    command: "$HOME/.local/lib/skbackup/skbackup-alert-check.sh norpv1200 $HOME/.skenv/bin/sk-alert"
+    log: "$HOME/.skcapstone/logs/skbackup-check.log"
+
+  - name: ollama-health-check
+    # Probes .100 (VM 102 ollama norpv1300) :11434/api/tags and pages on down.
+    # Coord card .100-hard-hangs, 2026-10-20.
+    schedule: "*/5 * * * *"
+    command: "$HOME/.local/lib/ollama-vm-watch/ollama-health-check.sh"
+    log: "$HOME/.skcapstone/logs/ollama-health-check.log"
+
+  - name: yt-channel-watch
+    # Daily Salla / CosmicAgency / Swaruu channel transcripts -> realm wiki
+    # raw/youtube + skingest. Source in realmwiki tools/, PR feat/yt-channel-watch;
+    # the deployed copy lives in ~/.local/lib/yt-channel-watch.
+    schedule: "15 7 * * *"
+    command: "$HOME/.local/lib/yt-channel-watch/yt_channel_watch.py --commit"
+    log: "$HOME/clawd/logs/yt-channel-watch.log"
+
+  - name: yt-priority
+    schedule: "30 1 * * *"
+    command: "$HOME/.local/lib/yt-channel-watch/run/priority-nightly.sh"
+    log: "$HOME/.skcapstone/logs/yt-priority.log"
+
+  - name: yt-transcripts-backup
+    schedule: "50 3 * * *"
+    command: "$HOME/.skcapstone/scripts/yt-transcripts-backup.sh"
+    log: "$HOME/.skcapstone/logs/yt-transcripts-backup.log"
+
+  - name: yt-transcripts-skhub-sync
+    schedule: "20 4 * * *"
+    command: "$HOME/.skcapstone/scripts/yt-transcripts-skhub-sync.sh"
+    log: "$HOME/.skcapstone/logs/yt-transcripts-skhub-sync.log"

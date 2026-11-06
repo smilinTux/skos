@@ -23,4 +23,4 @@ Type=oneshot
 Environment=PATH=%h/.skenv/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=%h/.config/skos/nextcloud-gtd.env
 Nice=10
-ExecStart=%h/clawd/skos/scripts/sk-cron-run.sh gtd-tasks-mirror %h/.skenv/bin/skos gtd mirror-tasks
+ExecStart=%h/.skenv/bin/sk-cron-run gtd-tasks-mirror %h/.skenv/bin/skos gtd mirror-tasks

@@ -5,7 +5,7 @@ Shell helpers for the **gtd-ingest** subsystem (the Python lives in the package:
 
 | Script | Role | Standard |
 |---|---|---|
-| `sk-cron-run.sh <job> <cmd…>` | **shim only.** `exec`s `~/.skenv/bin/sk-cron-run`, the observability wrapper (run-ledger + failure→GTD + `sk-alert`), which ships with skcapstone. Kept because 31 drop-ins and the managed crontab name this path. | [OBSERVABILITY_AND_SCHEDULING](https://github.com/smilinTux/sk-standards/blob/main/standards/OBSERVABILITY_AND_SCHEDULING_STANDARD.md) |
+| `sk-cron-run.sh <job> <cmd…>` | **shim only.** `exec`s `~/.skenv/bin/sk-cron-run`, the observability wrapper (run-ledger + failure→GTD + `sk-alert`), which ships with skcapstone. Kept for nodes and hand-written units that still name this path; as of 2026-11-06 nothing on nor does, so it is a compatibility path, not a live one. | [OBSERVABILITY_AND_SCHEDULING](https://github.com/smilinTux/sk-standards/blob/main/standards/OBSERVABILITY_AND_SCHEDULING_STANDARD.md) |
 | `gtd-triage.sh` | deterministic Gmail noise-sweep (promotions/social/updates → `3 Read`) | - |
 | `skos-backup.sh` | scheduled skbackup entrypoint: `skos backup run` inside `sk-cron-run` (GTD store + cron ledger + model registry) | [runbook](../docs/runbooks/skbackup-restore.md) |
 

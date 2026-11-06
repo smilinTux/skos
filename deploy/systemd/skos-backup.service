@@ -13,7 +13,7 @@
 #     [Service]
 #     Environment=SK_BACKUP_OFFBOX=cbrd21@100.x.x.x:/srv/backups/skos
 #
-# Runs through sk-cron-run.sh so a failure lands in the cron ledger, captures a
+# Runs through sk-cron-run so a failure lands in the cron ledger, captures a
 # GTD item (source=cron), and fires sk-alert — same observability as every job.
 
 [Unit]

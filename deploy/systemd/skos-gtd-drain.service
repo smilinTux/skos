@@ -12,7 +12,7 @@
 #   systemctl --user enable --now skos-gtd-drain.timer
 #
 # capture()/upsert() on the owner already drain first; this timer covers a quiet
-# owner. Runs through sk-cron-run.sh, so a failure is ledgered and alerted.
+# owner. Runs through sk-cron-run, so a failure is ledgered and alerted.
 
 [Unit]
 Description=Fold other hosts' GTD spools into the store (owner host only, skos#35)
@@ -20,4 +20,4 @@ Description=Fold other hosts' GTD spools into the store (owner host only, skos#3
 [Service]
 Type=oneshot
 Environment=PATH=%h/.skenv/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/clawd/skos/scripts/sk-cron-run.sh gtd-drain-spool %h/.skenv/bin/skos gtd drain-spool
+ExecStart=%h/.skenv/bin/sk-cron-run gtd-drain-spool %h/.skenv/bin/skos gtd drain-spool
