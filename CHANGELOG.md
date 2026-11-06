@@ -5,6 +5,42 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 
 ## [Unreleased]
 
+### Changed
+- **The scheduler's runner is now `sk-cron-run`, an installed command.** The
+  wrapper was written here but moved to skcapstone on 2026-11-06 and installs
+  as `~/.skenv/bin/sk-cron-run` (a `script-files` entry, beside `sk-alert`).
+  The units that most need wrapping are skcapstone's repo-shipped skfleet
+  seats, which run on fleet nodes where skos is not installed (probed:
+  chiap01 and chiap08 carry skcapstone and `sk-alert`, neither carries skos),
+  so a runner shipped only by skos could never wrap them, and an `ExecStart`
+  naming an absent binary fails the unit at activation rather than degrading.
+  `deploy/schedule/jobs.yaml` now names `$HOME/.skenv/bin/sk-cron-run`, which
+  was the last thing tying nor's rendered crontab to a checkout location:
+  none of the 13 job commands referenced `$SKOS_REPO`, only the runner line
+  did, so a relocated checkout or a git worktree broke all 13 jobs at once.
+  **`scripts/sk-cron-run.sh` remains as an `exec`-only shim**, so no node
+  change is required: the 31 existing drop-ins and the live crontab keep
+  working and migrate at leisure. When the shim cannot resolve the real
+  wrapper it exits 78 and says the job did not run. Requires skcapstone
+  installed on the host; `skos schedule` exits 2 otherwise, which is
+  `check_runner_exists` working.
+- **`runner_path_in_repo` is now `runner_target`.** It always joined onto the
+  repo root, which was true while the runner lived here and a lie once it
+  became an installed command. It resolves `$SKOS_REPO`, `$HOME` and `~`, and
+  is named for what it returns. A path helper whose name disagrees with its
+  return value is how skcapstone's per-host-artifact bug happened.
+
+### Fixed
+- **`skos schedule install` would have appended a second managed block.**
+  `_signature`, which parses the live crontab to detect drift, keyed on the
+  literal string `sk-cron-run.sh`. The moment the manifest named the installed
+  command the parser stopped recognising its own managed lines, so the splice
+  would have added a duplicate block instead of replacing it, and every job
+  would have run twice. It now keys on the runner's identity, reusing
+  `timer_wrap._runner_key`'s basename-minus-`.sh` rule, so the crontab half
+  and the systemd half agree on what counts as the same runner and a host
+  mid-migration splices correctly.
+
 ### Added
 - **`skos schedule wrap-timers`.** `skos schedule install` covered the crontab
   half of OBSERVABILITY_AND_SCHEDULING_STANDARD; nothing covered the systemd

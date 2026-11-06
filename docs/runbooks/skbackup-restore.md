@@ -37,7 +37,7 @@ given) copies the snapshot to a second host (rsync over ssh) or a mounted target
 
 ## Scheduled backup (committed artifacts — NOT applied live by the repo)
 
-Two committed options; pick one. Both run through `sk-cron-run.sh`, so a failure
+Two committed options; pick one. Both run through `sk-cron-run`, so a failure
 lands in the cron ledger, captures a GTD item (`source=cron`), and fires
 sk-alert.
 

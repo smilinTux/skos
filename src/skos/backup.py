@@ -57,7 +57,7 @@ _PAYLOAD = "payload"                   # tar root dir under which sources live
 # ── source resolution ────────────────────────────────────────────────────────
 def cron_ledger_path() -> Path:
     """Resolve the cron run-ledger: ``$SK_CRON_LEDGER`` > default. Matches the
-    path ``scripts/sk-cron-run.sh`` writes to."""
+    path ``sk-cron-run`` writes to."""
     env = os.environ.get("SK_CRON_LEDGER")
     if env:
         return Path(env).expanduser()

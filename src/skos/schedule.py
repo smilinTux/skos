@@ -1,6 +1,6 @@
 """skos scheduler-as-code.
 
-The skos gtd-ingest / observability pipeline (the ~12 `sk-cron-run.sh`-wrapped jobs
+The skos gtd-ingest / observability pipeline (the ~12 `sk-cron-run`-wrapped jobs
 on the primary node) is declared in ``deploy/schedule/jobs.yaml`` and rendered into
 the user crontab by ``skos schedule install``. This module owns:
 
@@ -14,7 +14,7 @@ the user crontab by ``skos schedule install``. This module owns:
 * installing the desired schedule into a marked, idempotently-replaced crontab block.
 
 No secret value is ever read from, rendered into, or written to crontab. Jobs receive
-only the path of a protected runtime env file; ``sk-cron-run.sh`` loads it immediately
+only the path of a protected runtime env file; ``sk-cron-run`` loads it immediately
 before execution. Rotating that file therefore does not require rewriting crontab.
 """
 from __future__ import annotations

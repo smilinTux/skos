@@ -328,7 +328,10 @@ def plan_wraps(
 
     Args:
         unit_dir: A systemd user unit directory.
-        runner: Absolute path to ``sk-cron-run.sh``.
+        runner: Absolute path to ``sk-cron-run``, normally skcapstone's
+            installed ``~/.skenv/bin/sk-cron-run``. A legacy
+            ``scripts/sk-cron-run.sh`` shim path is accepted and compares
+            equal, see ``_runner_key``.
         strict: Raise on a timer whose service cannot be resolved, instead of
             reporting it as a problem entry.
         effective: How to read a unit's effective (post-drop-in) ExecStart.

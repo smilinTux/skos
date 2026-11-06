@@ -57,7 +57,9 @@ flowchart LR
 - `skos/src/skos/adapters/{email,calendar,telegram}.py`: pull adapters (`poll()`→captures).
 - `skos/src/skos/status.py`: status/report engine (email/cron/gtd/docs/corpus).
 - `skos/src/skos/mail.py` (`gtd-mail`): email capture/triage/digest + bidirectional (reply/done/attachments).
-- `skos/scripts/sk-cron-run.sh`: the cron/observability wrapper (run-ledger + failure→GTD+alert).
+- `sk-cron-run`: the cron/observability wrapper (run-ledger + failure→GTD+alert). Ships
+  with skcapstone as `~/.skenv/bin/sk-cron-run`; `skos/scripts/sk-cron-run.sh` is an
+  `exec`-only shim kept for drop-ins that still name it.
 - `skcapstone/src/skcapstone/itil.py::_gtd_emit`: ITIL push adapter (emits through the sink).
 
 **Store:** plain JSON under `$SK_DATA_ROOT/coordination/gtd/`
@@ -119,7 +121,7 @@ Telegram DM (Hermes bot). No public port.
 | :22/3h | `ingest-order` | `skos ingest order`: drive tracked order state (every 3h) |
 | every 30m | `drchiro-ingest` | `drchiro-mail-ingest.py`: Dr Rich clinic mail → GTD |
 
-Every command runs under `skos/scripts/sk-cron-run.sh <job> …`.
+Every command runs under `sk-cron-run <job> …`.
 
 **Scheduler-as-code (not `crontab -e`).** The pipeline is declared in
 [`deploy/schedule/jobs.yaml`](../deploy/schedule/jobs.yaml) and installed into the
