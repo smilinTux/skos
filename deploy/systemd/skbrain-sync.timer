@@ -1,0 +1,11 @@
+# See skbrain-sync.service.
+[Unit]
+Description=Project skbrain-ops canon every 30 minutes
+
+[Timer]
+OnCalendar=*:11/30
+RandomizedDelaySec=60
+Persistent=true
+
+[Install]
+WantedBy=timers.target
