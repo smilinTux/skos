@@ -19,7 +19,9 @@ def _connect(dsn: str):
     try:
         import psycopg
     except ImportError as exc:  # pragma: no cover - installation dependent
-        raise BackendError("psycopg is required for live skbrain database access") from exc
+        raise BackendError(
+            "psycopg is required for live skbrain database access"
+        ) from exc
     return psycopg.connect(dsn)
 
 
@@ -29,6 +31,14 @@ def dsn_from_env(name: str) -> str:
     if not value:
         raise BackendError(f"{name} is not configured")
     return value
+
+
+def _cypher(cur: Any, query: str, params: dict[str, str]) -> None:
+    """Run Cypher on ops_brain. AGE takes the query only as a dollar-quoted literal."""
+    cur.execute(
+        f"SELECT * FROM ag_catalog.cypher('ops_brain', $$ {query} $$, %s) AS (v ag_catalog.agtype)",
+        (json.dumps(params),),
+    )
 
 
 class PostgresWriterBackend:
@@ -55,7 +65,9 @@ class PostgresWriterBackend:
             cur.execute("SELECT id, content_hash FROM ops.wiki_nodes")
             return {str(row[0]): str(row[1]) for row in cur.fetchall()}
 
-    def upsert_node(self, node: OpsPage, chunks: list[OpsChunk], links: list[OpsEdge]) -> None:
+    def upsert_node(
+        self, node: OpsPage, chunks: list[OpsChunk], links: list[OpsEdge]
+    ) -> None:
         with self._conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO ops.wiki_nodes
@@ -100,12 +112,14 @@ class PostgresWriterBackend:
 
     def delete_node(self, node_id: str) -> None:
         with self._conn.cursor() as cur:
-            cur.execute("DELETE FROM ops.links WHERE src=%s OR dst=%s", (node_id, node_id))
-            cur.execute("DELETE FROM ops.wiki_nodes WHERE id=%s", (node_id,))
-            graph_id = json.dumps(node_id)
             cur.execute(
-                "SELECT * FROM ag_catalog.cypher('ops_brain', %s) AS (v ag_catalog.agtype)",
-                (f"MATCH (n:OpsEntity {{id: {graph_id}}}) DETACH DELETE n RETURN 1",),
+                "DELETE FROM ops.links WHERE src=%s OR dst=%s", (node_id, node_id)
+            )
+            cur.execute("DELETE FROM ops.wiki_nodes WHERE id=%s", (node_id,))
+            _cypher(
+                cur,
+                "MATCH (n:OpsEntity {id: $id}) DETACH DELETE n RETURN 1",
+                {"id": node_id},
             )
 
     def mark_observed(self, node_ids: list[str]) -> None:
@@ -121,33 +135,31 @@ class PostgresWriterBackend:
     @staticmethod
     def _upsert_graph(cur: Any, node: OpsPage, links: list[OpsEdge]) -> None:
         """Mirror a node and its outgoing edges into AGE inside the transaction."""
-        node_id, title, kind = map(json.dumps, (node.slug, node.title, node.kind))
-        query = (
-            f"MERGE (n:OpsEntity {{id: {node_id}}}) "
-            f"SET n.title = {title}, n.kind = {kind}, "
-            f"n.content_hash = {json.dumps(node.content_hash)} "
-            "RETURN n"
+        _cypher(
+            cur,
+            "MERGE (n:OpsEntity {id: $id}) "
+            "SET n.title = $title, n.kind = $kind, n.content_hash = $content_hash "
+            "RETURN n",
+            {
+                "id": node.slug,
+                "title": node.title,
+                "kind": node.kind,
+                "content_hash": node.content_hash,
+            },
         )
-        cur.execute(
-            "SELECT * FROM ag_catalog.cypher('ops_brain', %s) AS (v ag_catalog.agtype)",
-            (query,),
-        )
-        cur.execute(
-            "SELECT * FROM ag_catalog.cypher('ops_brain', %s) AS (v ag_catalog.agtype)",
-            (f"MATCH (n:OpsEntity {{id: {node_id}}})-[r]->() DELETE r RETURN n",),
+        _cypher(
+            cur,
+            "MATCH (n:OpsEntity {id: $id})-[r]->() DELETE r RETURN n",
+            {"id": node.slug},
         )
         for edge in links:
             edge_label = re.sub(r"[^A-Za-z0-9_]", "_", edge.edge_type).upper()
             if not edge_label or not edge_label[0].isalpha():
                 edge_label = "LINKS_TO"
-            dst = json.dumps(edge.dst)
-            provenance = json.dumps(edge.provenance)
-            query = (
-                f"MATCH (s:OpsEntity {{id: {node_id}}}) "
-                f"MERGE (d:OpsEntity {{id: {dst}}}) "
-                f"MERGE (s)-[r:{edge_label} {{provenance: {provenance}}}]->(d) RETURN r"
-            )
-            cur.execute(
-                "SELECT * FROM ag_catalog.cypher('ops_brain', %s) AS (v ag_catalog.agtype)",
-                (query,),
+            _cypher(
+                cur,
+                "MATCH (s:OpsEntity {id: $id}) "
+                "MERGE (d:OpsEntity {id: $dst}) "
+                f"MERGE (s)-[r:{edge_label} {{provenance: $provenance}}]->(d) RETURN r",
+                {"id": node.slug, "dst": edge.dst, "provenance": edge.provenance},
             )

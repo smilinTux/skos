@@ -6,9 +6,10 @@ unnoticed from 2026-08-20 until the first new canon page reached Postgres.
 
 from __future__ import annotations
 
+import json
 import re
 
-from skos.brain.ops.models import OpsPage
+from skos.brain.ops.models import OpsEdge, OpsPage
 from skos.brain.ops.postgres import PostgresWriterBackend
 
 # ops.wiki_nodes in skmemory/deploy/skmem-pg/03-ops-namespace.sql.
@@ -72,7 +73,9 @@ def test_upsert_names_only_real_columns_and_binds_every_placeholder():
 
     backend.upsert_node(page, [], [])
 
-    sql, params = next(s for s in conn.statements if "INSERT INTO ops.wiki_nodes" in s[0])
+    sql, params = next(
+        s for s in conn.statements if "INSERT INTO ops.wiki_nodes" in s[0]
+    )
     columns = re.search(r"\((.*?)\)\s*VALUES", sql, re.S).group(1)
     named = {name.strip() for name in columns.split(",")}
     assert named <= WIKI_NODES_COLUMNS
@@ -84,3 +87,49 @@ def test_age_operators_are_on_the_search_path():
     conn = _Conn()
     PostgresWriterBackend("dsn", connect=lambda _dsn: conn)
     assert "ag_catalog" in conn.statements[0][0]
+
+
+def _cypher_statements(conn: _Conn) -> list[tuple[str, tuple]]:
+    return [s for s in conn.statements if "cypher(" in s[0]]
+
+
+def _page(title: str = "X") -> OpsPage:
+    return OpsPage(
+        slug="ke-x",
+        kind="known-error",
+        title=title,
+        origin="git",
+        lifecycle="canon",
+        frontmatter={},
+        body_md="body",
+    )
+
+
+def test_cypher_text_is_dollar_quoted_because_age_refuses_a_bound_query():
+    conn = _Conn()
+    backend = PostgresWriterBackend("dsn", connect=lambda _dsn: conn)
+
+    backend.upsert_node(
+        _page(),
+        [],
+        [OpsEdge(src="ke-x", dst="svc-y", edge_type="touches", provenance="canon")],
+    )
+    backend.delete_node("ke-x")
+
+    statements = _cypher_statements(conn)
+    assert len(statements) == 4
+    for sql, params in statements:
+        assert "cypher('ops_brain', $$" in sql
+        assert sql.count("%s") == len(params) == 1
+
+
+def test_page_values_travel_as_parameters_never_in_the_query_text():
+    conn = _Conn()
+    backend = PostgresWriterBackend("dsn", connect=lambda _dsn: conn)
+    hostile = 'ends the quote $$ }) DETACH DELETE n // "'
+
+    backend.upsert_node(_page(hostile), [], [])
+
+    sql, params = _cypher_statements(conn)[0]
+    assert hostile not in sql
+    assert json.loads(params[0])["title"] == hostile

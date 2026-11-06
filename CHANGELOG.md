@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 ## [Unreleased]
 
 ### Fixed
+- **`skbrain sync --commit` could not write the ops graph.** AGE refuses a bound
+  query with "a dollar-quoted string constant is expected". The Cypher text is now
+  a dollar-quoted literal and page values travel as parameters.
 - **`skbrain sync --commit` could not write a new or changed page.** The writer
   inserted a `namespace` column that `ops.wiki_nodes` has never had; the schema
   is the namespace. Hermetic tests used a fake backend, so this stayed hidden.
