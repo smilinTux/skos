@@ -36,6 +36,9 @@ class PostgresWriterBackend:
 
     def __init__(self, dsn: str, *, connect: Callable[[str], Any] = _connect):
         self._conn = connect(dsn)
+        # AGE's cypher() resolves its agtype operators through search_path.
+        with self._conn.cursor() as cur:
+            cur.execute('SET search_path = ag_catalog, "$user", public')
 
     def __enter__(self):
         return self

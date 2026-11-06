@@ -78,3 +78,9 @@ def test_upsert_names_only_real_columns_and_binds_every_placeholder():
     assert named <= WIKI_NODES_COLUMNS
     assert len(params) == sql.count("%s") == len(named)
     assert "namespace" not in sql
+
+
+def test_age_operators_are_on_the_search_path():
+    conn = _Conn()
+    PostgresWriterBackend("dsn", connect=lambda _dsn: conn)
+    assert "ag_catalog" in conn.statements[0][0]
