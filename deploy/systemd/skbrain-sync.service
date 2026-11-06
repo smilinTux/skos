@@ -1,0 +1,27 @@
+# skbrain-sync.service: project skbrain-ops canon into the skmem-pg ops schema,
+# which is what keeps the ProjectorFresh condition honest (7200s bound).
+#
+# The pack's fleet/cronjob-skbrain-sync.json is only a declaration: nothing runs
+# fleet objects, and the projector went 77 days stale while `skbrain doctor`
+# reported skbrain:cron green. This unit is the thing that actually runs it.
+#
+# A systemd unit rather than a jobs.yaml entry because the projector DSN already
+# reaches the user manager from ~/.config/environment.d/skbrain.conf; cron would
+# need a second copy of it in the schedule env file.
+#
+# systemd USER unit. Install on the host that owns the canon (noroc2027 for nor):
+#   cp deploy/systemd/skbrain-sync.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now skbrain-sync.timer
+
+[Unit]
+Description=Project skbrain-ops canon into the ops schema
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.skenv/bin:/usr/local/bin:/usr/bin:/bin
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=50%
+TimeoutStartSec=20min
+ExecStart=%h/.skenv/bin/sk-cron-run skbrain-sync %h/.skenv/bin/skbrain sync --commit
