@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 ## [Unreleased]
 
 ### Fixed
+- **`skbrain sync --commit` could not write a new or changed page.** The writer
+  inserted a `namespace` column that `ops.wiki_nodes` has never had; the schema
+  is the namespace. Hermetic tests used a fake backend, so this stayed hidden.
 - **`skbrain sync --commit` could not embed any page of two or more chunks on a
   CPU host.** The 30s embed timeout is now 600s. Unchanged pages skip embedding,
   which is why this stayed hidden until new canon arrived.

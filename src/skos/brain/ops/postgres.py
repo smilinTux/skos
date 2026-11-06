@@ -56,18 +56,17 @@ class PostgresWriterBackend:
         with self._conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO ops.wiki_nodes
-                   (id, kind, title, namespace, origin, lifecycle,
+                   (id, kind, title, origin, lifecycle,
                     frontmatter, body_md, content_hash)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)
+                   VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,%s)
                    ON CONFLICT (id) DO UPDATE SET kind=EXCLUDED.kind,title=EXCLUDED.title,
-                   namespace=EXCLUDED.namespace,origin=EXCLUDED.origin,
+                   origin=EXCLUDED.origin,
                    lifecycle=EXCLUDED.lifecycle,frontmatter=EXCLUDED.frontmatter,
                    body_md=EXCLUDED.body_md,content_hash=EXCLUDED.content_hash,updated_at=now()""",
                 (
                     node.slug,
                     node.kind,
                     node.title,
-                    node.namespace,
                     node.origin,
                     node.lifecycle,
                     json.dumps(node.frontmatter, default=str),
