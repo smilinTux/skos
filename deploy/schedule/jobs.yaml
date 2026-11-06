@@ -113,6 +113,9 @@ jobs:
     log: "$HOME/.skcapstone/logs/sk-ingest.log"
 
   - name: service-unit-audit
+    # SERVICE_UNIT_STANDARD regression gate (prb-bd79dd5f). Fails if any node has
+    # a unit whose start limiter can never engage: such a unit retries forever on
+    # a permanent fault and can hang the host (.100, 13h, twice).
     schedule: "40 6 * * *"
     command: "$HOME/clawd/scripts/fleet-service-unit-audit.sh"
     log: "$HOME/.skcapstone/logs/service-unit-audit.log"
@@ -138,26 +141,40 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
 
   - name: skmem-pg-backup
+    # skmem-pg dump, part of the skmem-pg group added 2026-07-06. 2026-10-20: now
+    # ships OFF-SITE via restic to B2 (encrypted, dedup), and runs under
+    # sk-cron-run so a failure fires sk-alert + a GTD item. Before that the dump
+    # stayed on the box it protects and the script's own nightly warning reached
+    # nobody, because this was the one backup job not wrapped.
     schedule: "15 3 * * *"
     command: "/bin/bash $HOME/.skcapstone/scripts/skmem-pg-backup.sh"
     log: "$HOME/.skcapstone/logs/skmem-pg-backup.log"
 
   - name: swarm-replica-watch
+    # Prod swarm services below desired / restart loops -> sk-alert.
+    # PR smilinTux/skstack01-prod#67, 2026-09-28.
     schedule: "*/10 * * * *"
     command: "/usr/bin/python3 $HOME/.local/lib/swarm-replica-watch/swarm_replica_watch.py --cluster skstack01 --manager skuser@norap1001:1713 --manager skuser@norap1011:1713 --manager skuser@norap1021:1713 --ssh /usr/bin/ssh --alert-cmd $HOME/.skenv/bin/sk-alert --state $HOME/.local/state/swarm-replica-watch/skstack01.json"
     log: "$HOME/.skcapstone/logs/swarm-replica-watch.log"
 
   - name: skbackup-check
+    # NAS backup staleness (sanoid 2h, skbak 26h, restic 36h) + pool health ->
+    # sk-alert. PR skstack01-prod feat/skbackup-host-tiers, 2026-09-28.
     schedule: "17 * * * *"
     command: "$HOME/.local/lib/skbackup/skbackup-alert-check.sh norpv1200 $HOME/.skenv/bin/sk-alert"
     log: "$HOME/.skcapstone/logs/skbackup-check.log"
 
   - name: ollama-health-check
+    # Probes .100 (VM 102 ollama norpv1300) :11434/api/tags and pages on down.
+    # Coord card .100-hard-hangs, 2026-10-20.
     schedule: "*/5 * * * *"
     command: "$HOME/.local/lib/ollama-vm-watch/ollama-health-check.sh"
     log: "$HOME/.skcapstone/logs/ollama-health-check.log"
 
   - name: yt-channel-watch
+    # Daily Salla / CosmicAgency / Swaruu channel transcripts -> realm wiki
+    # raw/youtube + skingest. Source in realmwiki tools/, PR feat/yt-channel-watch;
+    # the deployed copy lives in ~/.local/lib/yt-channel-watch.
     schedule: "15 7 * * *"
     command: "$HOME/.local/lib/yt-channel-watch/yt_channel_watch.py --commit"
     log: "$HOME/clawd/logs/yt-channel-watch.log"
