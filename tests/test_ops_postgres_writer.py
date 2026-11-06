@@ -73,7 +73,9 @@ def test_upsert_names_only_real_columns_and_binds_every_placeholder():
 
     backend.upsert_node(page, [], [])
 
-    sql, params = next(s for s in conn.statements if "INSERT INTO ops.wiki_nodes" in s[0])
+    sql, params = next(
+        s for s in conn.statements if "INSERT INTO ops.wiki_nodes" in s[0]
+    )
     columns = re.search(r"\((.*?)\)\s*VALUES", sql, re.S).group(1)
     named = {name.strip() for name in columns.split(",")}
     assert named <= WIKI_NODES_COLUMNS
@@ -108,7 +110,9 @@ def test_cypher_text_is_dollar_quoted_because_age_refuses_a_bound_query():
     backend = PostgresWriterBackend("dsn", connect=lambda _dsn: conn)
 
     backend.upsert_node(
-        _page(), [], [OpsEdge(src="ke-x", dst="svc-y", edge_type="touches", provenance="canon")]
+        _page(),
+        [],
+        [OpsEdge(src="ke-x", dst="svc-y", edge_type="touches", provenance="canon")],
     )
     backend.delete_node("ke-x")
 
