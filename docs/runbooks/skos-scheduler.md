@@ -1,6 +1,6 @@
 # Runbook: skos scheduler-as-code (deploy / rollback / cutover)
 
-The skos gtd-ingest + observability pipeline (13 `sk-cron-run.sh`-wrapped jobs) is
+The skos gtd-ingest + observability pipeline (13 `sk-cron-run`-wrapped jobs) is
 **declared in the repo**, not hand-edited into a crontab. This runbook covers the
 one-time cutover of the primary node (noroc2027 / .158) from the legacy hand-edited
 crontab lines to the committed manifest, plus routine deploy and rollback.
@@ -18,7 +18,7 @@ Card: `29ae4313` · deploy-plan item 4b (`docs/deploy-plan/skos-bulletproof-depl
 | `~/.skcapstone/skos-schedule.env` | Runtime values (owned regular file, mode 600, **not** in git or crontab). |
 
 Design note (why crontab, not systemd timers) is in the header of `jobs.yaml`: the
-live pipeline is already a user crontab, every job is wrapped in `sk-cron-run.sh`, and
+live pipeline is already a user crontab, every job is wrapped in `sk-cron-run`, and
 one ordered crontab block reproduces the live schedule byte-for-byte for a clean
 cutover. `deploy/systemd/` still ships the `skos-backup` timer (the one job that
 benefits from `OnCalendar` catch-up).
@@ -63,11 +63,14 @@ skos schedule install            # DRY RUN; prints paths/commands, never values
 skos schedule install --apply
    ```
 5. **Remove any legacy duplicates.** After apply, older hand-edited
-   `sk-cron-run.sh` lines may still exist *outside* the managed block. Compare
+   `sk-cron-run` lines may still exist *outside* the managed block. Compare
    exact job names and remove only confirmed duplicates with `crontab -e`; do
    not assume their count. Verify the final managed count:
    ```bash
-   crontab -l | grep -c 'sk-cron-run.sh'   # expect 13 (all inside the managed block)
+   crontab -l | grep -c 'sk-cron-run'     # expect 13 (all inside the managed block)
+   # Counts both spellings on purpose: the installed command and the legacy
+   # scripts/sk-cron-run.sh shim are the same runner, and a host mid-migration
+   # has some of each. `schedule diff` is what decides whether that is drift.
    skos schedule diff                       # expect: clean
    ```
 
@@ -104,11 +107,11 @@ applied** until failover. This is scheduler-only; it does not extend to skmem-pg
 
 | Symptom | Check |
 |---|---|
-| job exits 78 before execution | runtime env file is a symlink, foreign-owned, or not mode 600/400; replace it atomically with a safe regular file. |
+| job exits 78 before execution | Two causes, and the stderr distinguishes them. `sk-cron-run.sh: sk-cron-run is not installed` means the shim could not resolve the wrapper, so **the job did not run**: install skcapstone (`pip install -e <skcapstone>`), which ships `~/.skenv/bin/sk-cron-run`. Otherwise the runtime env file is a symlink, foreign-owned, or not mode 600/400; replace it atomically with a safe regular file. |
 | `diff` shows `changed` for a job | manifest schedule/command differs from live; reconcile the manifest, then `install --apply`. |
-| `diff` shows `extra` | a `sk-cron-run.sh` job exists live but is not declared; add it to `jobs.yaml` or remove it from the crontab. |
+| `diff` shows `extra` | a `sk-cron-run` job exists live but is not declared; add it to `jobs.yaml` or remove it from the crontab. |
 | job runs twice | legacy line not removed after cutover (step 5). |
-| `schedule error: runner script … not found` | running from outside the repo, or a bad checkout; the runner is repo-relative (`$SKOS_REPO/scripts/sk-cron-run.sh`). |
+| `schedule error: runner referenced by manifest not found` | skcapstone is not installed on this host. The runner is its installed command, `$HOME/.skenv/bin/sk-cron-run`, no longer a path into this checkout. The check is strict on purpose: the in-repo shim resolving is not evidence the wrapper exists, since the shim would then exit 78 at run time. |
 
 ### Credential rotation
 

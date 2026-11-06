@@ -7,6 +7,7 @@ store by (source, source_ref).
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -75,24 +76,40 @@ def test_cli_upsert_create_then_update():
     assert any(i.get("source_ref") == "ord-1" for i in archive)
 
 
-# ── sk-cron-run.sh failure capture goes through the library ─────────────────
+# ── sk-cron-run failure capture goes through the library ───────────────────
+#
+# The wrapper itself moved to skcapstone on 2026-11-06 and its behaviour tests
+# went with it (skcapstone tests/test_sk_cron_run.py), including the one
+# asserting it never touches the GTD store files directly. What stays here is
+# the cross-repo integration these two repos share and neither can test alone:
+# a failing job must land a GTD item in SKOS's store. skos CI does not install
+# skcapstone (tests marked needs_skcapstone self-skip when it is absent), so
+# these skip there and run for real on any box that has both.
 
-def test_cron_script_has_no_inline_json_manipulation():
-    body = CRON_SH.read_text()
-    # the run-ledger JSONL append may json.dumps a record, but nothing may
-    # load or rewrite the GTD store files directly
-    assert "json.dump(" not in body
-    assert "json.load(" not in body
-    assert "GTD_INBOX" not in body
-    assert "gtd capture" in body
+
+def _cron_run_bin() -> str | None:
+    """The installed sk-cron-run, or None when skcapstone is not installed."""
+    candidate = Path(os.path.expanduser("~/.skenv/bin/sk-cron-run"))
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        return str(candidate)
+    return shutil.which("sk-cron-run")
+
+
+needs_cron_run = pytest.mark.skipif(
+    _cron_run_bin() is None,
+    reason="sk-cron-run not installed (it ships with the sibling skcapstone package)",
+)
 
 
 def _run_cron(env, *cmd):
+    # Through the shim deliberately: that is the path the 31 live drop-ins and
+    # the managed crontab still take, so this also proves the shim delegates.
+    env = dict(env, SK_CRON_RUN_BIN=_cron_run_bin() or "")
     return subprocess.run(["bash", str(CRON_SH), *cmd],
                           capture_output=True, text=True, env=env)
 
 
-@pytest.mark.skipif(not CRON_SH.exists(), reason="cron wrapper missing")
+@needs_cron_run
 def test_forced_cron_failure_captures_exactly_once(tmp_path):
     env = dict(os.environ)
     env["SK_GTD_DIR"] = os.environ["SK_GTD_DIR"]
@@ -113,6 +130,7 @@ def test_forced_cron_failure_captures_exactly_once(tmp_path):
     assert cron_items[0]["priority"] == "high" and cron_items[0]["context"] == "@ops"
 
 
+@needs_cron_run
 @pytest.mark.skipif(not Path(os.path.expanduser("~/.skenv/bin/skos")).exists(),
                     reason="skos console script not installed")
 def test_forced_cron_failure_via_cli_binary(tmp_path):

@@ -26,7 +26,7 @@ and sibling `sk*` packages that import `skos.paths` / `skos.gtd_ingest`.
 | Capability catalog + resolver | the 4 C's (cloud / comms / compute / core), capability port to adapter per profile. |
 | Capability packs | `skos install <pack>`: a signed `skworld.module.json` `install` facet, planned then provisioned all-or-nothing, state in `registry/packs.json`. |
 | Unified GTD sink | `src/skos/gtd_ingest.py`, the single `capture()` / `upsert()` port every source adapter writes through. |
-| Scheduler-as-code | `deploy/schedule/jobs.yaml` rendered into the user crontab by `skos schedule install`, every job wrapped in `scripts/sk-cron-run.sh`. |
+| Scheduler-as-code | `deploy/schedule/jobs.yaml` rendered into the user crontab by `skos schedule install`, every job wrapped in `sk-cron-run`, skcapstone's installed observability command. |
 | Timer wrapping | `src/skos/timer_wrap.py`, systemd drop-ins that route user timers through the same wrapper. |
 | Secret plane adapter | `skos.secrets`, a `vault-file` Fernet backend plus a not-yet-implemented `capauth` backend. |
 | Brain + surfaces | the entity-graph ontology and its obsidian / claude-code / codex / n8n adapters. |
@@ -38,7 +38,7 @@ and sibling `sk*` packages that import `skos.paths` / `skos.gtd_ingest`.
 - **It does not own `skoperator`.** `~/.skenv/bin/skoperator` imports
   `skcapstone.operator_seat.cli:main`. `skoperator` is **not** in this repo's
   `[project.scripts]`, and `skoperator.service` runs **skcapstone** code that skos
-  merely *wraps* in `sk-cron-run.sh`. See section 8 for why this matters.
+  merely *wraps* in `sk-cron-run`, which is itself skcapstone's. See section 8 for why this matters.
 - **It does not run a daemon.** There is no long-lived skos process. `skos serve` is
   opt-in, read-only, and loopback.
 - **It does not store secret values in the tree.** `skos.secret_env` resolves names at
@@ -53,7 +53,7 @@ and sibling `sk*` packages that import `skos.paths` / `skos.gtd_ingest`.
 ```mermaid
 flowchart TD
     OP["operator / agent"] -->|"skos &lt;verb&gt;"| CLI["src/skos/cli.py<br/>typer app (16 verbs + 14 sub-apps)"]
-    CRON["user crontab + 30 systemd user timers"] -->|"every job"| RUN["scripts/sk-cron-run.sh<br/>run-ledger + failure to GTD + sk-alert"]
+    CRON["user crontab + 30 systemd user timers"] -->|"every job"| RUN["sk-cron-run (skcapstone)<br/>run-ledger + failure to GTD + sk-alert"]
     RUN -->|"runs &quot;$@&quot; verbatim"| JOB["the wrapped command"]
 
     CLI --> PATHS["src/skos/paths.py<br/>$SK_DATA_ROOT resolution"]
@@ -331,8 +331,10 @@ It **generalised**. `timer_wrap` wraps every wrappable systemd user timer on the
 (30 today), so **any** unit whose flags arrive from a drop-in rather than its base
 fragment was exposed to the same silent strip.
 
-`scripts/sk-cron-run.sh` is **innocent**. It runs `"$@"` verbatim (line 41). The stripping
-was entirely `timer_wrap`'s reconstruction of the command.
+The wrapper is **innocent**. It runs `"$@"` verbatim. The stripping was entirely
+`timer_wrap`'s reconstruction of the command. (The wrapper moved to skcapstone on
+2026-11-06 and installs as `~/.skenv/bin/sk-cron-run`; `scripts/sk-cron-run.sh` here is
+now an `exec`-only shim for the drop-ins that still name it.)
 
 **What the fix does.** `plan_wraps()` now asks systemd for the effective command,
 `systemctl --user show <unit>.service -p ExecStartEx --value` (falling back to
@@ -366,7 +368,7 @@ and restores the full command **through** the wrapper, so observability and the 
 both in effect. On the primary node today:
 
 ```
-ExecStart    = /home/cbrd21/clawd/skos/scripts/sk-cron-run.sh skoperator \
+ExecStart    = /home/cbrd21/.skenv/bin/sk-cron-run skoperator \
                /home/cbrd21/.skenv/bin/skoperator run --execute --honor
 DropInPaths  = execute.conf  sk-cron-run.conf  zz-honor.conf
 ```
@@ -393,7 +395,7 @@ sequence, and every step is reversible by putting the file back:
    `skoperator run --execute --honor`.
 5. Re-run the wrap so `sk-cron-run.conf` is regenerated from that effective command.
 6. `systemctl --user daemon-reload`, then verify the final state: `ExecStart` runs
-   through `sk-cron-run.sh` **and** ends `--execute --honor`, and `DropInPaths` no longer
+   through `sk-cron-run` **and** ends `--execute --honor`, and `DropInPaths` no longer
    lists `zz-honor.conf`.
 
 If step 4 or step 6 does not show both flags, restore `zz-honor.conf`, reload, and stop.
@@ -405,7 +407,7 @@ If step 4 or step 6 does not show both flags, restore `zz-honor.conf`, reload, a
 | A wrapped unit silently lost its flags; behaviour reverted to the base unit's defaults | `systemctl --user show <unit> -p ExecStart --value` vs `grep ExecStart "$(systemctl --user show <unit> -p FragmentPath --value)"`. If a drop-in's flags are missing from the effective line, the node is running a `skos` from before card `47e32514`, or a `sk-cron-run.conf` written by one. Check the deployed code with `python -c "import skos.timer_wrap as t; print(hasattr(t,'parse_show_execstart'))"`, then follow the retirement sequence in section 8. Restore with a `zz-*.conf` drop-in that sorts last. |
 | A wrapped unit runs the flags it had a month ago, not the ones its drop-ins set now | The wrap SNAPSHOTS the effective command into `sk-cron-run.conf`, which sorts after most drop-ins. Editing a contributing drop-in does not update it. Re-run the wrap after changing any drop-in that contributes flags. |
 | A drop-in wrote absolute paths where the unit used `%h` | Expected. `systemctl show` reports an already-expanded command, so an entry with `exec_source: effective` cannot carry specifiers. Only the base-file fallback (`exec_source: file`, which is what a bare `foo@.service` template gets) preserves `%h`. |
-| `skoperator` behaves differently after a `git checkout` or an uncommitted edit in `~/clawd/skos` | `skoperator.service` runs `/home/cbrd21/clawd/skos/scripts/sk-cron-run.sh`, a path inside the **working checkout**, not an installed copy. Any edit or revert there changes production immediately. `git -C ~/clawd/skos status` and `git -C ~/clawd/skos log -1 -- scripts/sk-cron-run.sh`. |
+| `skoperator` behaves differently after a `git checkout` or an uncommitted edit in `~/clawd/skos` | Historic, and fixed by packaging. The wrapper used to be `/home/cbrd21/clawd/skos/scripts/sk-cron-run.sh`, a path inside the **working checkout**, so any edit or revert there changed production immediately. It is now `~/.skenv/bin/sk-cron-run`, a pip-installed copy from skcapstone. A drop-in still naming the old path reaches it through an `exec`-only shim, so a checkout edit can no longer alter the wrapper's behaviour. If a unit does still name the shim, `grep -l sk-cron-run.sh ~/.config/systemd/user/*.service.d/*.conf` lists them; migrate with `skos schedule wrap-timers --apply`. |
 | A wrapped job runs **twice** per trigger | The drop-in is missing its bare `ExecStart=` reset. `ExecStart` is list-typed, so systemd appends. `grep -c '^ExecStart' <unit>.service.d/sk-cron-run.conf` must show 2 lines, the first empty. |
 | `skos --help` dies with `Choice is not subscriptable` or `Secondary flag is not valid for non-boolean flag` | The typer/click pins were bypassed. `pip show typer click`; require `typer>=0.12,<0.13` and `click>=8.1,<8.2`. Both pins are needed, not either one. |
 | `pip show skos` and `pip show skos-sovereign` disagree, or a version looks stale | The distribution was renamed to `skos-sovereign`; an older editable install still registers as `skos`. Do not trust an installed version string as authoritative. Read `pyproject.toml` on the ref you care about, and confirm releases on PyPI. |
@@ -517,8 +519,10 @@ checks:
     run: grep -qF 'SK_GTD_DIR' src/skos/gtd_ingest.py && grep -qF 'home / "coordination" / "gtd"' src/skos/gtd_ingest.py && test "$(tr -d ' \n' < src/skos/gtd_ingest.py | grep -o '_ALL_FILES=\[[^]]*\]')" = '_ALL_FILES=["inbox.json","next-actions.json","projects.json","waiting-for.json","someday-maybe.json","archive.json"]'
   - name: timer_wrap reads the EFFECTIVE ExecStart, with the base file only as fallback
     run: grep -qF 'DROPIN_NAME = "sk-cron-run.conf"' src/skos/timer_wrap.py && grep -qF 'execstart = effective_execstart(f"{unit}.service", query)' src/skos/timer_wrap.py && grep -qF 'def parse_show_execstart' src/skos/timer_wrap.py && grep -qF 'execstart = _execstart_of(service)' src/skos/timer_wrap.py
-  - name: sk-cron-run.sh still runs its argv verbatim (it is not the stripper)
-    run: grep -qF 'out="$("$@" 2>&1)"' scripts/sk-cron-run.sh
+  - name: the runner is skcapstone's installed command, not a path into this checkout
+    run: grep -qF 'runner: "$HOME/.skenv/bin/sk-cron-run"' deploy/schedule/jobs.yaml
+  - name: scripts/sk-cron-run.sh is an exec-only shim holding no wrapper logic
+    run: grep -qF 'exec "$HOME/.skenv/bin/sk-cron-run" "$@"' scripts/sk-cron-run.sh && ! grep -vE '^[[:space:]]*#' scripts/sk-cron-run.sh | grep -qE 'cron-ledger|gtd capture|sk-alert'
   - name: the blocking ruff gate is exactly the rule set section 4 documents
     run: grep -qF 'ruff check --select=E9,F63,F7,F82,F401 src tests' .github/workflows/ci.yml
   - name: the scheduler secret file and manifest paths section 6 documents exist

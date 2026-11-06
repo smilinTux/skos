@@ -18,8 +18,13 @@ def test_committed_manifest_loads_and_is_consistent():
     assert s.jobs, "manifest declares no jobs"
     names = [j.name for j in s.jobs]
     assert len(names) == len(set(names)), "job names must be unique"
-    # runner referenced by the manifest must exist in the repo
-    sched.check_runner_exists(s)
+    # The runner is an installed command (skcapstone's sk-cron-run), not a
+    # path into this checkout. Asserted here rather than calling
+    # check_runner_exists, which is strict about the binary being present and
+    # so cannot run on a box without skcapstone installed; it has its own
+    # tests below, both directions, against a controlled HOME.
+    assert s.runner == "$HOME/.skenv/bin/sk-cron-run"
+    assert "$SKOS_REPO" not in s.runner, "the crontab must not depend on a checkout path"
     # every schedule is a valid 5-field cron expression
     for j in s.jobs:
         sched.validate_schedule(j.schedule, j.name)
@@ -129,7 +134,8 @@ def test_render_expand_produces_concrete_paths():
     assert lines
     joined = "\n".join(lines)
     assert "$HOME" not in joined and "$SKOS_REPO" not in joined
-    assert "/home/tester/clawd/skos/scripts/sk-cron-run.sh" in joined
+    assert "/home/tester/.skenv/bin/sk-cron-run" in joined
+    assert "scripts/sk-cron-run.sh" not in joined, "the shim is legacy, never rendered"
 
 
 def test_render_never_injects_secret_even_when_provided():
@@ -202,3 +208,64 @@ def test_env_file_placeholder_not_treated_as_secret(tmp_path, monkeypatch):
     envf.write_text("GOG_KEYRING_PASSWORD=replace-me\n")
     resolved = sched.resolve_secrets(s, envf)
     assert "GOG_KEYRING_PASSWORD" not in resolved  # placeholder ignored
+
+
+# ------------------------------------------------------------------- runner target
+
+def test_runner_target_resolves_home_and_repo_forms(tmp_path, monkeypatch):
+    """Both forms resolve. The function is named for what it returns.
+
+    It was ``runner_path_in_repo`` and always joined onto the repo root, which
+    was true while the runner was a script in this checkout and a lie the
+    moment it became an installed command. A path helper whose name disagrees
+    with its return value is how skcapstone's per-host-artifact bug happened:
+    callers guessed between the pip copy and the deployed copy and were right
+    by luck.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    installed = sched.Schedule(
+        runner="$HOME/.skenv/bin/sk-cron-run", path="", secret_env=[], jobs=[]
+    )
+    assert sched.runner_target(installed) == tmp_path / ".skenv" / "bin" / "sk-cron-run"
+
+    legacy = sched.Schedule(
+        runner="$SKOS_REPO/scripts/sk-cron-run.sh", path="", secret_env=[], jobs=[]
+    )
+    assert sched.runner_target(legacy) == sched.repo_root() / "scripts" / "sk-cron-run.sh"
+
+
+def test_check_runner_exists_refuses_an_absent_installed_command(tmp_path, monkeypatch):
+    """Strict on purpose: the in-repo shim is not evidence the command exists.
+
+    The shim resolves at render time and then exits 78 at run time, so
+    accepting it here would move the silence one layer down instead of ending
+    it, and make this an instrument that cannot fail.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    s = sched.Schedule(runner="$HOME/.skenv/bin/sk-cron-run", path="", secret_env=[], jobs=[])
+    with pytest.raises(sched.ScheduleError) as err:
+        sched.check_runner_exists(s)
+    assert "sk-cron-run" in str(err.value) and "skcapstone" in str(err.value)
+
+    binary = tmp_path / ".skenv" / "bin" / "sk-cron-run"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n")
+    sched.check_runner_exists(s)  # present now, so no raise
+
+
+def test_both_runner_spellings_sign_as_the_same_managed_job():
+    """A host migrating from the shim to the installed command must SPLICE.
+
+    _signature keyed on the literal "sk-cron-run.sh", so the moment the
+    manifest named the installed command the parser stopped recognising its
+    own managed lines and `schedule install` would have appended a second copy
+    of the whole block instead of replacing it. It now keys on the runner's
+    identity, reusing timer_wrap's basename-minus-.sh rule so the crontab half
+    and the systemd half agree on what counts as the same runner.
+    """
+    tail = "myjob /bin/true >> /x/l 2>&1"
+    head = "0 3 * * * SKOS_SCHEDULE_ENV=/x/e PATH=/b"
+    installed = sched._signature(f"{head} /home/u/.skenv/bin/sk-cron-run {tail}")
+    legacy = sched._signature(f"{head} /home/u/clawd/skos/scripts/sk-cron-run.sh {tail}")
+    assert installed is not None and installed == legacy
+    assert sched._signature(f"{head} /usr/bin/something-else {tail}") is None

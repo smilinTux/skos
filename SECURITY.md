@@ -72,9 +72,15 @@ every claim is scoped to a surface and cites its primitive.
 - **Path traversal or data-root escape.** `skos.paths` is the single joiner of data-root
   literals; a caller-controlled subdir escaping `$SK_DATA_ROOT`, or `skos path` resolving
   outside the tree.
-- **Privilege gain through the scheduler wrap.** `scripts/sk-cron-run.sh` and the
+- **Privilege gain through the scheduler wrap.** The `sk-cron-run` wrapper and the
   `timer_wrap` drop-ins run arbitrary commands with the operator's user rights. A defect
-  that lets an untrusted input choose or alter the wrapped command is in scope.
+  that lets an untrusted input choose or alter the wrapped command is in scope. The
+  wrapper itself ships with skcapstone as `~/.skenv/bin/sk-cron-run` (report wrapper
+  defects there); in this repo the surface is `timer_wrap`'s reconstruction of the
+  command, the manifest renderer, and the `exec`-only `scripts/sk-cron-run.sh` shim.
+  The shim adds no argument handling: it `exec`s the real wrapper with `"$@"`, and when
+  it cannot resolve one it exits 78 rather than reporting a job that never ran as a
+  success.
 - **Silent alteration of a scheduled command.** `timer_wrap` used to read `ExecStart`
   from the **base unit file only**, never the effective post-drop-in value, so wrapping a
   unit silently dropped flags that other drop-ins contributed. That reverted an executing
