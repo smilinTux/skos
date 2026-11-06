@@ -189,6 +189,21 @@ jobs:
     command: "$HOME/.skcapstone/scripts/yt-transcripts-backup.sh"
     log: "$HOME/.skcapstone/logs/yt-transcripts-backup.log"
 
+  - name: pubsub-retention
+    # Caps each $HOME/.skcapstone/pubsub/topics/<topic>/ to the newest N messages.
+    # Added 2026-11-06 after the topic store was found holding 287,542 message
+    # files (1.2 GB on disk, only ~166 MB of content: the rest was block overhead
+    # on a quarter-million tiny files). subscriptions.json held one entry,
+    # "test.*", with last_read null and message_count 0, so nothing had ever
+    # consumed a single message; skgateway.warn alone was 255,461 of them. The
+    # one-off cleanup reclaimed 1.17 GB and 281k inodes, and without this job it
+    # grows straight back. Runs at 02:15, before the 02:45 GFS state backup, so
+    # the daily tarball stops carrying the junk too. The topics are excluded from
+    # Syncthing, so this never propagates a delete to the fleet.
+    schedule: "15 2 * * *"
+    command: "/bin/bash $HOME/clawd/skos/scripts/pubsub-retention.sh"
+    log: "$HOME/.skcapstone/logs/pubsub-retention.log"
+
   - name: yt-transcripts-skhub-sync
     schedule: "20 4 * * *"
     command: "$HOME/.skcapstone/scripts/yt-transcripts-skhub-sync.sh"
