@@ -115,6 +115,39 @@ def wrap_command(runner: str, job: str, execstart: str) -> str:
     return f"{prefix}{runner} {job} {command}"
 
 
+def job_name(unit: str) -> str:
+    """The run-ledger job key for a unit.
+
+    A template unit (``foo@``) gets ``foo@%i`` so each instance keeps its own
+    ledger records and its own failure captures. Using the bare template name
+    would file every instance's runs under one key, which is the opposite of
+    what the ledger is for. The two template drop-ins written by hand on
+    noroc2027 both use ``@%i``; this is that convention, in code.
+    """
+    return f"{unit}%i" if unit.endswith("@") else unit
+
+
+def _already_wrapped_by_dropin(dropin: Path, runner: str) -> bool:
+    """True when this unit's own drop-in already carries a wrap.
+
+    Needed because a TEMPLATE unit's effective ExecStart cannot be read from
+    systemd (a template has no state to query), so the read falls back to the
+    base fragment and cannot see the wrap the drop-in already applies. Without
+    this check a template is re-planned on every run, and applying rewrites a
+    correct drop-in from the base fragment: card 47e32514's flag loss, and on
+    noroc2027 it would also have downgraded ``skmemory-sync@%i`` to
+    ``skmemory-sync@`` and merged every instance's ledger records into one key.
+    """
+    try:
+        text = dropin.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    records = [value.strip() for value in _EXECSTART.findall(text) if value.strip()]
+    if not records:
+        return False
+    return wrap_command(runner, "probe", records[-1]) == records[-1]
+
+
 def dropin_text(runner: str, job: str, execstart: str) -> str:
     """The full drop-in file contents for one unit."""
     return (
@@ -355,17 +388,22 @@ def plan_wraps(
                 raise ValueError(f"unit {unit} has no ExecStart")
             plan.append({"unit": unit, "problem": "no ExecStart in the service unit"})
             continue
-        wrapped = wrap_command(runner, unit, execstart)
+        dropin = unit_dir / f"{unit}.service.d" / DROPIN_NAME
+        if _already_wrapped_by_dropin(dropin, runner):
+            continue
+        job = job_name(unit)
+        wrapped = wrap_command(runner, job, execstart)
         if wrapped == execstart:
             continue  # already wrapped
         plan.append(
             {
                 "unit": unit,
+                "job": job,
                 "service": str(service),
                 "exec": execstart,
                 "exec_source": source,
                 "wrapped_exec": wrapped,
-                "dropin": str(unit_dir / f"{unit}.service.d" / DROPIN_NAME),
+                "dropin": str(dropin),
             }
         )
     return plan
@@ -395,7 +433,8 @@ def apply_wraps(
         path = Path(entry["dropin"])
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            dropin_text(runner, entry["unit"], entry["exec"]), encoding="utf-8"
+            dropin_text(runner, entry.get("job") or job_name(entry["unit"]), entry["exec"]),
+            encoding="utf-8",
         )
         written.append(str(path))
     return written
