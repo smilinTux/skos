@@ -41,7 +41,7 @@ import re
 import shutil
 import subprocess
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # Units that belong to someone else. Wrapping them is not ours to do, and a
 # package upgrade would drop the drop-in on the floor anyway.
@@ -83,6 +83,23 @@ def split_exec_prefix(execstart: str) -> tuple[str, str]:
     return execstart[:cut], execstart[cut:].lstrip()
 
 
+def _runner_key(token: str) -> str:
+    """The identity of a runner path for idempotency: basename, minus ``.sh``.
+
+    Compared by basename rather than by full path on purpose. The runner is
+    resolved from the live checkout (``$SKOS_REPO``), so the same wrapper has
+    more than one absolute path over a node's life: a relocated checkout, a git
+    worktree, a node that keeps skos somewhere other than ``~/clawd/skos``.
+    A path-exact check calls those a different wrapper and stacks a second
+    runner onto every already-wrapped unit, which is precisely the failure
+    idempotency exists to stop. The ``.sh`` suffix is dropped so an installed
+    ``sk-cron-run`` on PATH also recognises a ``sk-cron-run.sh`` wrap already
+    on disk, and does not double it.
+    """
+    name = PurePosixPath(token).name
+    return name[:-3] if name.endswith(".sh") else name
+
+
 def wrap_command(runner: str, job: str, execstart: str) -> str:
     """The wrapped ExecStart line. Idempotent: never wraps a wrapped command.
 
@@ -92,7 +109,8 @@ def wrap_command(runner: str, job: str, execstart: str) -> str:
     of ``plan_wraps``.
     """
     prefix, command = split_exec_prefix(execstart)
-    if command.startswith(runner):
+    first = command.split(maxsplit=1)[0] if command.strip() else ""
+    if first and _runner_key(first) == _runner_key(runner):
         return f"{prefix}{command}"
     return f"{prefix}{runner} {job} {command}"
 

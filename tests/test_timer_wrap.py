@@ -61,6 +61,36 @@ def test_an_already_wrapped_command_is_not_double_wrapped():
     assert wrap_command("/opt/sk-cron-run.sh", "job", cmd) == cmd
 
 
+def test_the_same_runner_at_a_different_path_is_not_double_wrapped():
+    """The runner is resolved from the live checkout, so its absolute path
+    moves: a relocated repo, a git worktree, a node that keeps skos somewhere
+    other than ~/clawd/skos. A path-exact check stacked a SECOND runner onto
+    every already-wrapped unit, which is the exact failure idempotency is for.
+    Caught by running the first `skos schedule wrap-timers` from a worktree,
+    where every wrapped timer on the node showed up as needing a wrap."""
+    cmd = "/home/u/clawd/skos/scripts/sk-cron-run.sh job /bin/true"
+    assert wrap_command("/elsewhere/skos/scripts/sk-cron-run.sh", "job", cmd) == cmd
+
+
+def test_an_installed_runner_recognises_a_dot_sh_wrap_already_on_disk():
+    """Installing the wrapper on PATH as `sk-cron-run` must not re-wrap the
+    drop-ins written earlier by `sk-cron-run.sh`."""
+    cmd = "/home/u/clawd/skos/scripts/sk-cron-run.sh job /bin/true"
+    assert wrap_command("/home/u/.skenv/bin/sk-cron-run", "job", cmd) == cmd
+
+
+def test_a_different_wrapper_is_still_wrapped():
+    """Basename matching must not swallow some other wrapper's command."""
+    cmd = "/opt/other-runner.sh job /bin/true"
+    assert wrap_command("/opt/sk-cron-run.sh", "job", cmd) == (
+        "/opt/sk-cron-run.sh job /opt/other-runner.sh job /bin/true"
+    )
+
+
+def test_an_empty_execstart_is_not_mistaken_for_a_wrap():
+    assert wrap_command("/opt/sk-cron-run.sh", "job", "   ") == "/opt/sk-cron-run.sh job "
+
+
 # ── the drop-in ───────────────────────────────────────────────────────────
 
 

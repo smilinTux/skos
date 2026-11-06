@@ -1189,6 +1189,94 @@ def schedule_install(
         typer.echo(new_text)
 
 
+@schedule_app.command("wrap-timers")
+def schedule_wrap_timers(
+    unit_dir: str = typer.Option(
+        "", "--unit-dir", help="systemd user unit dir (default: ~/.config/systemd/user)"
+    ),
+    runner: str = typer.Option(
+        "", "--runner", help="sk-cron-run path (default: the manifest's runner)"
+    ),
+    apply: bool = typer.Option(
+        False, "--apply", help="Write the drop-ins (default: dry-run preview)"
+    ),
+    unwrap: bool = typer.Option(
+        False, "--unwrap", help="Remove every drop-in this command wrote, then stop"
+    ),
+):
+    """Route systemd user timers through sk-cron-run, the way the crontab half
+    already is.
+
+    `skos schedule install` covers the crontab. Nothing covered the timer half:
+    `skos.timer_wrap` has done the work since card 95a3b69e but was never given
+    a command, so wrapping a timer meant calling the library by hand. It was
+    called by hand once and then not again, which is why timers added later
+    (the skfleet seats among them) run unwrapped and fail silently. This is
+    that missing command, so the timer half converges on re-run instead of
+    depending on somebody remembering.
+
+    Estate agnostic: the unit dir and the runner are the only inputs, both
+    resolved from this node. Nothing here is host, agent or estate specific.
+
+    Writes systemd drop-ins only, never an edit of a packaged unit, so the
+    whole change reverses with --unwrap. Default is a DRY RUN.
+    """
+    from pathlib import Path
+
+    from skos import schedule as _sched
+    from skos import timer_wrap as _tw
+
+    units = Path(unit_dir).expanduser() if unit_dir else Path.home() / ".config/systemd/user"
+    if not units.is_dir():
+        typer.echo(f"no systemd user unit dir: {units}", err=True)
+        raise typer.Exit(2)
+
+    if unwrap:
+        removed = _tw.unwrap(units)
+        for path in removed:
+            typer.echo(f"  removed {path}")
+        typer.echo(f"unwrapped {len(removed)} drop-in(s); run `systemctl --user daemon-reload`")
+        return
+
+    if runner:
+        runner_path = Path(runner).expanduser()
+    else:
+        runner_path = _sched.runner_path_in_repo(_load_schedule(""))
+    if not runner_path.exists():
+        typer.echo(f"runner not found: {runner_path}", err=True)
+        raise typer.Exit(2)
+
+    plan = _tw.plan_wraps(units, str(runner_path))
+    problems = [entry for entry in plan if entry.get("problem")]
+    wraps = [entry for entry in plan if not entry.get("problem")]
+
+    for entry in problems:
+        typer.echo(f"  PROBLEM {entry['unit']}: {entry['problem']}")
+    for entry in wraps:
+        typer.echo(f"  {entry['unit']}  (exec read from: {entry['exec_source']})")
+        typer.echo(f"      now: {entry['exec']}")
+        typer.echo(f"      new: {entry['wrapped_exec']}")
+
+    if not wraps:
+        typer.echo(f"clean: every wrappable timer in {units} already routes through the runner")
+        if problems:
+            raise typer.Exit(1)
+        return
+
+    if not apply:
+        typer.echo(
+            f"# DRY RUN - {len(wraps)} timer(s) would be wrapped (pass --apply to write)"
+        )
+        return
+
+    written = _tw.apply_wraps(units, str(runner_path), plan=plan)
+    for path in written:
+        typer.echo(f"  wrote {path}")
+    typer.echo(f"wrapped {len(written)} timer(s); run `systemctl --user daemon-reload`")
+    if problems:
+        raise typer.Exit(1)
+
+
 # ── cold-start bootstrap: empty-store guard + node sentinel ───────────────────
 coldstart_app = typer.Typer(
     help="Cold-start bootstrap: empty-store guard + node-initialized sentinel (restore before first run)"
