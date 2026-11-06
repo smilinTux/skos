@@ -5,6 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 
 ## [Unreleased]
 
+### Fixed
+- **`skbrain sync --commit` could not embed any page of two or more chunks on a
+  CPU host.** The 30s embed timeout is now 600s. Unchanged pages skip embedding,
+  which is why this stayed hidden until new canon arrived.
+
 ### Added
 - **`CmdbDriftBounded` now reports real evidence** instead of a hardcoded
   `Unknown` (card 5dcf04d1). It reads only checksum-verified reconcile artifacts,
