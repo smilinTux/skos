@@ -20,7 +20,9 @@ from skos.brain.ops.models import OpsChunk
 DEFAULT_BASE_URL = "http://localhost:11434"
 DEFAULT_MODEL = "mxbai-embed-large"
 DEFAULT_DIM = 1024
-DEFAULT_TIMEOUT = 30.0
+# One batched call per page, on CPU: noroc2027 (4 cores) measured 12-25s per chunk
+# under load, so 30s failed every page of two or more chunks.
+DEFAULT_TIMEOUT = 600.0
 
 
 class EmbedError(RuntimeError):

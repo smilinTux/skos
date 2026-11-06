@@ -23,5 +23,5 @@ Environment=PATH=%h/.skenv/bin:/usr/local/bin:/usr/bin:/bin
 Nice=10
 IOSchedulingClass=idle
 CPUQuota=50%
-TimeoutStartSec=20min
+TimeoutStartSec=2h
 ExecStart=%h/.skenv/bin/sk-cron-run skbrain-sync %h/.skenv/bin/skbrain sync --commit
