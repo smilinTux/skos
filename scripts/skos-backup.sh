@@ -2,7 +2,7 @@
 # skos-backup.sh — the scheduled skbackup entrypoint (card 17660fbe / deploy 3c).
 #
 # Thin wrapper the systemd timer (or a crontab line) calls. It runs the real
-# `skos backup run` INSIDE sk-cron-run.sh, so a failure is observable exactly
+# `skos backup run` INSIDE sk-cron-run, so a failure is observable exactly
 # like every other scheduled job: a run-ledger record, a GTD capture
 # (source=cron), and a realtime sk-alert. Nothing fails silently.
 #
@@ -24,4 +24,10 @@ args=(backup run --keep "$KEEP")
 [ -n "${SK_BACKUP_DEST:-}" ]   && args+=(--dest "$SK_BACKUP_DEST")
 [ -n "${SK_BACKUP_OFFBOX:-}" ] && args+=(--offbox "$SK_BACKUP_OFFBOX")
 
+# sk-cron-run ships with skcapstone as an installed command. Prefer it directly;
+# fall back to the in-repo shim so a node that has skos but not skcapstone still
+# runs (the shim then reports the absence loudly rather than running unwrapped).
+if [ -x "$HOME/.skenv/bin/sk-cron-run" ]; then
+  exec "$HOME/.skenv/bin/sk-cron-run" skos-backup "$SKOS_BIN" "${args[@]}"
+fi
 exec "$HERE/sk-cron-run.sh" skos-backup "$SKOS_BIN" "${args[@]}"

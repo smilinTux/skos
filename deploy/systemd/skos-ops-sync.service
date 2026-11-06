@@ -29,4 +29,4 @@ Nice=10
 IOSchedulingClass=idle
 CPUQuota=50%
 TimeoutStartSec=30min
-ExecStart=%h/clawd/skos/scripts/sk-cron-run.sh skops-sync %h/.skenv/bin/skos ops sync
+ExecStart=%h/.skenv/bin/sk-cron-run skops-sync %h/.skenv/bin/skos ops sync

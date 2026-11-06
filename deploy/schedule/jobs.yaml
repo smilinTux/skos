@@ -8,7 +8,7 @@
 # WHY CRONTAB (not systemd user timers):
 #   The live pipeline already runs as a user crontab, and this whole subsystem is
 #   the reference implementation of OBSERVABILITY_AND_SCHEDULING_STANDARD where every
-#   job is wrapped in scripts/sk-cron-run.sh (run-ledger + failure->GTD + sk-alert).
+#   job is wrapped in sk-cron-run (run-ledger + failure->GTD + sk-alert).
 #   Rendering one ordered crontab block keeps the tight 04:45->07:45 daily sequence
 #   legible in one place and lets `skos schedule install` reproduce the live schedule
 #   byte-for-byte (clean diff / exact cutover) instead of 24 systemd unit files.
@@ -31,7 +31,7 @@ defaults:
   # The sk-cron-run wrapper, which ships with skcapstone as an installed
   # command (pyproject script-files, beside sk-alert). Every job runs as:
   # <runner> <job-name> <command>. scripts/sk-cron-run.sh in this repo is a
-  # shim kept only so drop-ins and crontabs that still name it keep working.
+  # compatibility shim for anything that still names that path.
   runner: "$HOME/.skenv/bin/sk-cron-run"
   # PATH prepended to each line so cron finds the skenv console scripts + brew tools.
   path: "$HOME/.skenv/bin:$HOME/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin"
