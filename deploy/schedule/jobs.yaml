@@ -38,6 +38,11 @@ defaults:
   # Env var NAMES (not values) to prepend to each line. Values come from the env file.
   secret_env:
     - GOG_KEYRING_PASSWORD
+    # A PATH to a restic env file, not a credential. Declared here rather than
+    # as a per-job env in the manifest: sk-cron-run sources the protected file
+    # for every job, so this reaches skmem-pg-backup with no schema change and
+    # no value in the crontab. Same channel GTD_MAIL_ACCOUNTS already uses.
+    - SKMEM_BACKUP_OFFBOX
 
 jobs:
   - name: youtube-ingest
@@ -111,3 +116,63 @@ jobs:
     schedule: "40 6 * * *"
     command: "$HOME/clawd/scripts/fleet-service-unit-audit.sh"
     log: "$HOME/.skcapstone/logs/service-unit-audit.log"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Jobs that were live but undeclared until 2026-11-06.
+  #
+  # All eight ran under sk-cron-run from hand-written crontab lines OUTSIDE the
+  # managed block, so `skos schedule diff` reported `extra: 8` and exited 1 on
+  # every run. A drift gate that is permanently red cannot report drift: the one
+  # signal that would show a job going missing was already saturated. Declaring
+  # them is what makes the gate mean something again.
+  #
+  # Each entry reproduces the live schedule and command verbatim. Three of them
+  # (yt-priority, yt-transcripts-backup, yt-transcripts-skhub-sync) had NO log
+  # redirect at all, so their output went only to cron's mail; they now get a log
+  # file, which is additive. PATH is deliberately left to the shared default:
+  # the live lines carried four different PATHs, and the only one that differed
+  # materially was skmem-pg-backup's /usr/local/bin, which was checked and holds
+  # nothing it uses (restic, docker and pg_dump are all in /usr/bin).
+  # skmem-pg-backup's SKMEM_BACKUP_OFFBOX is declared in secret_env above, so it
+  # arrives through the protected env file rather than as a crontab value.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  - name: skmem-pg-backup
+    schedule: "15 3 * * *"
+    command: "/bin/bash $HOME/.skcapstone/scripts/skmem-pg-backup.sh"
+    log: "$HOME/.skcapstone/logs/skmem-pg-backup.log"
+
+  - name: swarm-replica-watch
+    schedule: "*/10 * * * *"
+    command: "/usr/bin/python3 $HOME/.local/lib/swarm-replica-watch/swarm_replica_watch.py --cluster skstack01 --manager skuser@norap1001:1713 --manager skuser@norap1011:1713 --manager skuser@norap1021:1713 --ssh /usr/bin/ssh --alert-cmd $HOME/.skenv/bin/sk-alert --state $HOME/.local/state/swarm-replica-watch/skstack01.json"
+    log: "$HOME/.skcapstone/logs/swarm-replica-watch.log"
+
+  - name: skbackup-check
+    schedule: "17 * * * *"
+    command: "$HOME/.local/lib/skbackup/skbackup-alert-check.sh norpv1200 $HOME/.skenv/bin/sk-alert"
+    log: "$HOME/.skcapstone/logs/skbackup-check.log"
+
+  - name: ollama-health-check
+    schedule: "*/5 * * * *"
+    command: "$HOME/.local/lib/ollama-vm-watch/ollama-health-check.sh"
+    log: "$HOME/.skcapstone/logs/ollama-health-check.log"
+
+  - name: yt-channel-watch
+    schedule: "15 7 * * *"
+    command: "$HOME/.local/lib/yt-channel-watch/yt_channel_watch.py --commit"
+    log: "$HOME/clawd/logs/yt-channel-watch.log"
+
+  - name: yt-priority
+    schedule: "30 1 * * *"
+    command: "$HOME/.local/lib/yt-channel-watch/run/priority-nightly.sh"
+    log: "$HOME/.skcapstone/logs/yt-priority.log"
+
+  - name: yt-transcripts-backup
+    schedule: "50 3 * * *"
+    command: "$HOME/.skcapstone/scripts/yt-transcripts-backup.sh"
+    log: "$HOME/.skcapstone/logs/yt-transcripts-backup.log"
+
+  - name: yt-transcripts-skhub-sync
+    schedule: "20 4 * * *"
+    command: "$HOME/.skcapstone/scripts/yt-transcripts-skhub-sync.sh"
+    log: "$HOME/.skcapstone/logs/yt-transcripts-skhub-sync.log"
