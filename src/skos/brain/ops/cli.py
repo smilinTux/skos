@@ -8,6 +8,7 @@ from pathlib import Path
 
 import typer
 
+from skos.brain.ops.cmdb_drift import compute_cmdb_drift
 from skos.brain.ops.doctor import checks_json, run_checks
 from skos.brain.ops.embed import MxbaiEmbedder
 from skos.brain.ops.kedb_coverage import compute_kedb_coverage
@@ -122,6 +123,7 @@ def operator_observe(
         }
 
     kedb = compute_kedb_coverage(canon_path)
+    cmdb = compute_cmdb_drift(canon_path)
 
     # Every condition dict is built here, keyed by name, then re-projected
     # through `_CONDITIONS` below -- the single ordered source of truth this
@@ -131,8 +133,8 @@ def operator_observe(
         "ProjectorFresh": condition("ProjectorFresh", ("skbrain:projector",)),
         "CmdbDriftBounded": {
             "type": "CmdbDriftBounded",
-            "status": "Unknown",
-            "reason": "CMDB evidence is owned by the CMDB adapter",
+            "status": cmdb.status,
+            "reason": cmdb.reason,
         },
         "KedbCanonCovered": {
             "type": "KedbCanonCovered",
