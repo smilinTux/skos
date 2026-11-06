@@ -6,6 +6,38 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 ## [Unreleased]
 
 ### Added
+- **`skos schedule wrap-timers`.** `skos schedule install` covered the crontab
+  half of OBSERVABILITY_AND_SCHEDULING_STANDARD; nothing covered the systemd
+  timer half. `skos.timer_wrap` has done that work correctly since card
+  `95a3b69e` but was never given a command, so wrapping a timer meant calling
+  the library by hand. That happened once, and every timer added afterwards ran
+  unwrapped: 8 enabled jobs on noroc2027, the three skfleet seats among them,
+  failing with nobody told while all 31 hand-made units were wrapped. Dry-run by
+  default, `--apply` to write, `--unwrap` to remove. Drop-ins only, never an
+  edit of a packaged unit. The unit dir and runner path are the only inputs, so
+  it is estate agnostic.
+
+### Fixed
+- **`timer_wrap` idempotency was path-exact and double-wrapped on any path
+  change.** `wrap_command` compared `command.startswith(runner)` against the
+  full runner path, but the runner resolves from the live checkout, so the same
+  wrapper has more than one absolute path over a node's life. Run from a git
+  worktree, all 31 already-wrapped units came back as needing a wrap with the
+  new runner stacked in front of the old, which is the stacked-runner failure
+  idempotency exists to prevent. Now compared by basename with `.sh` dropped,
+  which also makes a future move to an installed `sk-cron-run` on PATH a no-op
+  against the `sk-cron-run.sh` drop-ins already on disk.
+- **`timer_wrap` re-planned template units every run, destructively.** A
+  template has no state, so `systemctl show foo@.service` cannot answer its
+  effective `ExecStart`; the read falls back to the base fragment and cannot see
+  the wrap its own drop-in applies. So a template read as unwrapped forever, and
+  applying rewrote its correct drop-in FROM THE BASE FRAGMENT, discarding
+  drop-in-only flags (card `47e32514` again) and downgrading the job key
+  `skmemory-sync@%i` to `skmemory-sync@`, merging every instance's ledger
+  records under one name. `plan_wraps` now checks the very file the write would
+  overwrite, and `job_name()` gives a template the `@%i` key already in use.
+
+### Added
 - **SK Token Spend Period column** (this month, last month, older), so an Analytics
   report can show month to date and last month without date maths.
 

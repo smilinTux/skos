@@ -30,6 +30,7 @@ from skos.timer_wrap import (
     apply_wraps,
     dropin_text,
     is_wrappable,
+    job_name,
     parse_show_execstart,
     plan_wraps,
     split_exec_prefix,
@@ -59,6 +60,36 @@ def test_systemd_specifiers_survive_untouched():
 def test_an_already_wrapped_command_is_not_double_wrapped():
     cmd = "/opt/sk-cron-run.sh job /bin/true"
     assert wrap_command("/opt/sk-cron-run.sh", "job", cmd) == cmd
+
+
+def test_the_same_runner_at_a_different_path_is_not_double_wrapped():
+    """The runner is resolved from the live checkout, so its absolute path
+    moves: a relocated repo, a git worktree, a node that keeps skos somewhere
+    other than ~/clawd/skos. A path-exact check stacked a SECOND runner onto
+    every already-wrapped unit, which is the exact failure idempotency is for.
+    Caught by running the first `skos schedule wrap-timers` from a worktree,
+    where every wrapped timer on the node showed up as needing a wrap."""
+    cmd = "/home/u/clawd/skos/scripts/sk-cron-run.sh job /bin/true"
+    assert wrap_command("/elsewhere/skos/scripts/sk-cron-run.sh", "job", cmd) == cmd
+
+
+def test_an_installed_runner_recognises_a_dot_sh_wrap_already_on_disk():
+    """Installing the wrapper on PATH as `sk-cron-run` must not re-wrap the
+    drop-ins written earlier by `sk-cron-run.sh`."""
+    cmd = "/home/u/clawd/skos/scripts/sk-cron-run.sh job /bin/true"
+    assert wrap_command("/home/u/.skenv/bin/sk-cron-run", "job", cmd) == cmd
+
+
+def test_a_different_wrapper_is_still_wrapped():
+    """Basename matching must not swallow some other wrapper's command."""
+    cmd = "/opt/other-runner.sh job /bin/true"
+    assert wrap_command("/opt/sk-cron-run.sh", "job", cmd) == (
+        "/opt/sk-cron-run.sh job /opt/other-runner.sh job /bin/true"
+    )
+
+
+def test_an_empty_execstart_is_not_mistaken_for_a_wrap():
+    assert wrap_command("/opt/sk-cron-run.sh", "job", "   ") == "/opt/sk-cron-run.sh job "
 
 
 # ── the drop-in ───────────────────────────────────────────────────────────
@@ -115,6 +146,58 @@ def test_systemd_own_units_are_left_alone():
 
 
 # ── planning over a real unit tree ────────────────────────────────────────
+# ── template units ────────────────────────────────────────────────────────
+
+
+def test_a_template_unit_gets_a_per_instance_job_name():
+    """Filing every instance's runs under the bare template name defeats the
+    ledger. The two template drop-ins written by hand on noroc2027 both use
+    `@%i`."""
+    assert job_name("skmemory-sync@") == "skmemory-sync@%i"
+
+
+def test_a_plain_unit_keeps_its_own_name():
+    assert job_name("skfleet-link") == "skfleet-link"
+
+
+def test_a_template_already_wrapped_by_its_dropin_is_not_replanned(tmp_path):
+    """A template has no state, so systemd cannot answer its effective
+    ExecStart; the read falls back to the base fragment and cannot see the wrap
+    its own drop-in applies. Unguarded, the template is re-planned on every run
+    and applying rewrites a correct drop-in FROM THE BASE, dropping whatever
+    flags only a drop-in contributed (card 47e32514) and downgrading
+    `skmemory-sync@%i` to `skmemory-sync@`."""
+    _unit(tmp_path, "skmemory-sync@", "%h/.skenv/bin/skmemory sync --quiet")
+    dropin = tmp_path / "skmemory-sync@.service.d"
+    dropin.mkdir()
+    (dropin / "sk-cron-run.conf").write_text(
+        "[Service]\nExecStart=\n"
+        f"ExecStart={RUNNER} skmemory-sync@%i %h/.skenv/bin/skmemory sync --quiet --vector\n",
+        encoding="utf-8",
+    )
+    assert plan_wraps(tmp_path, RUNNER, effective=None) == []
+
+
+def test_a_dropin_that_is_not_a_wrap_does_not_count_as_wrapped(tmp_path):
+    """Only a wrap counts. A drop-in that sets some other ExecStart must still
+    be planned, or the guard becomes a way to miss units."""
+    _unit(tmp_path, "something", "/bin/true")
+    dropin = tmp_path / "something.service.d"
+    dropin.mkdir()
+    (dropin / "sk-cron-run.conf").write_text(
+        "[Service]\nExecStart=\nExecStart=/bin/false\n", encoding="utf-8"
+    )
+    plan = plan_wraps(tmp_path, RUNNER, effective=None)
+    assert [entry["unit"] for entry in plan] == ["something"]
+
+
+def test_applying_to_a_template_writes_the_per_instance_job(tmp_path):
+    _unit(tmp_path, "hermes-session-export@", "/usr/bin/env python3 %h/.local/bin/x")
+    apply_wraps(tmp_path, RUNNER, effective=None)
+    text = (tmp_path / "hermes-session-export@.service.d" / "sk-cron-run.conf").read_text()
+    assert f"ExecStart={RUNNER} hermes-session-export@%i /usr/bin/env python3" in text
+
+
 
 
 def _unit(tmp: Path, name: str, execstart: str) -> None:

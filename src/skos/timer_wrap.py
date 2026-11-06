@@ -41,7 +41,7 @@ import re
 import shutil
 import subprocess
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # Units that belong to someone else. Wrapping them is not ours to do, and a
 # package upgrade would drop the drop-in on the floor anyway.
@@ -83,6 +83,23 @@ def split_exec_prefix(execstart: str) -> tuple[str, str]:
     return execstart[:cut], execstart[cut:].lstrip()
 
 
+def _runner_key(token: str) -> str:
+    """The identity of a runner path for idempotency: basename, minus ``.sh``.
+
+    Compared by basename rather than by full path on purpose. The runner is
+    resolved from the live checkout (``$SKOS_REPO``), so the same wrapper has
+    more than one absolute path over a node's life: a relocated checkout, a git
+    worktree, a node that keeps skos somewhere other than ``~/clawd/skos``.
+    A path-exact check calls those a different wrapper and stacks a second
+    runner onto every already-wrapped unit, which is precisely the failure
+    idempotency exists to stop. The ``.sh`` suffix is dropped so an installed
+    ``sk-cron-run`` on PATH also recognises a ``sk-cron-run.sh`` wrap already
+    on disk, and does not double it.
+    """
+    name = PurePosixPath(token).name
+    return name[:-3] if name.endswith(".sh") else name
+
+
 def wrap_command(runner: str, job: str, execstart: str) -> str:
     """The wrapped ExecStart line. Idempotent: never wraps a wrapped command.
 
@@ -92,9 +109,43 @@ def wrap_command(runner: str, job: str, execstart: str) -> str:
     of ``plan_wraps``.
     """
     prefix, command = split_exec_prefix(execstart)
-    if command.startswith(runner):
+    first = command.split(maxsplit=1)[0] if command.strip() else ""
+    if first and _runner_key(first) == _runner_key(runner):
         return f"{prefix}{command}"
     return f"{prefix}{runner} {job} {command}"
+
+
+def job_name(unit: str) -> str:
+    """The run-ledger job key for a unit.
+
+    A template unit (``foo@``) gets ``foo@%i`` so each instance keeps its own
+    ledger records and its own failure captures. Using the bare template name
+    would file every instance's runs under one key, which is the opposite of
+    what the ledger is for. The two template drop-ins written by hand on
+    noroc2027 both use ``@%i``; this is that convention, in code.
+    """
+    return f"{unit}%i" if unit.endswith("@") else unit
+
+
+def _already_wrapped_by_dropin(dropin: Path, runner: str) -> bool:
+    """True when this unit's own drop-in already carries a wrap.
+
+    Needed because a TEMPLATE unit's effective ExecStart cannot be read from
+    systemd (a template has no state to query), so the read falls back to the
+    base fragment and cannot see the wrap the drop-in already applies. Without
+    this check a template is re-planned on every run, and applying rewrites a
+    correct drop-in from the base fragment: card 47e32514's flag loss, and on
+    noroc2027 it would also have downgraded ``skmemory-sync@%i`` to
+    ``skmemory-sync@`` and merged every instance's ledger records into one key.
+    """
+    try:
+        text = dropin.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    records = [value.strip() for value in _EXECSTART.findall(text) if value.strip()]
+    if not records:
+        return False
+    return wrap_command(runner, "probe", records[-1]) == records[-1]
 
 
 def dropin_text(runner: str, job: str, execstart: str) -> str:
@@ -337,17 +388,22 @@ def plan_wraps(
                 raise ValueError(f"unit {unit} has no ExecStart")
             plan.append({"unit": unit, "problem": "no ExecStart in the service unit"})
             continue
-        wrapped = wrap_command(runner, unit, execstart)
+        dropin = unit_dir / f"{unit}.service.d" / DROPIN_NAME
+        if _already_wrapped_by_dropin(dropin, runner):
+            continue
+        job = job_name(unit)
+        wrapped = wrap_command(runner, job, execstart)
         if wrapped == execstart:
             continue  # already wrapped
         plan.append(
             {
                 "unit": unit,
+                "job": job,
                 "service": str(service),
                 "exec": execstart,
                 "exec_source": source,
                 "wrapped_exec": wrapped,
-                "dropin": str(unit_dir / f"{unit}.service.d" / DROPIN_NAME),
+                "dropin": str(dropin),
             }
         )
     return plan
@@ -377,7 +433,8 @@ def apply_wraps(
         path = Path(entry["dropin"])
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            dropin_text(runner, entry["unit"], entry["exec"]), encoding="utf-8"
+            dropin_text(runner, entry.get("job") or job_name(entry["unit"]), entry["exec"]),
+            encoding="utf-8",
         )
         written.append(str(path))
     return written
