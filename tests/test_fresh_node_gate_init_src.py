@@ -28,9 +28,16 @@ def _repo(tmp_path: Path, schema_dir: str | None) -> Path:
 
 
 def _resolve(repo: Path, tmp_path: Path) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, SKMEMORY_REPO=str(repo), FRESH_NODE_GATE_RESOLVE_ONLY="1",
-               TMPDIR=str(tmp_path), EVIDENCE_DIR=str(tmp_path / "ev"))
-    return subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
+    env = dict(
+        os.environ,
+        SKMEMORY_REPO=str(repo),
+        FRESH_NODE_GATE_RESOLVE_ONLY="1",
+        TMPDIR=str(tmp_path),
+        EVIDENCE_DIR=str(tmp_path / "ev"),
+    )
+    return subprocess.run(
+        ["bash", str(SCRIPT)], env=env, capture_output=True, text=True
+    )
 
 
 def test_mounts_packaged_pg_dir(tmp_path):
