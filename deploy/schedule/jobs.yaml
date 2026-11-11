@@ -43,6 +43,9 @@ defaults:
     # for every job, so this reaches skmem-pg-backup with no schema change and
     # no value in the crontab. Same channel GTD_MAIL_ACCOUNTS already uses.
     - SKMEM_BACKUP_OFFBOX
+    # Same shape for the flat memory backup: the PATH to the restic env file it
+    # ships its off-site snapshot with (skmemory docs/BACKUP_SOP.md).
+    - MEMORY_BACKUP_RESTIC_ENV
 
 jobs:
   - name: youtube-ingest
@@ -146,9 +149,26 @@ jobs:
     # sk-cron-run so a failure fires sk-alert + a GTD item. Before that the dump
     # stayed on the box it protects and the script's own nightly warning reached
     # nobody, because this was the one backup job not wrapped.
+    # 2026-11-11 (Chef): skmem-pg is derived and would be recreated from the
+    # flat files, not restored, so it keeps ONE local dump replaced nightly
+    # and nothing off-site (SKMEM_BACKUP_OFFBOX=none in the env file). The flat
+    # source is what goes off-site, from memory-backup below. skmemory
+    # docs/BACKUP_SOP.md.
     schedule: "15 3 * * *"
-    command: "/bin/bash $HOME/.skcapstone/scripts/skmem-pg-backup.sh"
+    command: "env SKMEM_BACKUP_RETAIN=1 SKMEM_BACKUP_WEEKLY_RETAIN=0 SKMEM_BACKUP_MONTHLY_RETAIN=0 /bin/bash $HOME/.skcapstone/scripts/skmem-pg-backup.sh"
     log: "$HOME/.skcapstone/logs/skmem-pg-backup.log"
+
+  - name: memory-backup
+    # lumina's flat memory, the source of truth: GPG tarball kept 7 daily / 4
+    # weekly / 12 monthly, plus a restic snapshot to B2 with the same retention
+    # (MEMORY_BACKUP_RESTIC_ENV from the env file). Ran from a hand-written
+    # crontab line since 2026-07-12 and was never declared here, which is how
+    # it failed on 2026-11-10 (1 GB free) with nothing in skos knowing it
+    # existed. Runs after skmem-pg-backup: they compete for disk and IO, and
+    # this is the one that must not fail. skmemory docs/BACKUP_SOP.md.
+    schedule: "40 3 * * *"
+    command: "/bin/bash $HOME/.skcapstone/agents/lumina/scripts/memory-backup.sh"
+    log: "$HOME/.skcapstone/agents/lumina/logs/memory-backup-cron.log"
 
   - name: swarm-replica-watch
     # Prod swarm services below desired / restart loops -> sk-alert.
