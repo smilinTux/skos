@@ -269,3 +269,19 @@ def test_both_runner_spellings_sign_as_the_same_managed_job():
     legacy = sched._signature(f"{head} /home/u/clawd/skos/scripts/sk-cron-run.sh {tail}")
     assert installed is not None and installed == legacy
     assert sched._signature(f"{head} /usr/bin/something-else {tail}") is None
+
+
+def test_fleet_cronjobs_run_under_their_fleet_object_name():
+    """CMDB drift ties a fleet CronJob to a crontab entry through the
+    sk-cron-run job name, so each one installed here must use the fleet
+    object's own name (skcapstone deploy/fleet-objects/bulletproof). Until
+    2026-11-11 these three ran from hand-written lines outside the managed
+    block (or not at all), and drift reported them missing."""
+    jobs = {job.name: job for job in sched.load().jobs}
+    assert jobs["skmem-reconcile"].command.endswith("-m skmemory.reconcile --all"), (
+        "one agent-agnostic run, not a hand line per agent"
+    )
+    assert jobs["skcapstone-backup-gfs"].command == "$HOME/.skenv/bin/skcapstone-gfs-backup.sh"
+    assert jobs["capauth-custody-doctor"].command == "$HOME/.skenv/bin/capauth doctor custody --json"
+    for name in ("skmem-reconcile", "skcapstone-backup-gfs", "capauth-custody-doctor"):
+        assert jobs[name].log, f"{name} must log, not discard its output"

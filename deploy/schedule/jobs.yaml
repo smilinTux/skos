@@ -231,3 +231,37 @@ jobs:
     schedule: "20 4 * * *"
     command: "$HOME/.skcapstone/scripts/yt-transcripts-skhub-sync.sh"
     log: "$HOME/.skcapstone/logs/yt-transcripts-skhub-sync.log"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Fleet CronJobs (skcapstone deploy/fleet-objects/bulletproof), added
+  # 2026-11-11. CMDB drift matches a fleet CronJob to its crontab entry by the
+  # sk-cron-run job name, so each runs under its fleet object's own name. Before
+  # this, skmem-reconcile and the GFS backup ran from hand-written lines outside
+  # this block (one per agent, and the GFS one unwrapped with its output sent to
+  # /dev/null), and the custody doctor did not run at all.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  - name: skmem-reconcile
+    # flat JSON -> skmem-pg for every agent provisioned on the node (the skmem-pg
+    # HA path). --all replaces one hand line per agent: a new agent is covered
+    # without editing the crontab. Dry run on noroc2027 2026-11-11: 13 agents,
+    # all succeed; the 9 not previously listed add nothing to embed.
+    schedule: "15 4 * * *"
+    command: "$HOME/.skenv/bin/python3 -m skmemory.reconcile --all"
+    log: "$HOME/.skcapstone/logs/skmem-reconcile.log"
+
+  - name: skcapstone-backup-gfs
+    # GFS tarballs of ~/.skcapstone plus ~/.hermes config, optional off-site push
+    # (OFFSITE_DEST in ~/.skcapstone/config/backup.env). Installed by skcapstone
+    # (script-files), not copied by hand.
+    schedule: "45 2 * * *"
+    command: "$HOME/.skenv/bin/skcapstone-gfs-backup.sh"
+    log: "$HOME/.skcapstone/logs/skcapstone-gfs-backup.cron.log"
+
+  - name: capauth-custody-doctor
+    # Read-only key-custody preconditions (root revocation cert, keystore,
+    # restorable backup, signing key); exits nonzero on any FAIL, which
+    # sk-cron-run turns into an alert and a GTD item.
+    schedule: "50 5 * * *"
+    command: "$HOME/.skenv/bin/capauth doctor custody --json"
+    log: "$HOME/.skcapstone/logs/capauth-custody-doctor.log"
