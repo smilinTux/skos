@@ -538,15 +538,27 @@ def _tg_send_file(path: Path, caption: str = "") -> bool:
 log = logging.getLogger("skos.mail")
 
 QUARANTINE_DIR = "quarantine"
+HELD_DIR = "held"
 SCREEN_TIMEOUT_S = 300
+SK_ALERT = os.path.expanduser("~/.skenv/bin/sk-alert")
+
+
+def _alert(level: str, key: str, msg: str) -> None:
+    """Best-effort sk-alert (Talk/Telegram). Never raises: mail must not stop."""
+    try:
+        subprocess.run([SK_ALERT, "-l", level, "-k", key, "-t", "21600", msg],
+                       capture_output=True, text=True, timeout=60)
+    except Exception as exc:
+        log.warning("sk-alert failed (%s): %s", type(exc).__name__, msg)
 
 
 def _screen_attachment(path: Path) -> dict:
-    """Screen a downloaded attachment with sksecurity. Never raises, never blocks mail.
+    """Screen a downloaded attachment with sksecurity. Never raises.
 
     Returns {"verdict": "safe"|"suspicious"|"malicious"|"unscreened", "detail": str}.
     Order: import sksecurity.filescreen, then shell out to `sksecurity screen-file`,
-    then give up with "unscreened" (a missing screener must not stop mail).
+    then give up with "unscreened". The caller HOLDS an unscreened attachment
+    (fail safe): it is kept, not forwarded, and an alert goes out.
     """
     try:
         from sksecurity.filescreen import screen_file
@@ -564,30 +576,33 @@ def _screen_attachment(path: Path) -> dict:
         return {"verdict": rec["verdict"],
                 "detail": "; ".join(f.get("description", "") for f in rec.get("findings", []))[:300]}
     except Exception as exc:
-        log.warning("attachment screening unavailable (%s); proceeding unscreened: %s",
+        log.warning("attachment screening unavailable (%s); holding: %s",
                     type(exc).__name__, path.name)
         return {"verdict": "unscreened", "detail": "sksecurity unavailable"}
 
 
-def _quarantine(staged: Path, outdir: Path, name: str, info: dict) -> Path:
-    """Move a malicious download into outdir/quarantine (0700 dir, 0600 file) and record it.
+def _quarantine(staged: Path, outdir: Path, name: str, info: dict,
+                subdir: str = QUARANTINE_DIR, verdict: str = "malicious") -> Path:
+    """Move a download into outdir/<subdir> (0700 dir, 0600 file) and record it.
 
-    This is the mail pipeline's own download, never a user file.
+    Used for malicious files (quarantine/) and for files that could not be
+    screened (held/). This is the mail pipeline's own download, never a user
+    file, and the message itself is never touched.
     """
-    qdir = outdir / QUARANTINE_DIR
+    qdir = outdir / subdir
     qdir.mkdir(parents=True, exist_ok=True)
     os.chmod(qdir, 0o700)
     dest = qdir / name
     os.replace(staged, dest)
     os.chmod(dest, 0o600)
-    entry = {"ts": _now(), "file": str(dest), "name": name, "verdict": "malicious",
+    entry = {"ts": _now(), "file": str(dest), "name": name, "verdict": verdict,
              "detail": info.get("detail", ""), "thread_id": info.get("thread_id", ""),
              "message_id": info.get("message_id", "")}
-    ledger = qdir / "quarantine.jsonl"
+    ledger = qdir / f"{subdir}.jsonl"
     with open(ledger, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry) + "\n")
     os.chmod(ledger, 0o600)
-    log.warning("attachment quarantined: %s (%s)", dest, info.get("detail", ""))
+    log.warning("attachment %s: %s (%s)", subdir, dest, info.get("detail", ""))
     return dest
 
 
@@ -596,9 +611,12 @@ def cmd_attachments(ref: str, save: bool = False, to_dir: str | None = None,
     """List a thread's attachments; --save / --telegram download them.
 
     Downloads land in a staging dir and are screened by sksecurity before they
-    reach their final place or Telegram. Malicious: quarantined, not forwarded.
-    Suspicious: forwarded with a warning prefix. Returns one status dict per
-    attachment (status: listed | saved | quarantined).
+    reach their final place or Telegram. Malicious: quarantined, not forwarded,
+    crit alert. Not screenable (screener missing or erroring): HELD in held/,
+    not forwarded, one warn alert per thread (fail safe; the mail itself is
+    never dropped or modified). Suspicious: forwarded with a warning prefix.
+    Returns one status dict per attachment
+    (status: listed | saved | quarantined | held | download-failed).
     """
     r = _resolve(ref, account)
     acct, tid = r["account"], r["thread_id"]
@@ -611,6 +629,7 @@ def cmd_attachments(ref: str, save: bool = False, to_dir: str | None = None,
     outdir.mkdir(parents=True, exist_ok=True)
     seen_files = set()
     results: list[dict] = []
+    held: list[str] = []
     for mid, a in found:
         line = f"  {a['filename']}  ({a['mime']}, {a['size']}B)"
         res = {"filename": a["filename"], "thread_id": tid, "message_id": mid,
@@ -627,14 +646,27 @@ def cmd_attachments(ref: str, save: bool = False, to_dir: str | None = None,
                     print(line + "  [download failed]")
                     results.append(res)
                     continue
-                info = _screen_attachment(staged)
-                verdict = info["verdict"]
+                try:
+                    info = _screen_attachment(staged)
+                except Exception as exc:  # fail safe: an erroring screener holds
+                    info = {"verdict": "unscreened", "detail": f"screener error {type(exc).__name__}"}
+                verdict = info.get("verdict", "unscreened")
+                if verdict not in ("safe", "suspicious", "malicious"):
+                    verdict = "unscreened"
                 res["verdict"] = verdict
                 if verdict == "malicious":
                     info.update(thread_id=tid, message_id=mid)
                     dest = _quarantine(staged, outdir, name, info)
                     res.update(status="quarantined", path=str(dest), detail=info["detail"])
                     line += f"  -> {dest}  [QUARANTINED: malicious, not forwarded]"
+                    _alert("crit", f"gtd-mail-quarantine-{tid}",
+                           f"gtd-mail quarantined attachment {name} (thread {tid}): {info.get('detail', '')[:120]}")
+                elif verdict == "unscreened":
+                    info.update(thread_id=tid, message_id=mid)
+                    dest = _quarantine(staged, outdir, name, info, subdir=HELD_DIR, verdict="unscreened")
+                    res.update(status="held", path=str(dest), detail=info.get("detail", ""))
+                    line += f"  -> {dest}  [HELD: could not be screened, not forwarded]"
+                    held.append(name)
                 else:
                     dest = outdir / name
                     os.replace(staged, dest)
@@ -643,8 +675,6 @@ def cmd_attachments(ref: str, save: bool = False, to_dir: str | None = None,
                     if verdict == "suspicious":
                         line += "  [screen:suspicious]"
                         res["detail"] = info["detail"]
-                    elif verdict == "unscreened":
-                        line += "  [screen:unavailable]"
                     if telegram and a["filename"] not in seen_files:
                         prefix = "\u26a0\ufe0f SUSPICIOUS (screened): " if verdict == "suspicious" else ""
                         ok = _tg_send_file(dest, caption=f"{prefix}\U0001f4ce {a['filename']} (from: {th['sender'][:40]})")
@@ -655,6 +685,10 @@ def cmd_attachments(ref: str, save: bool = False, to_dir: str | None = None,
                 shutil.rmtree(stage, ignore_errors=True)
         print(line)
         results.append(res)
+    if held:
+        _alert("warn", f"gtd-mail-held-{tid}",
+               f"gtd-mail held {len(held)} attachment(s) on thread {tid}: screener unavailable. "
+               f"Not forwarded; files kept in {outdir / HELD_DIR}")
     if save or telegram:
         print(f"SAVED to {outdir}")
     return results

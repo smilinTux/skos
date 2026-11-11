@@ -21,6 +21,12 @@ class _Proc:
         self.stdout, self.returncode = stdout, returncode
 
 
+@pytest.fixture(autouse=True)
+def _no_real_alerts(monkeypatch):
+    """No test may deliver a real sk-alert."""
+    monkeypatch.setattr(mail, "SK_ALERT", "/bin/true")
+
+
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     """Fake thread with three attachments; fake gog download; fake Telegram."""
@@ -176,8 +182,41 @@ def test_screen_neither_available_proceeds_with_warning(tmp_path, monkeypatch, c
     assert "unavailable" in caplog.text
 
 
-def test_unscreened_still_saved_and_forwarded(env, monkeypatch):
-    monkeypatch.setattr(mail, "_screen_attachment", lambda p: {"verdict": "unscreened", "detail": ""})
+@pytest.fixture
+def alerts(monkeypatch):
+    got = []
+    monkeypatch.setattr(mail, "_alert", lambda level, key, msg: got.append((level, key, msg)))
+    return got
+
+
+def test_unscreened_is_held_not_forwarded_and_alerts(env, monkeypatch, alerts):
+    """Fail safe: no verdict means hold the attachment and alert, never forward."""
+    monkeypatch.setattr(mail, "_screen_attachment", lambda p: {"verdict": "unscreened", "detail": "x"})
     res = mail.cmd_attachments("T1", save=True, telegram=True, to_dir=str(env.out))
-    assert all(r["status"] == "saved" for r in res)
-    assert {n for n, _ in env.sent} == {"ok.pdf", "sus.doc", "bad.exe"}
+    assert len(res) == 3 and all(r["status"] == "held" for r in res)
+    assert env.sent == []
+    for r in res:
+        p = env.out / "held" / r["filename"]
+        assert p.exists() and stat.S_IMODE(p.stat().st_mode) == 0o600
+        assert not (env.out / r["filename"]).exists()
+    assert len(alerts) == 1 and alerts[0][0] == "warn" and "held" in alerts[0][2]
+
+
+def test_malicious_alerts(env, alerts):
+    mail.cmd_attachments("T1", save=True, telegram=True, to_dir=str(env.out))
+    assert any(a[0] == "crit" and "bad.exe" in a[2] for a in alerts)
+
+
+def test_screener_exception_is_held(env, monkeypatch, alerts):
+    def boom(p):
+        raise RuntimeError("screener crashed")
+    monkeypatch.setattr(mail, "_screen_attachment", boom)
+    res = mail.cmd_attachments("T1", save=True, telegram=True, to_dir=str(env.out))
+    assert all(r["status"] == "held" for r in res) and env.sent == []
+
+
+def test_alert_failure_never_raises(monkeypatch):
+    def run(*a, **k):
+        raise OSError("no sk-alert")
+    monkeypatch.setattr(mail.subprocess, "run", run)
+    mail._alert("warn", "k", "m")

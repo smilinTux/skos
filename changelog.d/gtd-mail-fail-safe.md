@@ -1,0 +1,1 @@
+- gtd-mail attachments now fail safe: an attachment that cannot be screened (sksecurity missing or erroring) is held in `held/` (0600), not forwarded, and one warn sk-alert goes out per thread. A malicious one is quarantined and raises a crit sk-alert. The message itself is never dropped or modified.
