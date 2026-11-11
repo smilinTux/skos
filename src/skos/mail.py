@@ -24,7 +24,9 @@ Subcommands:
             Mark the GTD item done AND archive+read its email thread (close loop).
   attachments <ref> [--save] [--telegram] [--to dir] [-a acct]
             List a thread's attachments; --save downloads; --telegram delivers
-            each file to Chef's DM ("show attachment").
+            each file to Chef's DM ("show attachment"). Each download is screened
+            by sksecurity first: malicious -> quarantine/ (0600), not forwarded;
+            suspicious -> forwarded with a warning; screener missing -> proceeds.
 
 This is Phase-0 of the skos email->unified-GTD integration (see
 docs/skos-email-gtd-architecture.md). It writes the SAME GTD store the ITIL
@@ -32,9 +34,12 @@ tools and manual captures use: ~/.skcapstone/coordination/gtd/*.json.
 """
 from __future__ import annotations
 import json
+import logging
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import datetime
 from pathlib import Path
 from skos import gtd_ingest
@@ -530,32 +535,129 @@ def _tg_send_file(path: Path, caption: str = "") -> bool:
     except Exception:
         return False
 
+log = logging.getLogger("skos.mail")
+
+QUARANTINE_DIR = "quarantine"
+SCREEN_TIMEOUT_S = 300
+
+
+def _screen_attachment(path: Path) -> dict:
+    """Screen a downloaded attachment with sksecurity. Never raises, never blocks mail.
+
+    Returns {"verdict": "safe"|"suspicious"|"malicious"|"unscreened", "detail": str}.
+    Order: import sksecurity.filescreen, then shell out to `sksecurity screen-file`,
+    then give up with "unscreened" (a missing screener must not stop mail).
+    """
+    try:
+        from sksecurity.filescreen import screen_file
+        v = screen_file(str(path))
+        return {"verdict": v.verdict.value,
+                "detail": "; ".join(f.description for f in v.findings)[:300]}
+    except ImportError:
+        pass
+    except Exception as exc:  # screener bug: try the CLI before giving up
+        log.warning("sksecurity.filescreen failed (%s); trying CLI", type(exc).__name__)
+    try:
+        proc = subprocess.run(["sksecurity", "screen-file", "--format", "json", str(path)],
+                              capture_output=True, text=True, timeout=SCREEN_TIMEOUT_S)
+        rec = json.loads(proc.stdout)["files"][0]
+        return {"verdict": rec["verdict"],
+                "detail": "; ".join(f.get("description", "") for f in rec.get("findings", []))[:300]}
+    except Exception as exc:
+        log.warning("attachment screening unavailable (%s); proceeding unscreened: %s",
+                    type(exc).__name__, path.name)
+        return {"verdict": "unscreened", "detail": "sksecurity unavailable"}
+
+
+def _quarantine(staged: Path, outdir: Path, name: str, info: dict) -> Path:
+    """Move a malicious download into outdir/quarantine (0700 dir, 0600 file) and record it.
+
+    This is the mail pipeline's own download, never a user file.
+    """
+    qdir = outdir / QUARANTINE_DIR
+    qdir.mkdir(parents=True, exist_ok=True)
+    os.chmod(qdir, 0o700)
+    dest = qdir / name
+    os.replace(staged, dest)
+    os.chmod(dest, 0o600)
+    entry = {"ts": _now(), "file": str(dest), "name": name, "verdict": "malicious",
+             "detail": info.get("detail", ""), "thread_id": info.get("thread_id", ""),
+             "message_id": info.get("message_id", "")}
+    ledger = qdir / "quarantine.jsonl"
+    with open(ledger, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry) + "\n")
+    os.chmod(ledger, 0o600)
+    log.warning("attachment quarantined: %s (%s)", dest, info.get("detail", ""))
+    return dest
+
+
 def cmd_attachments(ref: str, save: bool = False, to_dir: str | None = None,
-                    account: str | None = None, telegram: bool = False) -> None:
+                    account: str | None = None, telegram: bool = False) -> list[dict]:
+    """List a thread's attachments; --save / --telegram download them.
+
+    Downloads land in a staging dir and are screened by sksecurity before they
+    reach their final place or Telegram. Malicious: quarantined, not forwarded.
+    Suspicious: forwarded with a warning prefix. Returns one status dict per
+    attachment (status: listed | saved | quarantined).
+    """
     r = _resolve(ref, account)
     acct, tid = r["account"], r["thread_id"]
     th = _thread(acct, tid)
     found = [(m["id"], a) for m in th["messages"] for a in m["attachments"]]
     if not found:
         print("attachments: none on this thread")
-        return
+        return []
     outdir = Path(to_dir or f"/tmp/gtd-attach/{tid}")
     outdir.mkdir(parents=True, exist_ok=True)
     seen_files = set()
+    results: list[dict] = []
     for mid, a in found:
         line = f"  {a['filename']}  ({a['mime']}, {a['size']}B)"
+        res = {"filename": a["filename"], "thread_id": tid, "message_id": mid,
+               "status": "listed", "verdict": None, "path": None, "telegram": None}
         if save or telegram:
-            dest = outdir / a["filename"]
-            subprocess.run([GOG, "gmail", "attachment", mid, a["aid"], "-a", acct, "--out", str(dest)],
-                           capture_output=True, timeout=90)
-            line += f"  -> {dest}"
-            if telegram and a["filename"] not in seen_files:
-                ok = _tg_send_file(dest, caption=f"📎 {a['filename']} (from: {th['sender'][:40]})")
-                line += f"  [tg:{'sent' if ok else 'fail'}]"
-                seen_files.add(a["filename"])
+            name = Path(a["filename"]).name or "attachment"
+            stage = Path(tempfile.mkdtemp(prefix=".stage-", dir=outdir))
+            try:
+                staged = stage / name
+                subprocess.run([GOG, "gmail", "attachment", mid, a["aid"], "-a", acct, "--out", str(staged)],
+                               capture_output=True, timeout=90)
+                if not staged.exists():
+                    res["status"] = "download-failed"
+                    print(line + "  [download failed]")
+                    results.append(res)
+                    continue
+                info = _screen_attachment(staged)
+                verdict = info["verdict"]
+                res["verdict"] = verdict
+                if verdict == "malicious":
+                    info.update(thread_id=tid, message_id=mid)
+                    dest = _quarantine(staged, outdir, name, info)
+                    res.update(status="quarantined", path=str(dest), detail=info["detail"])
+                    line += f"  -> {dest}  [QUARANTINED: malicious, not forwarded]"
+                else:
+                    dest = outdir / name
+                    os.replace(staged, dest)
+                    res.update(status="saved", path=str(dest))
+                    line += f"  -> {dest}"
+                    if verdict == "suspicious":
+                        line += "  [screen:suspicious]"
+                        res["detail"] = info["detail"]
+                    elif verdict == "unscreened":
+                        line += "  [screen:unavailable]"
+                    if telegram and a["filename"] not in seen_files:
+                        prefix = "\u26a0\ufe0f SUSPICIOUS (screened): " if verdict == "suspicious" else ""
+                        ok = _tg_send_file(dest, caption=f"{prefix}\U0001f4ce {a['filename']} (from: {th['sender'][:40]})")
+                        res["telegram"] = bool(ok)
+                        line += f"  [tg:{'sent' if ok else 'fail'}]"
+                        seen_files.add(a["filename"])
+            finally:
+                shutil.rmtree(stage, ignore_errors=True)
         print(line)
+        results.append(res)
     if save or telegram:
         print(f"SAVED to {outdir}")
+    return results
 
 def main():
     gtd_ingest.gtd_dir()  # resolves + creates the unified store dir
