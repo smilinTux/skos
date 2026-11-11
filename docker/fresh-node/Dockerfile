@@ -51,7 +51,13 @@ WORKDIR /root/clawd/skcapstone-repos
 # Order matters for layer caching: skmemory changes less often than skos
 # during this harness's own development.
 COPY skmemory ./skmemory
+COPY skcapstone ./skcapstone
 COPY skos ./skos
+
+# The staged sources carry no .git; scripts/fresh-node-gate.sh passes each
+# package's newest tag so setuptools_scm has a version to build with.
+ARG SKMEMORY_VERSION=0.0.0
+ARG SKCAPSTONE_VERSION=0.0.0
 
 # Real installs, in the same order + editable style the fleet convention
 # uses (see ~/.claude/CLAUDE.md "SK* packages install into ~/.skenv/"): a
@@ -61,7 +67,10 @@ COPY skos ./skos
 # expect a real checkout at ~/clawd/skcapstone-repos/<package>, not a bare
 # PyPI wheel (the PyPI skmemory wheel does NOT ship deploy/, confirmed during
 # harness development -- see the runbook's follow-ups).
-RUN pip install --no-cache-dir -e ./skmemory \
+RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SKMEMORY="$SKMEMORY_VERSION" \
+        pip install --no-cache-dir -e ./skmemory \
+    && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SKCAPSTONE="$SKCAPSTONE_VERSION" \
+        pip install --no-cache-dir -e ./skcapstone \
     && pip install --no-cache-dir -e ./skos
 
 COPY entrypoint.sh /entrypoint.sh
