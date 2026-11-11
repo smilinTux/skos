@@ -1,0 +1,1 @@
+- SKBrain CmdbDriftBounded judges the newest verified artifact per scope: every scope named in `baselines/cmdb-drift.json` gates (unless `"gated": false`) against its own baseline and the 7h age limit, and other scopes are reported, not gated. Recording a network shadow no longer turns the local gate red.
