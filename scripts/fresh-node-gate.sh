@@ -68,11 +68,27 @@ cleanup() {
 }
 trap cleanup EXIT
 
-command -v docker >/dev/null 2>&1 || { echo "FATAL: docker not found on PATH" >&2; exit 2; }
-if [ ! -d "$SKMEMORY_REPO/deploy/skmem-pg" ]; then
-    echo "FATAL: SKMEMORY_REPO ($SKMEMORY_REPO) has no deploy/skmem-pg; set SKMEMORY_REPO to a skmemory checkout" >&2
+# The init wrapper stays in deploy/skmem-pg/initdb, but schema.sql and the
+# migrations moved into the wheel at skmemory/pg (skmemory #171). Mount the
+# directory that actually holds schema.sql, the same one docker-compose.yml
+# mounts, and keep the old layout working for older checkouts.
+INIT_SCRIPT="$SKMEMORY_REPO/deploy/skmem-pg/initdb/00-run-init.sh"
+INIT_SRC=""
+for candidate in "$SKMEMORY_REPO/skmemory/pg" "$SKMEMORY_REPO/deploy/skmem-pg"; do
+    if [ -f "$candidate/schema.sql" ]; then
+        INIT_SRC="$candidate"
+        break
+    fi
+done
+if [ ! -f "$INIT_SCRIPT" ] || [ -z "$INIT_SRC" ]; then
+    echo "FATAL: SKMEMORY_REPO ($SKMEMORY_REPO) has no skmem-pg init script or schema.sql; set SKMEMORY_REPO to a skmemory checkout" >&2
     exit 2
 fi
+if [ "${FRESH_NODE_GATE_RESOLVE_ONLY:-0}" = "1" ]; then
+    echo "$INIT_SRC"
+    exit 0
+fi
+command -v docker >/dev/null 2>&1 || { echo "FATAL: docker not found on PATH" >&2; exit 2; }
 if ! docker image inspect "$SKMEM_PG_IMAGE" >/dev/null 2>&1; then
     echo "FATAL: docker image $SKMEM_PG_IMAGE not found locally." >&2
     echo "       Build it once from the skmemory checkout:" >&2
@@ -110,8 +126,8 @@ docker run -d --rm --name "$PG_CONTAINER" \
     -e POSTGRES_DB=skmemory \
     -e POSTGRES_PASSWORD="$PG_PASSWORD" \
     -v "$REPO_ROOT/docker/fresh-node/00-pre-schemas.sql:/docker-entrypoint-initdb.d/00-pre-schemas.sql:ro" \
-    -v "$SKMEMORY_REPO/deploy/skmem-pg/initdb/00-run-init.sh:/docker-entrypoint-initdb.d/00-run-init.sh:ro" \
-    -v "$SKMEMORY_REPO/deploy/skmem-pg:/skmem-initdb-src:ro" \
+    -v "$INIT_SCRIPT:/docker-entrypoint-initdb.d/00-run-init.sh:ro" \
+    -v "$INIT_SRC:/skmem-initdb-src:ro" \
     "$SKMEM_PG_IMAGE" postgres -c shared_preload_libraries=pg_search,age >/dev/null \
     || { echo "FATAL: could not start ephemeral skmem-pg" >&2; exit 2; }
 
