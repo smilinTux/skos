@@ -52,6 +52,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 SKMEMORY_REPO="${SKMEMORY_REPO:-$HOME/clawd/skcapstone-repos/skmemory}"
+SKCAPSTONE_REPO="${SKCAPSTONE_REPO:-$HOME/clawd/skcapstone-repos/skcapstone}"
 SKMEM_PG_IMAGE="${SKMEM_PG_IMAGE:-smilintux/skmem-pg:pg17-bm25-age}"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 EVIDENCE_DIR="${EVIDENCE_DIR:-$REPO_ROOT/artifacts/fresh-node-gate/$RUN_ID}"
@@ -68,11 +69,27 @@ cleanup() {
 }
 trap cleanup EXIT
 
-command -v docker >/dev/null 2>&1 || { echo "FATAL: docker not found on PATH" >&2; exit 2; }
-if [ ! -d "$SKMEMORY_REPO/deploy/skmem-pg" ]; then
-    echo "FATAL: SKMEMORY_REPO ($SKMEMORY_REPO) has no deploy/skmem-pg; set SKMEMORY_REPO to a skmemory checkout" >&2
+# The init wrapper stays in deploy/skmem-pg/initdb, but schema.sql and the
+# migrations moved into the wheel at skmemory/pg (skmemory #171). Mount the
+# directory that actually holds schema.sql, the same one docker-compose.yml
+# mounts, and keep the old layout working for older checkouts.
+INIT_SCRIPT="$SKMEMORY_REPO/deploy/skmem-pg/initdb/00-run-init.sh"
+INIT_SRC=""
+for candidate in "$SKMEMORY_REPO/skmemory/pg" "$SKMEMORY_REPO/deploy/skmem-pg"; do
+    if [ -f "$candidate/schema.sql" ]; then
+        INIT_SRC="$candidate"
+        break
+    fi
+done
+if [ ! -f "$INIT_SCRIPT" ] || [ -z "$INIT_SRC" ]; then
+    echo "FATAL: SKMEMORY_REPO ($SKMEMORY_REPO) has no skmem-pg init script or schema.sql; set SKMEMORY_REPO to a skmemory checkout" >&2
     exit 2
 fi
+if [ "${FRESH_NODE_GATE_RESOLVE_ONLY:-0}" = "1" ]; then
+    echo "$INIT_SRC"
+    exit 0
+fi
+command -v docker >/dev/null 2>&1 || { echo "FATAL: docker not found on PATH" >&2; exit 2; }
 if ! docker image inspect "$SKMEM_PG_IMAGE" >/dev/null 2>&1; then
     echo "FATAL: docker image $SKMEM_PG_IMAGE not found locally." >&2
     echo "       Build it once from the skmemory checkout:" >&2
@@ -84,7 +101,7 @@ fi
 mkdir -p "$EVIDENCE_DIR"
 
 log "staging skos worktree + skmemory checkout (read-only source, nothing mutated)"
-mkdir -p "$STAGE_DIR/skos" "$STAGE_DIR/skmemory"
+mkdir -p "$STAGE_DIR/skos" "$STAGE_DIR/skmemory" "$STAGE_DIR/skcapstone"
 rsync -a --exclude='.git' --exclude='.venv' --exclude='__pycache__' --exclude='.pytest_cache' \
     --exclude='.ruff_cache' --exclude='artifacts' \
     "$REPO_ROOT/" "$STAGE_DIR/skos/" \
@@ -92,10 +109,26 @@ rsync -a --exclude='.git' --exclude='.venv' --exclude='__pycache__' --exclude='.
 rsync -a --exclude='.git' --exclude='.venv' --exclude='__pycache__' --exclude='.pytest_cache' \
     "$SKMEMORY_REPO/" "$STAGE_DIR/skmemory/" \
     || { echo "FATAL: staging skmemory failed" >&2; exit 2; }
+# skcapstone is a declared requirement of the skbrain pack (CmdbDriftBounded
+# and KedbCanonCovered read through it); without it both report Unknown.
+rsync -a --exclude='.git' --exclude='.venv' --exclude='__pycache__' --exclude='.pytest_cache' \
+    "$SKCAPSTONE_REPO/" "$STAGE_DIR/skcapstone/" \
+    || { echo "FATAL: staging skcapstone failed" >&2; exit 2; }
 cp "$REPO_ROOT/docker/fresh-node/entrypoint.sh" "$STAGE_DIR/entrypoint.sh"
 
 log "building the fresh-node image ($NODE_IMAGE_TAG)"
-docker build -q -t "$NODE_IMAGE_TAG" -f "$REPO_ROOT/docker/fresh-node/Dockerfile" "$STAGE_DIR" >&2 \
+# The staged copies have no .git, so setuptools_scm cannot derive a version
+# (a checkout only built before because a stale *.egg-info happened to carry
+# one). Pin each version from the source checkout's newest tag instead.
+scm_version() {
+    git -C "$1" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true
+}
+SKMEMORY_VERSION="$(scm_version "$SKMEMORY_REPO")"
+SKCAPSTONE_VERSION="$(scm_version "$SKCAPSTONE_REPO")"
+docker build -q -t "$NODE_IMAGE_TAG" -f "$REPO_ROOT/docker/fresh-node/Dockerfile" \
+    --build-arg "SKMEMORY_VERSION=${SKMEMORY_VERSION:-0.0.0}" \
+    --build-arg "SKCAPSTONE_VERSION=${SKCAPSTONE_VERSION:-0.0.0}" \
+    "$STAGE_DIR" >&2 \
     || { echo "FATAL: docker build failed" >&2; exit 2; }
 
 log "booting an ephemeral, fresh skmem-pg ($PG_CONTAINER, fresh volume, not the host's real skmem-pg)"
@@ -110,8 +143,8 @@ docker run -d --rm --name "$PG_CONTAINER" \
     -e POSTGRES_DB=skmemory \
     -e POSTGRES_PASSWORD="$PG_PASSWORD" \
     -v "$REPO_ROOT/docker/fresh-node/00-pre-schemas.sql:/docker-entrypoint-initdb.d/00-pre-schemas.sql:ro" \
-    -v "$SKMEMORY_REPO/deploy/skmem-pg/initdb/00-run-init.sh:/docker-entrypoint-initdb.d/00-run-init.sh:ro" \
-    -v "$SKMEMORY_REPO/deploy/skmem-pg:/skmem-initdb-src:ro" \
+    -v "$INIT_SCRIPT:/docker-entrypoint-initdb.d/00-run-init.sh:ro" \
+    -v "$INIT_SRC:/skmem-initdb-src:ro" \
     "$SKMEM_PG_IMAGE" postgres -c shared_preload_libraries=pg_search,age >/dev/null \
     || { echo "FATAL: could not start ephemeral skmem-pg" >&2; exit 2; }
 

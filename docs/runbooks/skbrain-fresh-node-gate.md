@@ -221,3 +221,17 @@ scaffolding, so they were fixed rather than deferred:
   gate to discover a reachable skmem-pg on its own; a real topology-registry
   probe would be a more faithful (if `--force`-free) NodeFacts source for a
   future iteration.
+
+## 2026-11-11 rerun (card f3cb6231)
+
+Every run since skmemory #171 (2026-11-08) failed in setup: that change moved
+`schema.sql` and the migrations into `skmemory/pg`, the gate still mounted
+`deploy/skmem-pg`, init exited, and the node saw "postgres never became
+ready". Fixed here, along with two more harness gaps: skcapstone (a declared
+pack requirement) is now installed in the node image, and package versions
+are pinned from git tags because the staged copies have no `.git`. With
+skmemory's `pg` commands no longer opening an agent memory store (skmemory
+fix/pg-cli-storeless), `sql_migration` and `db_roles` succeed again and
+`OpsSchemaPresent` reads True. The install still stops at `content_repo`
+(follow-up 1 above, unchanged), so the gate does not pass yet.
+
