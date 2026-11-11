@@ -38,13 +38,20 @@ def canon(tmp_path: Path) -> Path:
 
 
 def _compute(canon: Path, *artifacts: dict):
-    return compute_cmdb_drift(canon, artifact_loader=lambda _home: list(artifacts), now=NOW)
+    return compute_cmdb_drift(
+        canon, artifact_loader=lambda _home: list(artifacts), now=NOW
+    )
 
 
 def test_true_states_age_scope_and_counts(canon):
     result = _compute(canon, _artifact())
     assert result.status == "True"
-    for expected in ("age 3600s", "scope local", "declared_not_observed=19", "baseline 19"):
+    for expected in (
+        "age 3600s",
+        "scope local",
+        "declared_not_observed=19",
+        "baseline 19",
+    ):
         assert expected in result.reason
 
 
@@ -68,11 +75,13 @@ def test_unknown_when_reader_fails(canon):
     [
         (_artifact(age_hours=7.5), "older than"),
         (_artifact(completeness={"complete": False}), "incomplete"),
-        (_artifact(reconcile={"validation_failures": [{"reason": "x"}]}), "validation failures"),
+        (
+            _artifact(reconcile={"validation_failures": [{"reason": "x"}]}),
+            "validation failures",
+        ),
         (_artifact(drift={"count": 1, "by_severity": {"high": 1}}), "no drift summary"),
         ({k: v for k, v in _artifact().items() if k != "drift"}, "no drift summary"),
         (_artifact(dno=20), "above baseline 19"),
-        (_artifact(scope="network"), "no declared_not_observed for scope 'network'"),
     ],
 )
 def test_false_cases(canon, artifact, needle):
@@ -128,3 +137,90 @@ def test_missing_baseline_is_false(canon):
     result = _compute(canon, _artifact())
     assert result.status == "False"
     assert "missing" in result.reason
+
+
+# -- per scope: each named scope against its own baseline (2026-11-11) --------
+
+
+def _baseline_file(canon: Path, value: dict) -> None:
+    (canon / BASELINE_PATH).write_text(json.dumps(value))
+
+
+def test_a_newer_unnamed_scope_does_not_mask_the_gated_one(canon):
+    """Live case: recording network shadows flipped the local gate red because
+    the newest artifact of ANY scope was judged."""
+    result = _compute(
+        canon, _artifact(age_hours=2), _artifact(age_hours=0.1, scope="network")
+    )
+    assert result.status == "True"
+    assert "scope local" in result.reason
+    assert "scope network" in result.reason and "not gated" in result.reason
+
+
+def test_an_ungated_named_scope_is_reported_not_gating(canon):
+    _baseline_file(
+        canon,
+        {
+            "local": {"declared_not_observed": 19},
+            "network": {"declared_not_observed": 2, "gated": False},
+        },
+    )
+    network = _artifact(age_hours=30, dno=50, scope="network")
+    result = _compute(canon, _artifact(), network)
+    assert result.status == "True"
+    assert "network" in result.reason and "not gated" in result.reason
+    assert "above baseline 2" in result.reason
+
+
+def test_every_gated_scope_must_pass(canon):
+    _baseline_file(
+        canon,
+        {
+            "local": {"declared_not_observed": 19},
+            "network": {"declared_not_observed": 2},
+        },
+    )
+    good_network = _artifact(dno=2, scope="network")
+    assert _compute(canon, _artifact(), good_network).status == "True"
+    bad = _compute(canon, _artifact(), _artifact(dno=3, scope="network"))
+    assert bad.status == "False" and "scope network" in bad.reason
+    stale = _compute(canon, _artifact(), _artifact(dno=2, age_hours=8, scope="network"))
+    assert stale.status == "False" and "older than" in stale.reason
+
+
+def test_a_gated_scope_with_no_artifact_is_false_not_unknown(canon):
+    _baseline_file(
+        canon,
+        {
+            "local": {"declared_not_observed": 19},
+            "network": {"declared_not_observed": 2},
+        },
+    )
+    result = _compute(canon, _artifact())
+    assert result.status == "False"
+    assert "no verified artifact for scope 'network'" in result.reason
+
+
+def test_only_an_unnamed_scope_present_is_false(canon):
+    result = _compute(canon, _artifact(scope="network"))
+    assert result.status == "False"
+    assert "no verified artifact for scope 'local'" in result.reason
+
+
+def test_newest_is_chosen_per_scope(canon):
+    old_bad = _artifact(age_hours=5, dno=99)
+    assert _compute(canon, old_bad, _artifact(age_hours=1)).status == "True"
+
+
+@pytest.mark.parametrize(
+    "baseline",
+    [
+        {"local": {"declared_not_observed": 19, "gated": "no"}},
+        {"local": {"declared_not_observed": 19, "gated": False}},
+    ],
+)
+def test_no_valid_gated_scope_is_false(canon, baseline):
+    _baseline_file(canon, baseline)
+    result = _compute(canon, _artifact())
+    assert result.status == "False"
+    assert "baseline" in result.reason
