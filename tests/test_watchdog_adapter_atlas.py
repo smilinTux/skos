@@ -271,3 +271,11 @@ def test_apps_fall_back_to_object_and_oldest_compares_as_datetimes(fleet_root):
     ev = _firing_events(AtlasAdapter().collect(_window()))[0]
     assert ev.meta["parked_apps"] == ["node-ollama", "skchat"]
     assert ev.meta["parked_oldest"] == "2026-08-09T05:30:00+05:00"
+
+
+def test_mid_pass_frozen_event_does_not_claim_no_actuation(fleet_root):
+    _write_brief(fleet_root, MID_PASS_BRIEF)
+    frozen = [e for e in AtlasAdapter().collect(_window()) if e.kind == "AtlasFrozen"][0]
+    assert "no actuation" not in frozen.summary
+    assert "2 action(s) taken" in frozen.summary
+    assert frozen.meta["firing"] == 3

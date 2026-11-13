@@ -114,6 +114,13 @@ class AtlasAdapter(WatchdogSourceAdapter):
         if frozen:
             kind, severity = "AtlasFrozen", "notable"
             summary = "Atlas is FROZEN: standing down, no actuation."
+            sm = _FROZEN_STATE_RE.search(text)
+            if sm and sm.group("mid") == "true":
+                # A freeze that landed mid-pass: actions may already have run,
+                # so "no actuation" would contradict the AtlasFiring beside it.
+                firing = int(sm.group("firing"))
+                summary = ("Atlas is FROZEN (landed mid-pass): standing down, "
+                           f"{sm.group('acted')} action(s) taken before the freeze.")
         elif quiet:
             kind, severity = "AtlasQuiet", "info"
             summary = "Atlas: all quiet, nothing firing."
