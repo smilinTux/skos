@@ -237,23 +237,28 @@ Phase 1 adapters (all read-only, all local files or local CLIs):
 
 ### Atlas adapter: AtlasFrozen and AtlasFiring (added 2026-11-13, card f4f7e18d)
 
-While Atlas is frozen the brief reads `**FROZEN**` and its own `firing=` is
-always 0, because a frozen `skoperator run` does no observation. On its own that
-hides whether work is waiting. So while frozen the adapter emits `AtlasFiring`
-next to `AtlasFrozen`, read-only, from the parked decision store (the same
-`decisions/*.json` it already reads; no writes, no new privileges):
+A frozen pass normally observes nothing, so the brief's `firing=` is 0. Since
+skcapstone #1357 a freeze can land MID-pass, and then the brief says
+`**FROZEN** - landed mid-pass: ... N condition(s) still firing.` and carries
+`state: frozen=true mid_pass=true firing=N ... acted_before_freeze=M`. While
+frozen the adapter emits `AtlasFiring` next to `AtlasFrozen`, read-only (no
+writes, no new privileges), with two kinds of fact in `meta`:
 
-- `meta.status`: `Known` or `Unknown`. `Unknown` (severity notable) carries
-  `meta.reason` when the store is unreadable (a corrupt record, or the path is
-  not a directory). The count is never guessed.
-- `meta.count`: pending decisions. `meta.apps`: distinct `app` of their options
-  (`unknown` where an older record has none). `meta.oldest`: earliest `created`
-  (ISO 8601), or null.
-- Severity is `info` for 0 pending, `notable` otherwise.
-- Not emitted when unfrozen (the brief's own live `AtlasFiring` already covers
-  that, and a second one would double count) or when the brief says all quiet.
-- Limit: this counts parked decisions only. Conditions that would fire but were
-  never observed because of the freeze are not visible to it.
+- Live: `firing`, `mid_pass`, `acted_before_freeze`, parsed from the brief's
+  state line (banner fallback when absent). The summary leads with `firing`.
+  `firing` is what earns the kind name.
+- Parked backlog: `parked_backlog` (pending decisions in `decisions/*.json`),
+  `parked_apps` (distinct option `app`, else `object`, else `unknown`),
+  `parked_oldest` (earliest `created`, compared as parsed datetimes). This
+  comes from before the freeze and cannot change while frozen.
+- `status` is `Known`, or `Unknown` with `reason` when the decision store cannot
+  be read (listing error, corrupt or non-object record, path not a directory).
+  The backlog is never guessed. `AtlasFrozen` is emitted regardless.
+- Severity: info when firing and backlog are both 0, else notable.
+- Not emitted when unfrozen (the brief's own live `AtlasFiring` covers it) or
+  on an all-quiet brief.
+- Limit: conditions never observed because of a from-the-start freeze are not
+  visible. A stale brief tick is not checked here (follow-up).
 
 ### Change Management is a SOURCE, never a second notifier (added 2026-08-13)
 

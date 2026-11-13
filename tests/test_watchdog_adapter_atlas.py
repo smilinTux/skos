@@ -134,9 +134,11 @@ def test_frozen_with_no_pending_emits_firing_zero(fleet_root):
     assert [e.kind for e in events] == ["AtlasFrozen", "AtlasFiring"]
     ev = _firing_events(events)[0]
     assert ev.severity == "info"
-    assert ev.meta == {"status": "Known", "count": 0, "apps": [], "oldest": None,
-                       "source": "parked-decisions"}
-    assert "nothing pending" in ev.summary
+    assert ev.meta == {"status": "Known", "firing": 0, "mid_pass": False,
+                       "acted_before_freeze": 0, "parked_backlog": 0,
+                       "parked_apps": [], "parked_oldest": None,
+                       "source": "brief-state+parked-decisions"}
+    assert "0 condition(s) firing" in ev.summary
 
 
 def test_frozen_with_several_pending_reports_count_apps_and_oldest(fleet_root):
@@ -152,10 +154,10 @@ def test_frozen_with_several_pending_reports_count_apps_and_oldest(fleet_root):
     ev = _firing_events(AtlasAdapter().collect(_window()))[0]
     assert ev.severity == "notable"
     assert ev.meta["status"] == "Known"
-    assert ev.meta["count"] == 3
-    assert ev.meta["apps"] == ["skchat", "skmemory", "unknown"]
-    assert ev.meta["oldest"] == "2026-08-08T01:02:03Z"
-    assert "3 pending" in ev.summary and "2026-08-08T01:02:03Z" in ev.summary
+    assert ev.meta["parked_backlog"] == 3
+    assert ev.meta["parked_apps"] == ["skchat", "skmemory", "unknown"]
+    assert ev.meta["parked_oldest"] == "2026-08-08T01:02:03Z"
+    assert "backlog 3" in ev.summary and "2026-08-08T01:02:03Z" in ev.summary
 
 
 def test_unreadable_decision_source_is_unknown_with_reason(fleet_root):
@@ -165,7 +167,7 @@ def test_unreadable_decision_source_is_unknown_with_reason(fleet_root):
     ev = _firing_events(AtlasAdapter().collect(_window()))[0]
     assert ev.meta["status"] == "Unknown"
     assert ev.meta["reason"]
-    assert "count" not in ev.meta
+    assert "parked_backlog" not in ev.meta
     assert ev.severity == "notable"
     assert "Unknown" in ev.summary
 
@@ -195,3 +197,77 @@ def test_firing_event_writes_nothing(fleet_root):
     before = _snapshot(fleet_root)
     AtlasAdapter().collect(_window())
     assert _snapshot(fleet_root) == before
+
+
+MID_PASS_BRIEF = (
+    "**FROZEN** - landed mid-pass: 2 action(s) taken before the freeze, 1 refused, "
+    "3 condition(s) still firing.\n\n"
+    "state: frozen=true mid_pass=true firing=3 stale=0 acted_before_freeze=2\n")
+
+
+def test_mid_pass_freeze_reports_live_firing(fleet_root):
+    _write_brief(fleet_root, MID_PASS_BRIEF)
+    ev = _firing_events(AtlasAdapter().collect(_window()))[0]
+    assert ev.meta["firing"] == 3
+    assert ev.meta["mid_pass"] is True
+    assert ev.meta["acted_before_freeze"] == 2
+    assert ev.severity == "notable"
+    assert ev.summary.startswith("Atlas is frozen with 3 condition(s) firing")
+
+
+def test_mid_pass_without_state_line_falls_back_to_banner(fleet_root):
+    _write_brief(fleet_root, "**FROZEN** - landed mid-pass: 1 action(s) taken before "
+                 "the freeze, 0 refused, 4 condition(s) still firing.\n")
+    ev = _firing_events(AtlasAdapter().collect(_window()))[0]
+    assert ev.meta["firing"] == 4 and ev.meta["mid_pass"] is True
+
+
+def test_listing_error_is_unknown_and_frozen_event_survives(fleet_root, monkeypatch):
+    _write_brief(fleet_root, FROZEN_BRIEF)
+    _write_decision(fleet_root, "d1")
+
+    def boom(*a, **k):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr("skos.watchdog.adapters.atlas.os.scandir", boom)
+    events = AtlasAdapter().collect(_window())
+    assert [e.kind for e in events if e.kind != "AtlasPendingDecision"] == [
+        "AtlasFrozen", "AtlasFiring"]
+    ev = _firing_events(events)[0]
+    assert ev.meta["status"] == "Unknown" and "denied" in ev.meta["reason"]
+
+
+def test_exists_permission_error_is_unknown(fleet_root, monkeypatch):
+    _write_brief(fleet_root, FROZEN_BRIEF)
+    from pathlib import Path
+    real = Path.exists
+
+    def exists(self):
+        if self.name == "decisions":
+            raise PermissionError("denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    ev = _firing_events(AtlasAdapter().collect(_window()))[0]
+    assert ev.meta["status"] == "Unknown"
+
+
+def test_non_object_record_is_unknown(fleet_root):
+    _write_brief(fleet_root, FROZEN_BRIEF)
+    d = fleet_root / "decisions"
+    d.mkdir()
+    (d / "x.json").write_text("[1, 2]", encoding="utf-8")
+    ev = _firing_events(AtlasAdapter().collect(_window()))[0]
+    assert ev.meta["status"] == "Unknown" and "not an object" in ev.meta["reason"]
+
+
+def test_apps_fall_back_to_object_and_oldest_compares_as_datetimes(fleet_root):
+    _write_brief(fleet_root, FROZEN_BRIEF)
+    _write_decision(fleet_root, "a", created="2026-08-09T01:00:00+00:00",
+                    options=[{"action": "restart_service", "object": "node-ollama"}])
+    # Later as a string, earlier as an instant (offset +05:00).
+    _write_decision(fleet_root, "b", created="2026-08-09T05:30:00+05:00",
+                    options=[{"action": "x", "object": "skchat"}])
+    ev = _firing_events(AtlasAdapter().collect(_window()))[0]
+    assert ev.meta["parked_apps"] == ["node-ollama", "skchat"]
+    assert ev.meta["parked_oldest"] == "2026-08-09T05:30:00+05:00"

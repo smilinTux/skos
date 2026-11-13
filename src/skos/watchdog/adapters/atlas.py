@@ -37,10 +37,25 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..events import WatchdogEvent, WatchdogLink, source_unavailable
 from ..port import Window, WatchdogSourceAdapter, registry
+
+_FROZEN_STATE_RE = re.compile(
+    r"state: frozen=true mid_pass=(?P<mid>true|false) firing=(?P<firing>\d+) "
+    r"stale=\d+ acted_before_freeze=(?P<acted>\d+)")
+_STILL_FIRING_RE = re.compile(r"(\d+) condition\(s\) still firing")
+
+
+def _parse_ts(value: object) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
 
 _STATE_RE = re.compile(r"\*\*(\d+) firing\*\*, (\d+) stale\.")
 
@@ -120,22 +135,27 @@ class AtlasAdapter(WatchdogSourceAdapter):
             meta={"firing": firing, "stale": stale, "frozen": frozen},
         )]
         if frozen:
-            events.append(self._frozen_firing_event(window))
+            events.append(self._frozen_firing_event(window, text))
         return events
 
-    def _frozen_firing_event(self, window: Window) -> WatchdogEvent:
-        """AtlasFiring next to AtlasFrozen: what is waiting while Atlas stands down.
+    def _frozen_firing_event(self, window: Window, text: str) -> WatchdogEvent:
+        """AtlasFiring next to AtlasFrozen: what is waiting while Atlas is frozen.
 
-        A frozen ``skoperator run`` does no observation, so the brief's own
-        ``firing=`` is structurally 0 and says nothing. The one durable,
-        side-effect-free record of work waiting through a freeze is the parked
-        decision store (``decisions.park()``), which this adapter already reads.
-        count = pending decisions, apps = distinct ``app`` of their options
-        ("unknown" where an older record carries none), oldest = earliest
-        ``created``. Any read problem yields status Unknown with a reason,
-        never a guessed count. Emitted ONLY while frozen: when unfrozen the
-        brief itself emits AtlasFiring from live observation, and a second one
-        would double count.
+        Two independent facts, both read-only:
+
+        * LIVE firing, from the brief's machine line
+          ``state: frozen=true mid_pass=... firing=N ... acted_before_freeze=M``
+          (``brief_publish._state_line``). It is non-zero only when a freeze
+          landed MID-pass: a pass that starts frozen observes nothing, so it is
+          0 by construction. ``mid_pass`` and ``acted_before_freeze`` ride along.
+        * The parked backlog: pending decisions in ``decisions/*.json``.
+          ``parked_backlog`` (count), ``parked_apps``, ``parked_oldest``. This
+          comes from BEFORE the freeze and cannot change while frozen.
+
+        Any problem reading the decision store yields status Unknown with a
+        reason, never a guessed backlog. Emitted only while frozen: unfrozen,
+        the brief's own live AtlasFiring covers it and a second would double
+        count.
         """
         base = dict(
             ts=window.until, source=self.name, object="atlas-firing",
@@ -144,54 +164,78 @@ class AtlasAdapter(WatchdogSourceAdapter):
             ref=f"atlas:brief:AtlasFiring:frozen:{window.until[:10]}",
             kind="AtlasFiring",
         )
-        ddir = _decisions_dir()
-        reason = ""
-        pending: list[dict] = []
-        if ddir.exists() and not ddir.is_dir():
-            reason = f"decisions path {ddir} is not a directory"
-        elif ddir.is_dir():
-            try:
-                paths = sorted(ddir.glob("*.json"))
-            except OSError as exc:
-                paths = []
-                reason = f"cannot list decisions: {exc}"
-            for p in paths:
-                try:
-                    rec = json.loads(p.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-                    reason = f"unreadable decision {p.name}: {exc}"
-                    break
-                if not isinstance(rec, dict):
-                    reason = f"decision {p.name} is not an object"
-                    break
-                if rec.get("status") == "pending":
-                    pending.append(rec)
-        if reason:
+        sm = _FROZEN_STATE_RE.search(text)
+        if sm:
+            live = int(sm.group("firing"))
+            mid_pass = sm.group("mid") == "true"
+            acted = int(sm.group("acted"))
+        else:
+            fm = _STILL_FIRING_RE.search(text)
+            mid_pass = "landed mid-pass" in text
+            live = int(fm.group(1)) if fm else 0
+            acted = 0
+        reason, pending = self._read_pending()
+        live_meta = {"firing": live, "mid_pass": mid_pass, "acted_before_freeze": acted}
+        lead = f"Atlas is frozen with {live} condition(s) firing"
+        if mid_pass:
+            lead += f" (freeze landed mid-pass, {acted} action(s) taken before it)"
+        if reason is not None:
             return WatchdogEvent(
                 severity="notable",
-                summary=f"Atlas is frozen; whether conditions are firing is Unknown: {reason}",
-                meta={"status": "Unknown", "reason": reason, "source": "parked-decisions"},
+                summary=f"{lead}; parked backlog is Unknown: {reason}",
+                meta={"status": "Unknown", "reason": reason, **live_meta,
+                      "source": "brief-state+parked-decisions"},
                 **base)
         apps: set[str] = set()
+        dated: list[tuple[datetime, str]] = []
         for rec in pending:
             opts = [o for o in (rec.get("options") or []) if isinstance(o, dict)]
-            named = {str(o["app"]) for o in opts if o.get("app")}
+            named = {str(o.get("app") or o.get("object")) for o in opts
+                     if o.get("app") or o.get("object")}
             apps.update(named or {"unknown"})
-        created = [str(r["created"]) for r in pending if r.get("created")]
-        oldest = min(created) if created else None
-        count = len(pending)
-        meta = {"status": "Known", "count": count, "apps": sorted(apps),
-                "oldest": oldest, "source": "parked-decisions"}
-        if count == 0:
-            return WatchdogEvent(
-                severity="info",
-                summary="Atlas is frozen; nothing pending in the parked decision queue.",
-                meta=meta, **base)
+            c = rec.get("created")
+            dt = _parse_ts(c) if c else None
+            if dt is not None:
+                dated.append((dt, str(c)))
+        oldest = min(dated)[1] if dated else None
+        backlog = len(pending)
+        meta = {"status": "Known", **live_meta, "parked_backlog": backlog,
+                "parked_apps": sorted(apps), "parked_oldest": oldest,
+                "source": "brief-state+parked-decisions"}
+        summary = f"{lead}; parked backlog {backlog}"
+        if backlog:
+            summary += (f" across {', '.join(sorted(apps))}, oldest "
+                        f"{oldest or 'undated'} (from before the freeze)")
+        summary += "."
         return WatchdogEvent(
-            severity="notable",
-            summary=(f"Atlas is frozen with {count} pending decision(s) across "
-                     f"{', '.join(sorted(apps))}; oldest {oldest or 'undated'}."),
-            meta=meta, **base)
+            severity="notable" if (live or backlog) else "info",
+            summary=summary, meta=meta, **base)
+
+    @staticmethod
+    def _read_pending() -> tuple[str | None, list[dict]]:
+        """(reason, pending records). reason is None on a clean read."""
+        pending: list[dict] = []
+        try:
+            ddir = _decisions_dir()
+            if not ddir.exists():
+                return None, pending
+            if not ddir.is_dir():
+                return f"decisions path {ddir} is not a directory", pending
+            with os.scandir(ddir) as it:
+                names = sorted(e.name for e in it
+                               if e.name.endswith(".json") and e.is_file())
+            for name in names:
+                try:
+                    rec = json.loads((ddir / name).read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                    return f"unreadable decision {name}: {exc}", pending
+                if not isinstance(rec, dict):
+                    return f"decision {name} is not an object", pending
+                if rec.get("status") == "pending":
+                    pending.append(rec)
+        except OSError as exc:
+            return f"cannot read decisions: {exc}", pending
+        return None, pending
 
     def _decision_events(self, window: Window) -> list[WatchdogEvent]:
         ddir = _decisions_dir()
