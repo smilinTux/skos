@@ -111,7 +111,7 @@ class AtlasAdapter(WatchdogSourceAdapter):
             # guess a severity the brief itself did not state.
             return []
 
-        return [WatchdogEvent(
+        events = [WatchdogEvent(
             ts=window.until, source=self.name, kind=kind, object="atlas-brief",
             severity=severity, summary=summary,
             link=WatchdogLink(uri="skworld://skos/watchdog/atlas/brief",
@@ -119,6 +119,79 @@ class AtlasAdapter(WatchdogSourceAdapter):
             ref=f"atlas:brief:{kind}:{date}",
             meta={"firing": firing, "stale": stale, "frozen": frozen},
         )]
+        if frozen:
+            events.append(self._frozen_firing_event(window))
+        return events
+
+    def _frozen_firing_event(self, window: Window) -> WatchdogEvent:
+        """AtlasFiring next to AtlasFrozen: what is waiting while Atlas stands down.
+
+        A frozen ``skoperator run`` does no observation, so the brief's own
+        ``firing=`` is structurally 0 and says nothing. The one durable,
+        side-effect-free record of work waiting through a freeze is the parked
+        decision store (``decisions.park()``), which this adapter already reads.
+        count = pending decisions, apps = distinct ``app`` of their options
+        ("unknown" where an older record carries none), oldest = earliest
+        ``created``. Any read problem yields status Unknown with a reason,
+        never a guessed count. Emitted ONLY while frozen: when unfrozen the
+        brief itself emits AtlasFiring from live observation, and a second one
+        would double count.
+        """
+        base = dict(
+            ts=window.until, source=self.name, object="atlas-firing",
+            link=WatchdogLink(uri="skworld://skos/watchdog/atlas/brief",
+                               http="https://atlas.skworld.io/"),
+            ref=f"atlas:brief:AtlasFiring:frozen:{window.until[:10]}",
+            kind="AtlasFiring",
+        )
+        ddir = _decisions_dir()
+        reason = ""
+        pending: list[dict] = []
+        if ddir.exists() and not ddir.is_dir():
+            reason = f"decisions path {ddir} is not a directory"
+        elif ddir.is_dir():
+            try:
+                paths = sorted(ddir.glob("*.json"))
+            except OSError as exc:
+                paths = []
+                reason = f"cannot list decisions: {exc}"
+            for p in paths:
+                try:
+                    rec = json.loads(p.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                    reason = f"unreadable decision {p.name}: {exc}"
+                    break
+                if not isinstance(rec, dict):
+                    reason = f"decision {p.name} is not an object"
+                    break
+                if rec.get("status") == "pending":
+                    pending.append(rec)
+        if reason:
+            return WatchdogEvent(
+                severity="notable",
+                summary=f"Atlas is frozen; whether conditions are firing is Unknown: {reason}",
+                meta={"status": "Unknown", "reason": reason, "source": "parked-decisions"},
+                **base)
+        apps: set[str] = set()
+        for rec in pending:
+            opts = [o for o in (rec.get("options") or []) if isinstance(o, dict)]
+            named = {str(o["app"]) for o in opts if o.get("app")}
+            apps.update(named or {"unknown"})
+        created = [str(r["created"]) for r in pending if r.get("created")]
+        oldest = min(created) if created else None
+        count = len(pending)
+        meta = {"status": "Known", "count": count, "apps": sorted(apps),
+                "oldest": oldest, "source": "parked-decisions"}
+        if count == 0:
+            return WatchdogEvent(
+                severity="info",
+                summary="Atlas is frozen; nothing pending in the parked decision queue.",
+                meta=meta, **base)
+        return WatchdogEvent(
+            severity="notable",
+            summary=(f"Atlas is frozen with {count} pending decision(s) across "
+                     f"{', '.join(sorted(apps))}; oldest {oldest or 'undated'}."),
+            meta=meta, **base)
 
     def _decision_events(self, window: Window) -> list[WatchdogEvent]:
         ddir = _decisions_dir()

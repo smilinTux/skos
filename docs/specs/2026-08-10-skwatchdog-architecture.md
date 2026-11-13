@@ -235,6 +235,26 @@ Phase 1 adapters (all read-only, all local files or local CLIs):
 | `git` | `git log` / `gh pr list` across configured repos | merges to main, open PRs aging, CI failures |
 | `skingest` | skingest run summaries / timer state | ingest staleness (deploy-plan 3.1 surfaced here) |
 
+### Atlas adapter: AtlasFrozen and AtlasFiring (added 2026-11-13, card f4f7e18d)
+
+While Atlas is frozen the brief reads `**FROZEN**` and its own `firing=` is
+always 0, because a frozen `skoperator run` does no observation. On its own that
+hides whether work is waiting. So while frozen the adapter emits `AtlasFiring`
+next to `AtlasFrozen`, read-only, from the parked decision store (the same
+`decisions/*.json` it already reads; no writes, no new privileges):
+
+- `meta.status`: `Known` or `Unknown`. `Unknown` (severity notable) carries
+  `meta.reason` when the store is unreadable (a corrupt record, or the path is
+  not a directory). The count is never guessed.
+- `meta.count`: pending decisions. `meta.apps`: distinct `app` of their options
+  (`unknown` where an older record has none). `meta.oldest`: earliest `created`
+  (ISO 8601), or null.
+- Severity is `info` for 0 pending, `notable` otherwise.
+- Not emitted when unfrozen (the brief's own live `AtlasFiring` already covers
+  that, and a second one would double count) or when the brief says all quiet.
+- Limit: this counts parked decisions only. Conditions that would fire but were
+  never observed because of the freeze are not visible to it.
+
 ### Change Management is a SOURCE, never a second notifier (added 2026-08-13)
 
 A Change Management epic (coord epic `44f62183`) landed in parallel with the

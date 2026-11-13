@@ -113,3 +113,85 @@ def test_degrades_to_source_unavailable_when_brief_is_unreadable_binary(fleet_ro
     ev = events[0]
     assert ev.kind == "SourceUnavailable"
     assert ev.source == "atlas"
+
+
+# --- AtlasFiring alongside AtlasFrozen (card f4f7e18d) -----------------------
+
+FROZEN_BRIEF = "**FROZEN** - Atlas is standing down.\n"
+
+
+def _firing_events(events):
+    return [e for e in events if e.kind == "AtlasFiring"]
+
+
+def _snapshot(root):
+    return sorted((str(p.relative_to(root)), p.read_bytes()) for p in root.rglob("*") if p.is_file())
+
+
+def test_frozen_with_no_pending_emits_firing_zero(fleet_root):
+    _write_brief(fleet_root, FROZEN_BRIEF)
+    events = AtlasAdapter().collect(_window())
+    assert [e.kind for e in events] == ["AtlasFrozen", "AtlasFiring"]
+    ev = _firing_events(events)[0]
+    assert ev.severity == "info"
+    assert ev.meta == {"status": "Known", "count": 0, "apps": [], "oldest": None,
+                       "source": "parked-decisions"}
+    assert "nothing pending" in ev.summary
+
+
+def test_frozen_with_several_pending_reports_count_apps_and_oldest(fleet_root):
+    _write_brief(fleet_root, FROZEN_BRIEF)
+    _write_decision(fleet_root, "d1", created="2026-08-09T10:00:00Z",
+                    options=[{"action": "restart_service", "app": "skchat"}])
+    _write_decision(fleet_root, "d2", created="2026-08-08T01:02:03Z",
+                    options=[{"action": "restart_service", "app": "skmemory"},
+                             {"action": "noop", "app": "skchat"}])
+    _write_decision(fleet_root, "d3", created="2026-08-10T02:00:00Z",
+                    options=[{"action": "restart_service"}])
+    _write_decision(fleet_root, "d4", status="approved", created="2026-01-01T00:00:00Z")
+    ev = _firing_events(AtlasAdapter().collect(_window()))[0]
+    assert ev.severity == "notable"
+    assert ev.meta["status"] == "Known"
+    assert ev.meta["count"] == 3
+    assert ev.meta["apps"] == ["skchat", "skmemory", "unknown"]
+    assert ev.meta["oldest"] == "2026-08-08T01:02:03Z"
+    assert "3 pending" in ev.summary and "2026-08-08T01:02:03Z" in ev.summary
+
+
+def test_unreadable_decision_source_is_unknown_with_reason(fleet_root):
+    _write_brief(fleet_root, FROZEN_BRIEF)
+    _write_decision(fleet_root, "good")
+    (fleet_root / "decisions" / "bad.json").write_text("{not json", encoding="utf-8")
+    ev = _firing_events(AtlasAdapter().collect(_window()))[0]
+    assert ev.meta["status"] == "Unknown"
+    assert ev.meta["reason"]
+    assert "count" not in ev.meta
+    assert ev.severity == "notable"
+    assert "Unknown" in ev.summary
+
+
+def test_decisions_path_not_a_directory_is_unknown(fleet_root):
+    _write_brief(fleet_root, FROZEN_BRIEF)
+    (fleet_root / "decisions").write_text("x", encoding="utf-8")
+    ev = _firing_events(AtlasAdapter().collect(_window()))[0]
+    assert ev.meta["status"] == "Unknown"
+    assert "not a directory" in ev.meta["reason"]
+
+
+def test_not_frozen_adds_no_second_firing_event(fleet_root):
+    _write_brief(fleet_root, "**2 firing**, 1 stale.\n")
+    _write_decision(fleet_root, "d1")
+    assert len(_firing_events(AtlasAdapter().collect(_window()))) == 1
+
+
+def test_quiet_brief_emits_no_firing_event(fleet_root):
+    _write_brief(fleet_root, "**All quiet** - nothing firing.\n")
+    assert _firing_events(AtlasAdapter().collect(_window())) == []
+
+
+def test_firing_event_writes_nothing(fleet_root):
+    _write_brief(fleet_root, FROZEN_BRIEF)
+    _write_decision(fleet_root, "d1")
+    before = _snapshot(fleet_root)
+    AtlasAdapter().collect(_window())
+    assert _snapshot(fleet_root) == before

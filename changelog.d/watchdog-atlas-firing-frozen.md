@@ -1,0 +1,1 @@
+- The skos watchdog now emits `AtlasFiring` (status, count, apps, oldest) next to `AtlasFrozen` while ATLAS is frozen, read from the parked decision store, with status Unknown and a reason when that store is unreadable. Read-only.
