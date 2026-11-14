@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("skbrain", reason="skbrain (the brain extra) is not installed")
+
 from skos.packs.loader import load_manifest_dict
 
 MODULES = [
