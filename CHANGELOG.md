@@ -5,6 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · [SemVer](htt
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-14
+
+Release of main (38 commits since 0.3.0) so deployed nodes run a released build
+instead of an editable checkout. The entries below were unreleased until now.
+
 ### Fixed
 - **`skbrain sync --commit` could not write the ops graph.** AGE refuses a bound
   query with "a dollar-quoted string constant is expected". The Cypher text is now
