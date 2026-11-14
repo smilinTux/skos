@@ -235,6 +235,31 @@ Phase 1 adapters (all read-only, all local files or local CLIs):
 | `git` | `git log` / `gh pr list` across configured repos | merges to main, open PRs aging, CI failures |
 | `skingest` | skingest run summaries / timer state | ingest staleness (deploy-plan 3.1 surfaced here) |
 
+### Atlas adapter: AtlasFrozen and AtlasFiring (added 2026-11-13, card f4f7e18d)
+
+A frozen pass normally observes nothing, so the brief's `firing=` is 0. Since
+skcapstone #1357 a freeze can land MID-pass, and then the brief says
+`**FROZEN** - landed mid-pass: ... N condition(s) still firing.` and carries
+`state: frozen=true mid_pass=true firing=N ... acted_before_freeze=M`. While
+frozen the adapter emits `AtlasFiring` next to `AtlasFrozen`, read-only (no
+writes, no new privileges), with two kinds of fact in `meta`:
+
+- Live: `firing`, `mid_pass`, `acted_before_freeze`, parsed from the brief's
+  state line (banner fallback when absent). The summary leads with `firing`.
+  `firing` is what earns the kind name.
+- Parked backlog: `parked_backlog` (pending decisions in `decisions/*.json`),
+  `parked_apps` (distinct option `app`, else `object`, else `unknown`),
+  `parked_oldest` (earliest `created`, compared as parsed datetimes). This
+  comes from before the freeze and cannot change while frozen.
+- `status` is `Known`, or `Unknown` with `reason` when the decision store cannot
+  be read (listing error, corrupt or non-object record, path not a directory).
+  The backlog is never guessed. `AtlasFrozen` is emitted regardless.
+- Severity: info when firing and backlog are both 0, else notable.
+- Not emitted when unfrozen (the brief's own live `AtlasFiring` covers it) or
+  on an all-quiet brief.
+- Limit: conditions never observed because of a from-the-start freeze are not
+  visible. A stale brief tick is not checked here (follow-up).
+
 ### Change Management is a SOURCE, never a second notifier (added 2026-08-13)
 
 A Change Management epic (coord epic `44f62183`) landed in parallel with the
