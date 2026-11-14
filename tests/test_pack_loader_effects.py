@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from skos.packs import loader
-from skos.packs.effects import DONE, DefaultEffects, resolve_package_path
+from skos.packs.effects import DONE, FAILED, DefaultEffects, resolve_package_path
 
 
 class TestLoader:
@@ -101,6 +101,36 @@ class TestEffectsDryRun:
         r = fx.content_repo({"name": "skbrain-ops", "dest": "/tmp/x"}, dry_run=True)
         assert r.status == DONE
         assert "would clone" in r.note
+
+    def test_content_repo_dest_env_overrides_dest(self, monkeypatch, tmp_path):
+        canon = tmp_path / "canon"
+        canon.mkdir()
+        (canon / "skbrain.yaml").write_text("schema: skbrain.instance.v1\n", encoding="utf-8")
+        monkeypatch.setenv("SKBRAIN_CANON", str(canon))
+        fx = DefaultEffects()
+        r = fx.content_repo(
+            {
+                "name": "skbrain-ops",
+                "dest": str(tmp_path / "unused"),
+                "dest_env": "SKBRAIN_CANON",
+                "marker": "skbrain.yaml",
+                "syncthing": False,
+            },
+            dry_run=False,
+        )
+        assert r.status == DONE
+        assert str(canon) in r.note
+        assert "Syncthing" not in r.note
+
+    def test_content_repo_marker_missing_fails(self, monkeypatch, tmp_path):
+        canon = tmp_path / "canon"
+        canon.mkdir()
+        monkeypatch.setenv("SKBRAIN_CANON", str(canon))
+        r = DefaultEffects().content_repo(
+            {"name": "x", "dest": "/nonexistent", "dest_env": "SKBRAIN_CANON", "marker": "skbrain.yaml"},
+            dry_run=False,
+        )
+        assert r.status == FAILED
 
     def test_fleet_objects_dry_run(self):
         fx = DefaultEffects(fleet_objects_dir=Path("/tmp/fleet"))

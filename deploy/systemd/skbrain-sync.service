@@ -1,4 +1,4 @@
-# skbrain-sync.service: project skbrain-ops canon into the skmem-pg ops schema,
+# skbrain-sync.service: project the estate canon into the skmem-pg ops schema,
 # which is what keeps the ProjectorFresh condition honest (7200s bound).
 #
 # The pack's fleet/cronjob-skbrain-sync.json is only a declaration: nothing runs
@@ -15,7 +15,7 @@
 #   systemctl --user enable --now skbrain-sync.timer
 
 [Unit]
-Description=Project skbrain-ops canon into the ops schema
+Description=Project the estate canon into the ops schema
 
 [Service]
 Type=oneshot
@@ -24,4 +24,5 @@ Nice=10
 IOSchedulingClass=idle
 CPUQuota=50%
 TimeoutStartSec=2h
+ExecStartPre=/usr/bin/git -C ${SKBRAIN_CANON} pull --ff-only -q
 ExecStart=%h/.skenv/bin/sk-cron-run skbrain-sync %h/.skenv/bin/skbrain sync --commit

@@ -1,6 +1,6 @@
 # See skbrain-sync.service.
 [Unit]
-Description=Project skbrain-ops canon every 30 minutes
+Description=Project the estate canon every 30 minutes
 
 [Timer]
 OnCalendar=*:11/30

@@ -76,9 +76,11 @@
         "kind": "content_repo",
         "name": "skbrain-ops",
         "dest": "~/clawd/skbrain-ops",
+        "remote_env": "SKBRAIN_CANON_REMOTE",
+        "dest_env": "SKBRAIN_CANON",
         "private": true,
-        "marker": "CLAUDE.md",
-        "syncthing": true
+        "marker": "skbrain.yaml",
+        "syncthing": false
       },
       {
         "kind": "seed",
