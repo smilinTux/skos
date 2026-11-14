@@ -100,11 +100,12 @@ node with genuinely no prior skbrain state.
   registry, which is out of scope for this harness. Every step's *side
   effect* still runs for real; only the pre-flight capability assertion is
   asserted rather than discovered.
-- **Network egress / private repo credentials.** The `content_repo` install
-  step (cloning the private `skbrain-ops` content repo) has no credentials
-  available in this sandbox and is expected to fail here regardless of
-  isolation quality -- see Follow-ups, this also surfaced a real gap in the
-  pack manifest itself.
+- **Network egress / private repo credentials.** A real node clones its
+  PRIVATE estate canon (`skbrain-ops-<estate>` on skgit) from
+  `SKBRAIN_CANON_REMOTE`. The gate image sets `SKBRAIN_CANON_REMOTE` to the
+  PUBLIC example canon `smilinTux/skbrain-ops-example` (estate `example`), so
+  `content_repo` runs for real with no credentials and the private canon is
+  never needed in CI (framework design 2026-11-14, section 5.2 item 9).
 - **Fleet activation.** `fleet_objects` and `emit_manifest` steps, if
   reached, write files into the container's own fake `~/.skcapstone/fleet/`
   and `~/.skcapstone/shell/modules/` -- never the host's real ATLAS
@@ -199,13 +200,11 @@ scaffolding, so they were fixed rather than deferred:
 
 ## Follow-ups identified, deliberately not done here
 
-- `content_repo` step in `skworld.module.json` has no `remotes`; either add
-  one (if `skbrain-ops` has a real remote) or change the step to rely purely
-  on the documented Syncthing sync path and skip cloning when no remote is
-  configured. Not done here: touching the pack manifest's install steps is
-  scope creep for a test-harness card, and the manifest's `content_repo`
-  step is data, not code -- but the right owner should decide the intended
-  behavior.
+- ~~`content_repo` step in `skworld.module.json` has no `remotes`.~~ Done
+  2026-11-14: the step reads `remote_env: SKBRAIN_CANON_REMOTE` and
+  `dest_env: SKBRAIN_CANON` from node config, uses `marker: skbrain.yaml`,
+  `syncthing: false`, and fails closed with a clear message when no remote is
+  configured. The gate image points it at the public example canon.
 - `CmdbDriftBounded` / `KedbCanonCovered` hardcoded `"Unknown"` in
   `src/skos/brain/ops/cli.py`. Explicitly out of scope: another agent is
   concurrently editing that exact file on `feat/skbrain-kedb-and-contract`,

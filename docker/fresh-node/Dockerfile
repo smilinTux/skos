@@ -18,9 +18,9 @@
 #
 # What this does NOT prove: bare-metal-from-ISO provenance (still Debian
 # userland inside a container, sharing the host kernel), network egress to
-# the private skbrain-ops content repo (no credentials are available in this
-# sandbox, so the content_repo install step is EXPECTED to fail here -- see
-# the runbook), or systemd/cron wiring (fleet objects are written as files,
+# a private estate canon (the gate clones the PUBLIC example canon
+# smilinTux/skbrain-ops-example instead, so content_repo runs for real with
+# no credentials), or systemd/cron wiring (fleet objects are written as files,
 # never activated). See docs/runbooks/skbrain-fresh-node-gate.md.
 FROM python:3.12-slim-bookworm
 
@@ -43,6 +43,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 ENV HOME=/root \
+    SKBRAIN_CANON_REMOTE=https://github.com/smilinTux/skbrain-ops-example.git \
+    SKBRAIN_CANON=/root/clawd/skbrain-ops-example \
+    SKBRAIN_ESTATE=example \
     PYTHONUNBUFFERED=1 \
     PIP_ROOT_USER_ACTION=ignore
 
