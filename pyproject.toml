@@ -35,6 +35,7 @@ dependencies = [
     "requests>=2.32",
     "psycopg[binary]>=3.2",
     "packaging>=23",
+    "skbrain>=1.0.1",
 ]
 
 [project.scripts]
@@ -55,11 +56,9 @@ dev = ["pytest>=8", "pytest-mock>=3.14", "pytest-cov>=5", "fastapi>=0.110", "htt
 # skharness-dependent tests self-skip at collection when skharness is absent
 # (see tests/conftest.py).
 autopilot = ["skharness>=0.3.0"]
-# skbrain ops-canon engine. skos.brain.ops is a thin re-export shim over the
-# public skbrain framework (extraction design 2026-11-14). Optional for the same
-# reason as autopilot: skbrain is not on PyPI yet, and a base `pip install skos`
-# must resolve from PyPI alone. Nodes that run the skbrain pack install skbrain
-# from its release tag (git+https://github.com/smilinTux/skbrain.git@skbrain-vX.Y.Z).
+# skbrain is now a core dependency (on PyPI since 1.0.1). The `brain` extra
+# stays as a no-op alias so existing `pip install skos-sovereign[brain]` lines
+# keep working.
 brain = ["skbrain>=1.0.1"]
 # Optional READ-ONLY web surface (`skos serve`): serves the live SKWorld module
 # manifest + a Grade B status pane the umbrella shell embeds. Kept optional so

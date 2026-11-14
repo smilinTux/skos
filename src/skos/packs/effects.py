@@ -317,7 +317,10 @@ class DefaultEffects:
             return StepResult(DONE, note)
         if not shutil.which("git"):
             return StepResult(PENDING, "git not available; cannot clone content repo yet")
-        clone_url = remotes[0] if remotes else name
+        if not remotes:
+            hint = f"set {params.get('remote_env')} in node config" if params.get("remote_env") else "declare a remote"
+            return StepResult(FAILED, f"no remote for {name}: {hint} (an estate canon has no default remote)")
+        clone_url = remotes[0]
         rc, out = _run(["git", "clone", clone_url, str(dest)])
         if rc != 0:
             return StepResult(FAILED, f"clone failed: {out.strip()[:300]}")

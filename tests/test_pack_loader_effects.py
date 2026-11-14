@@ -132,6 +132,17 @@ class TestEffectsDryRun:
         )
         assert r.status == FAILED
 
+    def test_content_repo_without_remote_fails_closed(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("SKBRAIN_CANON_REMOTE", raising=False)
+        monkeypatch.setattr("shutil.which", lambda _c: "/usr/bin/git")
+        r = DefaultEffects().content_repo(
+            {"name": "canon", "dest": str(tmp_path / "absent"), "remote_env": "SKBRAIN_CANON_REMOTE"},
+            dry_run=False,
+        )
+        assert r.status == FAILED
+        assert "SKBRAIN_CANON_REMOTE" in r.note
+        assert not (tmp_path / "absent").exists()
+
     def test_fleet_objects_dry_run(self):
         fx = DefaultEffects(fleet_objects_dir=Path("/tmp/fleet"))
         r = fx.fleet_objects({"objects": ["a.json", "b.json"]}, Path("."), dry_run=True)
