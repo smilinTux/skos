@@ -295,6 +295,14 @@ class DefaultEffects:
         dest = Path(str(params.get("dest", ""))).expanduser()
         marker = params.get("marker")
         remotes = list(params.get("remotes", []))
+        # Node config wins over the manifest default: an estate canon has no
+        # universal location or remote, so the node declares them in env.
+        dest_env = os.environ.get(str(params.get("dest_env") or ""), "").strip()
+        if dest_env:
+            dest = Path(dest_env).expanduser()
+        remote_env = os.environ.get(str(params.get("remote_env") or ""), "").strip()
+        if remote_env:
+            remotes.insert(0, remote_env)
         syncthing = bool(params.get("syncthing"))
         if dry_run:
             return StepResult(DONE, f"would clone {name} to {dest} if absent")
