@@ -3,7 +3,7 @@
 # prohibited-names list). The import package is still `skos` (unchanged), so
 # `pip install skos-sovereign` then `import skos`. Mirrors `skchat-sovereign`.
 name = "skos-sovereign"
-version = "0.3.0"
+version = "0.3.1"
 description = "skos: sovereign agent OS, filesystem & packaging foundation"
 requires-python = ">=3.12"
 # Fleet-wide licence decision 2026-08-14 (Chef): GPL-3.0-or-later for every sk*
