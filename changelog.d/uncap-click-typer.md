@@ -1,0 +1,1 @@
+- Dependencies: `typer>=0.16` and `click>=8.1`, no upper caps (0.3.2). The old `typer<0.13` / `click<8.2` pair pulled every shared venv down to click 8.1.8. typer 0.16 is the first release that works on click 8.1 and 8.2+. Tests: 1224 passed on click 8.1.8 + typer 0.16.0 and on click 8.5.1 + typer 0.29.1.

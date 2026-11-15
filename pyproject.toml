@@ -3,7 +3,7 @@
 # prohibited-names list). The import package is still `skos` (unchanged), so
 # `pip install skos-sovereign` then `import skos`. Mirrors `skchat-sovereign`.
 name = "skos-sovereign"
-version = "0.3.1"
+version = "0.3.2"
 description = "skos: sovereign agent OS, filesystem & packaging foundation"
 requires-python = ">=3.12"
 # Fleet-wide licence decision 2026-08-14 (Chef): GPL-3.0-or-later for every sk*
@@ -12,11 +12,12 @@ license = {text = "GPL-3.0-or-later"}
 classifiers = [
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
 ]
-# typer pinned <0.13: newer typer drops click 8.1 compat and breaks the whole CLI
-# ("Choice is not subscriptable"). click pinned <8.2: click 8.2+ removes the
-# secondary-flag behavior typer 0.12.x relies on ("Secondary flag is not valid
-# for non-boolean flag"), so BOTH must be pinned for a from-scratch install to
-# yield a working CLI. See docs/gtd-ingest-SOP.md troubleshooting.
+# typer>=0.16 and no upper caps (2026-11-15). The old typer<0.13 / click<8.2 pair
+# existed because typer 0.12.x breaks on click >= 8.2 ("Secondary flag is not
+# valid for non-boolean flag"). The fix for a pairing problem is a floor: typer
+# 0.16 is the first release that works on click >= 8.2, and it still supports
+# click 8.1. The caps pulled every shared venv down to click 8.1.8 and broke
+# huggingface-hub (click >= 8.4.2). Tested on click 8.1.8 and 8.5.1.
 # ruamel.yaml preserves registry comments on `skmodels set` / `/model` toggle
 # write-back (models/__init__.py); plain-yaml fallback would silently strip them.
 # packaging: parses pack manifest version specifiers (skos.packs.planner uses
@@ -26,8 +27,8 @@ classifiers = [
 # ever present transitively (pulled in by pip/hatchling/typer's own build-time
 # deps) on every node this had previously been run on, never declared here.
 dependencies = [
-    "typer>=0.12,<0.13",
-    "click>=8.1,<8.2",
+    "typer>=0.16",
+    "click>=8.1",
     "pydantic>=2.7",
     "pyyaml>=6.0",
     "cryptography>=42",
